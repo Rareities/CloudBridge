@@ -6,6 +6,7 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.util.Log
+import ca.pkay.rcloneexplorer.BuildConfig
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.DATABASE_NAME
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.DATABASE_VERSION
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLES_TASKS
@@ -22,6 +23,9 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_AD
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_TYPE2
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_PATH2
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_TYPE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_PROFILES
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_RUNS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_ACTIVE_RUN
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
@@ -46,6 +50,9 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_PROFILES)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_RUNS)
+        sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_RUN)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -75,6 +82,13 @@ class DatabaseHandler(context: Context?) :
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        }
+        if (oldVersion < 9) {
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_PROFILES)
+        }
+        if (oldVersion < 10) {
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_RUNS)
+            sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_RUN)
         }
     }
 
@@ -127,23 +141,64 @@ class DatabaseHandler(context: Context?) :
         } else results[0]
     }
 
+    /** Read a task using a caller-owned transaction so the profile/run snapshot cannot race an edit. */
+    internal fun getTaskInTransaction(db: SQLiteDatabase, id: Long): Task? {
+        val cursor = db.query(
+            Task.TABLE_NAME,
+            taskProjection,
+            Task.COLUMN_NAME_ID + " = ?",
+            arrayOf(id.toString()),
+            null,
+            null,
+            null,
+            "1"
+        )
+        return try {
+            if (cursor.moveToFirst()) taskFromCursor(cursor) else null
+        } finally {
+            cursor.close()
+        }
+    }
+
     fun createTask(taskToStore: Task, withId: Boolean = false): Task {
         val db = writableDatabase
-        val newRowId = db.insert(Task.TABLE_NAME, null, if(withId) getTaskContentValuesWithID(taskToStore) else getTaskContentValues(taskToStore))
-        db.close()
-        taskToStore.id = newRowId
+        val newRowId: Long
+        db.beginTransaction()
+        try {
+            newRowId = db.insertOrThrow(
+                Task.TABLE_NAME,
+                null,
+                if (withId) getTaskContentValuesWithID(taskToStore) else getTaskContentValues(taskToStore)
+            )
+            taskToStore.id = newRowId
+            ProfileStore.upsertLegacyTask(db, taskToStore, BuildConfig.RCLONE_ENGINE_VERSION)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
         return taskToStore
     }
 
     fun updateTask(taskToUpdate: Task) {
         val db = writableDatabase
-        db.update(
-            Task.TABLE_NAME,
-            getTaskContentValues(taskToUpdate),
-            Task.COLUMN_NAME_ID + " = ?",
-            arrayOf(taskToUpdate.id.toString())
-        )
-        db.close()
+        db.beginTransaction()
+        try {
+            val updated = db.update(
+                Task.TABLE_NAME,
+                getTaskContentValues(taskToUpdate),
+                Task.COLUMN_NAME_ID + " = ?",
+                arrayOf(taskToUpdate.id.toString())
+            )
+            if (updated == 0) {
+                throw IllegalArgumentException("Task no longer exists")
+            }
+            ProfileStore.upsertLegacyTask(db, taskToUpdate, BuildConfig.RCLONE_ENGINE_VERSION)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
     }
 
     private val taskProjection: Array<String>
@@ -197,10 +252,20 @@ class DatabaseHandler(context: Context?) :
 
     fun deleteTask(id: Long): Int {
         val db = writableDatabase
-        val selection = Task.COLUMN_NAME_ID + " LIKE ?"
-        val selectionArgs = arrayOf(id.toString())
-        val retcode = db.delete(Task.TABLE_NAME, selection, selectionArgs)
-        db.close()
+        var retcode = 0
+        db.beginTransaction()
+        try {
+            val selection = Task.COLUMN_NAME_ID + " = ?"
+            val selectionArgs = arrayOf(id.toString())
+            retcode = db.delete(Task.TABLE_NAME, selection, selectionArgs)
+            if (retcode > 0) {
+                ProfileStore.retireLegacyTask(db, id)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
         return retcode
     }
 
@@ -493,6 +558,14 @@ class DatabaseHandler(context: Context?) :
                 db.insertOrThrow(Trigger.TABLE_NAME, null, values)
             }
 
+            // Keep the UUID profile ledger in the same SQLite transaction as the legacy import.
+            // Imported numeric IDs are the fresh database row IDs, never the source IDs.
+            ProfileStore.reconcileImportedTasks(
+                db,
+                insertedTasks.map { (rowId, task) -> task.copy(id = rowId) },
+                BuildConfig.RCLONE_ENGINE_VERSION
+            )
+
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
@@ -525,6 +598,26 @@ class DatabaseHandler(context: Context?) :
         values.put(Filter.COLUMN_NAME_TITLE, t.title)
         values.put(Filter.COLUMN_NAME_FILTERS, t.getFiltersRaw())
         return values
+    }
+
+    /**
+     * Create or refresh the durable UUID profile for every legacy numeric task. This is
+     * idempotent and intentionally does not delete retired profile history.
+     */
+    fun reconcileLegacyProfiles(): Int {
+        val tasks = allTasks
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            for (task in tasks) {
+                ProfileStore.upsertLegacyTask(db, task, BuildConfig.RCLONE_ENGINE_VERSION)
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
+        return tasks.size
     }
 
     private val filterProjection: Array<String>

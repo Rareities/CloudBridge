@@ -14,6 +14,9 @@ import androidx.work.ForegroundInfo
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler
+import ca.pkay.rcloneexplorer.Database.RunRejectedException
+import ca.pkay.rcloneexplorer.Database.RunRepository
+import ca.pkay.rcloneexplorer.Database.RunState
 import ca.pkay.rcloneexplorer.Items.RemoteItem
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.Items.Task
@@ -43,6 +46,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     companion object {
         const val TASK_ID = "TASK_ID"
         const val TASK_EPHEMERAL = "TASK_EPHEMERAL"
+        const val RUN_ID = "RUN_ID"
+        const val RUN_OWNER_TOKEN = "RUN_OWNER_TOKEN"
         private const val TAG = "SyncWorker"
 
         //those Extras do not follow the above schema, because they are exposed to external applications
@@ -64,6 +69,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     // Objects
     private var mRclone = Rclone(mContext)
     private var mDatabase = DatabaseHandler(mContext)
+    private val mRunRepository = RunRepository(mContext)
     private var mNotificationManager = SyncServiceNotifications(mContext)
     private val mPreferences = PreferenceManager.getDefaultSharedPreferences(mContext)
 
@@ -82,6 +88,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private var endNotificationAlreadyPosted = false
     private var silentRun = false
     private val ongoingNotificationID = Random().nextInt()
+    private var durableRunId: String? = null
+    private var durableRunOwnerToken: String? = null
+    private var durableRunFinished = false
+    private var nativeExitCode: Int? = null
 
 
     // Task
@@ -109,6 +119,19 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         if(inputData.keyValueMap.containsKey(TASK_ID)){
             val id = inputData.getLong(TASK_ID, -1)
             ephemeralTask = mDatabase.getTask(id)
+            if (ephemeralTask != null) {
+                durableRunId = inputData.getString(RUN_ID)
+                durableRunOwnerToken = inputData.getString(RUN_OWNER_TOKEN)
+                if (durableRunId == null || durableRunOwnerToken == null) {
+                    try {
+                        val compatibilityRun = mRunRepository.queueLegacyTask(id)
+                        durableRunId = compatibilityRun.runId
+                        durableRunOwnerToken = compatibilityRun.ownerToken
+                    } catch (e: RunRejectedException) {
+                        failureReason = FAILURE_REASON.UNSUPPORTED_DIRECTION
+                    }
+                }
+            }
         }
 
         if(inputData.keyValueMap.containsKey(TASK_EPHEMERAL)){
@@ -124,15 +147,26 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
         if (ephemeralTask != null) {
             mTask = ephemeralTask
-            handleTask()
+            if (failureReason == FAILURE_REASON.NO_FAILURE && durableRunId != null && durableRunOwnerToken != null) {
+                try {
+                    mRunRepository.claim(durableRunId!!, durableRunOwnerToken!!)
+                } catch (e: RunRejectedException) {
+                    failureReason = FAILURE_REASON.RCLONE_ERROR
+                    log("Durable run claim was rejected")
+                }
+            }
+            if (failureReason == FAILURE_REASON.NO_FAILURE) {
+                handleTask()
+            }
             postSync()
         } else {
+            failureReason = FAILURE_REASON.NO_TASK
             postSync()
             return Result.failure()
         }
 
         // Indicate whether the work finished successfully with the Result
-        return Result.success()
+        return if (failureReason == FAILURE_REASON.NO_FAILURE) Result.success() else Result.failure()
     }
 
     override fun onStopped() {
@@ -140,7 +174,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_sync_cancelled))
         SyncLog.info(mContext, mTitle, statusObject.toString())
         failureReason = FAILURE_REASON.CANCELLED
-        finishWork()
+        if (::mTask.isInitialized) {
+            finishWork()
+        }
     }
 
     private fun finishWork() {
@@ -197,6 +233,14 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 if (sRcloneProcess == null) {
                     failureReason = FAILURE_REASON.RCLONE_ERROR
                     log("Sync: Rclone process could not be started for direction ${mTask.direction}")
+                    return
+                }
+                if (durableRunId != null && durableRunOwnerToken != null &&
+                    !mRunRepository.markRunning(durableRunId!!, durableRunOwnerToken!!)) {
+                    sRcloneProcess?.destroy()
+                    sRcloneProcess = null
+                    failureReason = FAILURE_REASON.RCLONE_ERROR
+                    log("Sync: durable run was no longer owned")
                     return
                 }
                 handleSync(mTitle)
@@ -264,9 +308,14 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 FLog.e(TAG, "onHandleIntent: error reading stdout", e)
             }
             try {
-                localProcessReference.waitFor()
+                nativeExitCode = localProcessReference.waitFor()
+                if (nativeExitCode != 0) {
+                    failureReason = FAILURE_REASON.RCLONE_ERROR
+                }
             } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
                 FLog.e(TAG, "onHandleIntent: error waiting for process", e)
+                failureReason = FAILURE_REASON.RCLONE_ERROR
             }
         } else {
             log("Sync: No Rclone Process!")
@@ -276,6 +325,11 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
     private fun postSync() {
         if (endNotificationAlreadyPosted) {
+            return
+        }
+        recordDurableRunOutcome()
+        if (!::mTask.isInitialized) {
+            endNotificationAlreadyPosted = true
             return
         }
         if (silentRun) {
@@ -289,6 +343,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             FAILURE_REASON.NO_FAILURE -> {
                 showSuccessNotification(notificationId)
                 followupTask(mTask.onSuccessFollowup)
+                endNotificationAlreadyPosted = true
                 return
             }
             FAILURE_REASON.CANCELLED -> {
@@ -319,6 +374,42 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         showFailNotification(notificationId, content)
         endNotificationAlreadyPosted = true
         finishWork()
+    }
+
+    private fun recordDurableRunOutcome() {
+        if (durableRunFinished || durableRunId == null || durableRunOwnerToken == null) {
+            return
+        }
+        val state = when (failureReason) {
+            FAILURE_REASON.NO_FAILURE -> {
+                if (nativeExitCode == 0) RunState.SUCCESS else RunState.FAILED
+            }
+            FAILURE_REASON.CANCELLED -> RunState.CANCELLED
+            FAILURE_REASON.NO_UNMETERED,
+            FAILURE_REASON.NO_CONNECTION,
+            FAILURE_REASON.CONNECTIVITY_CHANGED -> RunState.DEFERRED
+            FAILURE_REASON.UNSUPPORTED_DIRECTION -> RunState.BLOCKED
+            else -> RunState.FAILED
+        }
+        val reason = when (failureReason) {
+            FAILURE_REASON.NO_FAILURE -> if (state == RunState.SUCCESS) null else "Native completion was not confirmed"
+            FAILURE_REASON.CANCELLED -> "Cancellation requested"
+            FAILURE_REASON.NO_UNMETERED -> "Unmetered network is required"
+            FAILURE_REASON.NO_CONNECTION -> "No usable network connection"
+            FAILURE_REASON.CONNECTIVITY_CHANGED -> "Connectivity changed during execution"
+            FAILURE_REASON.UNSUPPORTED_DIRECTION -> "Legacy direction requires reviewed repair"
+            else -> "Native sync failed"
+        }
+        durableRunFinished = mRunRepository.finish(
+            durableRunId!!,
+            durableRunOwnerToken!!,
+            state,
+            reason,
+            successfulItems = if (state == RunState.SUCCESS) statusObject.getTotalTransfers().toLong() else null,
+            failedItems = if (state == RunState.SUCCESS) 0L else null,
+            conflictItems = null,
+            unknownItems = null
+        )
     }
 
     private fun showCancelledNotification(notificationId: Int) {

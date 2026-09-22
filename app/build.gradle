@@ -3,6 +3,7 @@ apply plugin: 'kotlin-android'
 apply plugin: 'kotlinx-serialization'
 
 android {
+    def configuredRcloneVersion = project.properties['de.schuelken.cloudbridge.rCloneVersion'] ?: 'unknown'
     // Release signing: credentials come from a git-ignored keystore.properties
     // (local builds) or CB_* env vars (CI). Falls back to the debug key when
     // neither is present so fresh checkouts still build an installable APK.
@@ -37,6 +38,7 @@ android {
         versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.1'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
+        buildConfigField "java.lang.String", "RCLONE_ENGINE_VERSION", "\"${configuredRcloneVersion}\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";
         setProperty("archivesBaseName",  "cloudbridge_v"+versionName)
 

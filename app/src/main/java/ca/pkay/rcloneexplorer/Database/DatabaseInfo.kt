@@ -9,8 +9,48 @@ class DatabaseInfo {
     companion object {
 
         // If you change the database schema, you must increment the database version.
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 10
         const val DATABASE_NAME = "rcloneExplorer.db"
+
+        const val PROFILE_TABLE_NAME = "profile_table"
+        const val PROFILE_COLUMN_ID = "profile_id"
+        const val PROFILE_COLUMN_LEGACY_TASK_ID = "profile_legacy_task_id"
+        const val PROFILE_COLUMN_REVISION = "profile_revision"
+        const val PROFILE_COLUMN_TITLE = "profile_title"
+        const val PROFILE_COLUMN_MODE = "profile_mode"
+        const val PROFILE_COLUMN_ENDPOINT = "profile_endpoint_identity"
+        const val PROFILE_COLUMN_SETTINGS = "profile_settings"
+        const val PROFILE_COLUMN_FINGERPRINT = "profile_fingerprint"
+        const val PROFILE_COLUMN_ENGINE = "profile_engine_ref"
+        const val PROFILE_COLUMN_READINESS = "profile_readiness"
+        const val PROFILE_COLUMN_REASON = "profile_reason"
+        const val PROFILE_COLUMN_CREATED_AT = "profile_created_at"
+        const val PROFILE_COLUMN_UPDATED_AT = "profile_updated_at"
+
+        const val RUN_TABLE_NAME = "run_table"
+        const val RUN_COLUMN_ID = "run_id"
+        const val RUN_COLUMN_PROFILE_ID = "run_profile_id"
+        const val RUN_COLUMN_PROFILE_REVISION = "run_profile_revision"
+        const val RUN_COLUMN_PROFILE_FINGERPRINT = "run_profile_fingerprint"
+        const val RUN_COLUMN_REQUESTED_MODE = "run_requested_mode"
+        const val RUN_COLUMN_ENDPOINT = "run_endpoint_identity"
+        const val RUN_COLUMN_SETTINGS = "run_settings"
+        const val RUN_COLUMN_ENGINE = "run_engine_ref"
+        const val RUN_COLUMN_STATE = "run_state"
+        const val RUN_COLUMN_REASON = "run_reason"
+        const val RUN_COLUMN_REQUESTED_AT = "run_requested_at"
+        const val RUN_COLUMN_DUE_AT = "run_due_at"
+        const val RUN_COLUMN_STARTED_AT = "run_started_at"
+        const val RUN_COLUMN_FINISHED_AT = "run_finished_at"
+        const val RUN_COLUMN_OWNER_TOKEN = "run_owner_token"
+        const val RUN_COLUMN_OWNER_GENERATION = "run_owner_generation"
+        const val RUN_COLUMN_CANCEL_REQUESTED = "run_cancel_requested"
+        const val RUN_COLUMN_SUCCESSFUL_ITEMS = "run_successful_items"
+        const val RUN_COLUMN_FAILED_ITEMS = "run_failed_items"
+        const val RUN_COLUMN_CONFLICT_ITEMS = "run_conflict_items"
+        const val RUN_COLUMN_UNKNOWN_ITEMS = "run_unknown_items"
+        const val RUN_COLUMN_CREATED_AT = "run_created_at"
+        const val RUN_COLUMN_UPDATED_AT = "run_updated_at"
 
 
         val SQL_CREATE_TABLES_TASKS = "CREATE TABLE " + Task.TABLE_NAME + " (" +
@@ -47,6 +87,50 @@ class DatabaseInfo {
         val SQL_UPDATE_TASK_ADD_REMOTE_ID2 = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_REMOTE_ID2} TEXT"
         val SQL_UPDATE_TASK_ADD_REMOTE_TYPE2 = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_REMOTE_TYPE2} INTEGER"
         val SQL_UPDATE_TASK_ADD_REMOTE_PATH2 = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_REMOTE_PATH2} TEXT"
+
+        val SQL_CREATE_TABLE_PROFILES = "CREATE TABLE IF NOT EXISTS $PROFILE_TABLE_NAME (" +
+                "$PROFILE_COLUMN_ID TEXT PRIMARY KEY NOT NULL," +
+                "$PROFILE_COLUMN_LEGACY_TASK_ID INTEGER UNIQUE," +
+                "$PROFILE_COLUMN_REVISION INTEGER NOT NULL," +
+                "$PROFILE_COLUMN_TITLE TEXT NOT NULL," +
+                "$PROFILE_COLUMN_MODE TEXT NOT NULL," +
+                "$PROFILE_COLUMN_ENDPOINT TEXT NOT NULL," +
+                "$PROFILE_COLUMN_SETTINGS TEXT NOT NULL," +
+                "$PROFILE_COLUMN_FINGERPRINT TEXT NOT NULL," +
+                "$PROFILE_COLUMN_ENGINE TEXT NOT NULL," +
+                "$PROFILE_COLUMN_READINESS TEXT NOT NULL," +
+                "$PROFILE_COLUMN_REASON TEXT," +
+                "$PROFILE_COLUMN_CREATED_AT INTEGER NOT NULL," +
+                "$PROFILE_COLUMN_UPDATED_AT INTEGER NOT NULL)"
+
+        val SQL_CREATE_TABLE_RUNS = "CREATE TABLE IF NOT EXISTS $RUN_TABLE_NAME (" +
+                "$RUN_COLUMN_ID TEXT PRIMARY KEY NOT NULL," +
+                "$RUN_COLUMN_PROFILE_ID TEXT NOT NULL REFERENCES $PROFILE_TABLE_NAME($PROFILE_COLUMN_ID)," +
+                "$RUN_COLUMN_PROFILE_REVISION INTEGER NOT NULL," +
+                "$RUN_COLUMN_PROFILE_FINGERPRINT TEXT NOT NULL," +
+                "$RUN_COLUMN_REQUESTED_MODE TEXT NOT NULL," +
+                "$RUN_COLUMN_ENDPOINT TEXT NOT NULL," +
+                "$RUN_COLUMN_SETTINGS TEXT NOT NULL," +
+                "$RUN_COLUMN_ENGINE TEXT NOT NULL," +
+                "$RUN_COLUMN_STATE TEXT NOT NULL," +
+                "$RUN_COLUMN_REASON TEXT," +
+                "$RUN_COLUMN_REQUESTED_AT INTEGER NOT NULL," +
+                "$RUN_COLUMN_DUE_AT INTEGER," +
+                "$RUN_COLUMN_STARTED_AT INTEGER," +
+                "$RUN_COLUMN_FINISHED_AT INTEGER," +
+                "$RUN_COLUMN_OWNER_TOKEN TEXT NOT NULL," +
+                "$RUN_COLUMN_OWNER_GENERATION INTEGER NOT NULL DEFAULT 0," +
+                "$RUN_COLUMN_CANCEL_REQUESTED INTEGER NOT NULL DEFAULT 0," +
+                "$RUN_COLUMN_SUCCESSFUL_ITEMS INTEGER," +
+                "$RUN_COLUMN_FAILED_ITEMS INTEGER," +
+                "$RUN_COLUMN_CONFLICT_ITEMS INTEGER," +
+                "$RUN_COLUMN_UNKNOWN_ITEMS INTEGER," +
+                "$RUN_COLUMN_CREATED_AT INTEGER NOT NULL," +
+                "$RUN_COLUMN_UPDATED_AT INTEGER NOT NULL)"
+
+        val SQL_CREATE_INDEX_ACTIVE_RUN = "CREATE UNIQUE INDEX IF NOT EXISTS run_one_active_profile " +
+                "ON $RUN_TABLE_NAME($RUN_COLUMN_PROFILE_ID) " +
+                "WHERE $RUN_COLUMN_STATE IN ('QUEUED','PREFLIGHT','RUNNING')"
 
     }
 }
