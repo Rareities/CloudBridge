@@ -396,6 +396,14 @@ The post-change branch again passed **46 JVM tests** and Android lint (85 warnin
 baseline-filtered errors). WorkManager/device stop-before-launch and process-death tests
 remain **NOT RUN**; the JVM suite cannot prove those Android lifecycle interleavings.
 
+CloudBridge commit `73577c2` migrates noninteractive `about`, `config dump` and encrypted
+config password validation to the owned native handle. JSON outputs are bounded; password
+validation drains output without persisting or logging config plaintext. It removes the
+independent raw-process/drainer thread pair from `decryptConfig`. The branch again passed
+**46 JVM tests** and Android lint (85 warnings, 6 baseline-filtered errors). This does not
+cover interactive config creation/update, OAuth/reconnect or binary pipe streaming, and no
+live Keystore/Proton validation was run.
+
 ## Next work
 
 Continue WP05, not WP06: migrate remaining config/OAuth/reconnect/interactive and direct
