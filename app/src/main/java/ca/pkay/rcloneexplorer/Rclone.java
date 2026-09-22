@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.net.InetAddress;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -71,6 +72,7 @@ public class Rclone {
 
     private static final String TAG = "Rclone";
     private static final long MAX_BACKUP_ENTRY_BYTES = 4L * 1024L * 1024L;
+    private static final long METADATA_COMMAND_TIMEOUT_MILLIS = 5L * 60L * 1000L;
     public static final int SYNC_DIRECTION_LOCAL_TO_REMOTE = 1;
     public static final int SYNC_DIRECTION_REMOTE_TO_LOCAL = 2;
     public static final int SERVE_PROTOCOL_HTTP = 1;
@@ -1258,28 +1260,7 @@ public class Rclone {
             linkPath += filePath;
         }
         String[] command = createCommandWithOptions("link", linkPath);
-        Process process = null;
-        String[] env = getRcloneEnv();
-
-        try {
-            process = getRuntimeProcess(command, env);
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                logErrorOutput(process);
-                return null;
-            }
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                return reader.readLine();
-            }
-
-        } catch (IOException | InterruptedException e) {
-            FLog.e(TAG, "link: error running rclone", e);
-            if (process != null) {
-                logErrorOutput(process);
-            }
-        }
-        return null;
+        return runFirstMetadataLine(command, getRcloneEnv(), "link");
     }
 
     public String calculateMD5(RemoteItem remote, FileItem fileItem) {
@@ -1293,34 +1274,7 @@ public class Rclone {
 
         String remoteAndPath = remote.getName() + ":" + localRemotePath + fileItem.getName();
         String[] command = createCommandWithOptions("md5sum", remoteAndPath);
-        String[] env = getRcloneEnv();
-        Process process;
-        try {
-            process = getRuntimeProcess(command, env);
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                return context.getString(R.string.hash_error);
-            }
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line = reader.readLine();
-                if (line == null || line.trim().isEmpty()) {
-                    return context.getString(R.string.hash_error);
-                }
-                String[] split = line.split("\\s+");
-                if (split[0].trim().isEmpty()) {
-                    return context.getString(R.string.hash_unsupported);
-                } else {
-                    return split[0];
-                }
-            }
-        } catch (IOException e) {
-            FLog.e(TAG, "calculateMD5: error running rclone", e);
-            return context.getString(R.string.hash_error);
-        } catch (InterruptedException e) {
-            FLog.v(TAG, "calculateMD5: calculation stopped");
-            return context.getString(R.string.hash_error);
-        }
+        return parseHashLine(runFirstMetadataLine(command, getRcloneEnv(), "md5sum"));
     }
 
     public String calculateSHA1(RemoteItem remote, FileItem fileItem) {
@@ -1334,59 +1288,45 @@ public class Rclone {
 
         String remoteAndPath = remote.getName() + ":" + localRemotePath + fileItem.getName();
         String[] command = createCommandWithOptions("sha1sum", remoteAndPath);
-        String[] env = getRcloneEnv();
-        Process process;
-        try {
-            process = getRuntimeProcess(command, env);
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                return context.getString(R.string.hash_error);
-            }
+        return parseHashLine(runFirstMetadataLine(command, getRcloneEnv(), "sha1sum"));
+    }
 
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line = reader.readLine();
-                if (line == null || line.trim().isEmpty()) {
-                    return context.getString(R.string.hash_error);
-                }
-                String[] split = line.split("\\s+");
-                if (split[0].trim().isEmpty()) {
-                    return context.getString(R.string.hash_unsupported);
-                } else {
-                    return split[0];
-                }
-            }
-        } catch (IOException | InterruptedException e) {
-            FLog.e(TAG, "calculateSHA1: error running rclone", e);
+    private String parseHashLine(@Nullable String line) {
+        if (line == null || line.trim().isEmpty()) {
             return context.getString(R.string.hash_error);
+        }
+        String[] split = line.split("\\s+");
+        return split[0].trim().isEmpty()
+                ? context.getString(R.string.hash_unsupported) : split[0];
+    }
+
+    /** A small text-only command: drain both pipes before reporting its first stdout line. */
+    @Nullable
+    private String runFirstMetadataLine(String[] command, String[] env, String label) {
+        try {
+            AtomicReference<String> firstLine = new AtomicReference<>();
+            NativeExecutionHandle handle = NativeExecutionHandle.launch(command, env, label);
+            NativeExecutionHandle.Outcome outcome = handle.await(
+                    METADATA_COMMAND_TIMEOUT_MILLIS,
+                    line -> firstLine.compareAndSet(null, line), null);
+            if (!outcome.isSuccess() || outcome.isOutputTruncated()) {
+                FLog.e(TAG, "%s: native command ended with state %s", label, outcome.getState());
+                return null;
+            }
+            return firstLine.get();
+        } catch (IOException e) {
+            FLog.e(TAG, label + ": native command failed to start", e);
+            return null;
         }
     }
 
     public String getRcloneVersion() {
         String[] command = createCommand("--version");
-        ArrayList<String> result = new ArrayList<>();
-        try {
-            Process process = getRuntimeProcess(command, getRcloneEnv());
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                logErrorOutput(process);
-                return "-1";
-            }
-
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    result.add(line);
-                }
-            }
-        } catch (IOException | InterruptedException e) {
-            FLog.e(TAG, "getRcloneVersion: error running rclone", e);
+        String firstLine = runFirstMetadataLine(command, getRcloneEnv(), "version");
+        if (firstLine == null) {
             return "-1";
         }
-
-        if (result.isEmpty()) {
-            return "-1";
-        }
-        String[] version = result.get(0).split("\\s+");
+        String[] version = firstLine.split("\\s+");
         if (version.length < 2) {
             return "-1";
         }

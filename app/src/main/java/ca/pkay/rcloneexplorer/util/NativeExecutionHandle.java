@@ -413,7 +413,9 @@ public final class NativeExecutionHandle implements AutoCloseable {
 
     private static void forceDestroy(Process process) {
         try {
-            process.getClass().getMethod("destroyForcibly").invoke(process);
+            // Reflect on the public Process API, not the concrete Android implementation:
+            // its runtime class may be package-private and reject reflective invocation.
+            Process.class.getMethod("destroyForcibly").invoke(process);
         } catch (ReflectiveOperationException ignored) {
             // Android API levels without destroyForcibly still get the best-effort destroy().
             process.destroy();

@@ -111,6 +111,50 @@ public class NativeExecutionHandleTest {
         assertEquals(1, resource.closeCount.get());
     }
 
+    @Test
+    public void timeoutEscalatesToForcedKillAndNeverReportsSuccess() {
+        ScriptedProcess process = new ScriptedProcess(0, true, true, false);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "forced-kill-test", 10);
+        CountingResource resource = new CountingResource();
+        assertTrue(handle.attachResource(resource));
+
+        NativeExecutionHandle.Outcome outcome = handle.await(5, null, null);
+
+        assertEquals(NativeExecutionHandle.TerminalState.TIMED_OUT, outcome.getState());
+        assertEquals(Integer.valueOf(137), outcome.getExitCode());
+        assertEquals(1, resource.closeCount.get());
+        assertFalse(process.isAlive());
+    }
+
+    @Test
+    public void concurrentStopAndFinishShareOneTerminalOutcome() throws Exception {
+        ScriptedProcess process = new ScriptedProcess(0, true, false);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "concurrent-stop-test", 20);
+        CountingResource resource = new CountingResource();
+        assertTrue(handle.attachResource(resource));
+        CompletableFuture<NativeExecutionHandle.Outcome> normalWait = CompletableFuture.supplyAsync(
+                () -> handle.await(NativeExecutionHandle.NO_TIMEOUT, null, null));
+
+        NativeExecutionHandle.Outcome cancelled = handle.cancelAndAwait(null, null);
+        NativeExecutionHandle.Outcome completed = normalWait.get(2, TimeUnit.SECONDS);
+
+        assertSame(cancelled, completed);
+        assertEquals(NativeExecutionHandle.TerminalState.CANCELLED, completed.getState());
+        assertEquals(1, resource.closeCount.get());
+    }
+
+    @Test
+    public void launchFailureDoesNotInventAProcessOrSuccessfulOutcome() {
+        try {
+            NativeExecutionHandle.launch(
+                    new String[]{"cloudbridge-native-missing-command-for-test"}, null,
+                    "prelaunch-failure-test");
+            throw new AssertionError("Missing native command unexpectedly launched");
+        } catch (IOException expected) {
+            // The caller keeps responsibility for resources acquired before launch.
+        }
+    }
+
     private static final class CountingResource implements AutoCloseable {
         private final AtomicInteger closeCount = new AtomicInteger();
         private final CountDownLatch closed = new CountDownLatch(1);
@@ -130,11 +174,17 @@ public class NativeExecutionHandleTest {
         private final PipedOutputStream stderrWriter;
         private final CountDownLatch finished = new CountDownLatch(1);
         private final boolean ignoreDestroy;
+        private final boolean ignoreForcedDestroy;
         private final Thread writer;
         private volatile boolean alive = true;
         private volatile int exitCode = 0;
 
         private ScriptedProcess(int lines, boolean waitForDestroy, boolean ignoreDestroy) {
+            this(lines, waitForDestroy, ignoreDestroy, ignoreDestroy);
+        }
+
+        private ScriptedProcess(int lines, boolean waitForDestroy, boolean ignoreDestroy,
+                                boolean ignoreForcedDestroy) {
             try {
                 stdoutWriter = new PipedOutputStream(stdout);
                 stderrWriter = new PipedOutputStream(stderr);
@@ -142,6 +192,7 @@ public class NativeExecutionHandleTest {
                 throw new AssertionError(e);
             }
             this.ignoreDestroy = ignoreDestroy;
+            this.ignoreForcedDestroy = ignoreForcedDestroy;
             writer = new Thread(() -> {
                 try {
                     for (int i = 0; i < lines; i++) {
@@ -214,7 +265,7 @@ public class NativeExecutionHandleTest {
 
         @Override
         public Process destroyForcibly() {
-            if (!ignoreDestroy) {
+            if (!ignoreForcedDestroy) {
                 complete(137);
             }
             return this;
