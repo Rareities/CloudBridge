@@ -3,9 +3,12 @@ package ca.pkay.rcloneexplorer.util;
 import androidx.annotation.Nullable;
 
 import java.io.BufferedReader;
+import java.io.FilterInputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +50,89 @@ public final class NativeExecutionHandle implements AutoCloseable {
         void onLine(String line);
     }
 
+    /** Exclusive access to the three pipes for a command that requires interactive prompts. */
+    public static final class InteractiveSession implements AutoCloseable {
+        private final NativeExecutionHandle owner;
+        private final InputStream stdout;
+        private final InputStream stderr;
+        private final OutputStream stdin;
+        private final AtomicBoolean closed = new AtomicBoolean(false);
+
+        private InteractiveSession(NativeExecutionHandle owner, Process process) {
+            this.owner = owner;
+            stdout = process.getInputStream();
+            stderr = process.getErrorStream();
+            stdin = process.getOutputStream();
+        }
+
+        public InputStream getStdout() { return stdout; }
+        public InputStream getStderr() { return stderr; }
+        public OutputStream getStdin() { return stdin; }
+
+        /**
+         * Ends interactive access without closing the pipes. The owning handle takes over
+         * draining them when its normal await begins.
+         */
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true)) {
+                owner.finishInteractiveSession();
+            }
+        }
+    }
+
+    private static final class OwnedOutputPipe extends FilterInputStream {
+        private final NativeExecutionHandle owner;
+        private final AtomicBoolean finished = new AtomicBoolean(false);
+        private volatile boolean reachedEof;
+
+        private OwnedOutputPipe(NativeExecutionHandle owner, InputStream delegate) {
+            super(delegate);
+            this.owner = owner;
+        }
+
+        @Override
+        public int read() throws IOException {
+            int value = super.read();
+            if (value < 0) {
+                reachedEof = true;
+                finish();
+            }
+            return value;
+        }
+
+        @Override
+        public int read(byte[] buffer, int offset, int length) throws IOException {
+            int count = super.read(buffer, offset, length);
+            if (count < 0) {
+                reachedEof = true;
+                finish();
+            }
+            return count;
+        }
+
+        @Override
+        public void close() throws IOException {
+            try {
+                super.close();
+            } finally {
+                finish();
+            }
+        }
+
+        private void finish() {
+            if (finished.compareAndSet(false, true)) {
+                owner.finishExternalOutput(reachedEof);
+            }
+        }
+    }
+
+    private static final class OwnedInputPipe extends FilterOutputStream {
+        private OwnedInputPipe(OutputStream delegate) {
+            super(delegate);
+        }
+    }
+
     public static final class Outcome {
         private final TerminalState state;
         private final Integer exitCode;
@@ -86,6 +172,12 @@ public final class NativeExecutionHandle implements AutoCloseable {
     private final AtomicBoolean terminalAccepted = new AtomicBoolean(false);
     private final AtomicBoolean resourcesReleased = new AtomicBoolean(false);
     private final AtomicBoolean pumpsStarted = new AtomicBoolean(false);
+    // 0 = unclaimed, 1 = interactive session owns the pipes, 2 = bounded drainers own them.
+    private final Object pipeLock = new Object();
+    private int pipeOwner;
+    private final AtomicBoolean inputPipeClaimed = new AtomicBoolean(false);
+    private final AtomicBoolean externalOutputFinished = new AtomicBoolean(false);
+    private final AtomicBoolean externalOutputAbandoned = new AtomicBoolean(false);
     private final AtomicBoolean cancelRequested = new AtomicBoolean(false);
     private final AtomicBoolean timeoutRequested = new AtomicBoolean(false);
     private final CountDownLatch pumpsFinished = new CountDownLatch(2);
@@ -97,6 +189,7 @@ public final class NativeExecutionHandle implements AutoCloseable {
     private volatile Outcome outcome;
     private volatile Thread stdoutPump;
     private volatile Thread stderrPump;
+    private volatile CountDownLatch interactiveSessionClosed = new CountDownLatch(0);
 
     private NativeExecutionHandle(Process process, String label, long terminationGraceMillis) {
         this.process = process;
@@ -151,7 +244,84 @@ public final class NativeExecutionHandle implements AutoCloseable {
 
     /** Starts bounded drainers for a long-lived process that is not being awaited yet. */
     public void startDrainers() {
-        startPumps(null, null);
+        if (!startPumps(null, null)) {
+            cancel();
+        }
+    }
+
+    /** Opens process pipes for one interactive runner; they remain owned by this handle. */
+    public InteractiveSession openInteractiveSession() {
+        synchronized (pipeLock) {
+            if (outcome != null || pipeOwner != 0) {
+                throw new IllegalStateException("Native process pipes are already owned");
+            }
+            pipeOwner = 1;
+            interactiveSessionClosed = new CountDownLatch(1);
+            return new InteractiveSession(this, process);
+        }
+    }
+
+    private void finishInteractiveSession() {
+        CountDownLatch release = null;
+        synchronized (pipeLock) {
+            if (pipeOwner == 1) {
+                pipeOwner = 0;
+                release = interactiveSessionClosed;
+            }
+        }
+        if (release != null) {
+            release.countDown();
+        }
+    }
+
+    /** Gives one transfer consumer stdout while this handle owns stderr draining and process reap. */
+    public InputStream openOutputPipe() {
+        return openOutputPipe(null);
+    }
+
+    /** Same as {@link #openOutputPipe()}, with a bounded stderr callback selected before draining. */
+    public InputStream openOutputPipe(@Nullable LineSink stderrSink) {
+        OwnedOutputPipe output;
+        synchronized (pipeLock) {
+            if (outcome != null || pipeOwner != 0) {
+                throw new IllegalStateException("Native process pipes are already owned");
+            }
+            pipeOwner = 3;
+            output = new OwnedOutputPipe(this, process.getInputStream());
+        }
+        if (!startPumps(null, stderrSink)) {
+            cancel();
+            throw new IllegalStateException("Interrupted while starting native pipe drains");
+        }
+        return output;
+    }
+
+    /** Gives one transfer producer stdin while this handle drains process output. */
+    public OutputStream openInputPipe() {
+        return openInputPipe(null);
+    }
+
+    /** Same as {@link #openInputPipe()}, with a bounded stderr callback selected before draining. */
+    public OutputStream openInputPipe(@Nullable LineSink stderrSink) {
+        if (outcome != null || !inputPipeClaimed.compareAndSet(false, true)) {
+            throw new IllegalStateException("Native process stdin is already owned");
+        }
+        OutputStream input = new OwnedInputPipe(process.getOutputStream());
+        if (!startPumps(null, stderrSink)) {
+            cancel();
+            throw new IllegalStateException("Interrupted while starting native pipe drains");
+        }
+        return input;
+    }
+
+    private void finishExternalOutput(boolean reachedEof) {
+        if (!reachedEof) {
+            externalOutputAbandoned.set(true);
+            outputTruncated = true;
+        }
+        if (externalOutputFinished.compareAndSet(false, true)) {
+            pumpsFinished.countDown();
+        }
     }
 
     /** Cancels and waits for a bounded reap attempt. */
@@ -170,7 +340,18 @@ public final class NativeExecutionHandle implements AutoCloseable {
             return already;
         }
 
-        startPumps(stdoutSink, stderrSink);
+        if (!startPumps(stdoutSink, stderrSink)) {
+            // A caller interrupted while an interactive runner still owns the streams cannot
+            // safely hand them to pump threads. Cancel and reap without releasing early.
+            Thread.interrupted();
+            cancelRequested.set(true);
+            boolean reaped = terminateAndReap();
+            Thread.currentThread().interrupt();
+            if (!reaped) {
+                return acceptTerminal(new Outcome(TerminalState.UNCONFIRMED, null, outputTruncated), false);
+            }
+            return acceptTerminal(new Outcome(TerminalState.INTERRUPTED, readExitCode(), outputTruncated), true);
+        }
         boolean reaped = false;
         boolean interrupted = false;
         try {
@@ -212,7 +393,7 @@ public final class NativeExecutionHandle implements AutoCloseable {
             state = TerminalState.TIMED_OUT;
         } else if (cancelRequested.get()) {
             state = TerminalState.CANCELLED;
-        } else if (!outputComplete) {
+        } else if (!outputComplete || externalOutputAbandoned.get()) {
             state = TerminalState.FAILED;
         } else {
             state = exitCode != null && exitCode == 0 ? TerminalState.SUCCEEDED : TerminalState.FAILED;
@@ -244,12 +425,40 @@ public final class NativeExecutionHandle implements AutoCloseable {
         return processReaped.getCount() == 0L && !isProcessAlive(process);
     }
 
-    private void startPumps(@Nullable LineSink stdoutSink, @Nullable LineSink stderrSink) {
-        if (!pumpsStarted.compareAndSet(false, true)) {
-            return;
+    private boolean startPumps(@Nullable LineSink stdoutSink, @Nullable LineSink stderrSink) {
+        boolean externalStdout = false;
+        while (true) {
+            CountDownLatch release = null;
+            synchronized (pipeLock) {
+                if (pipeOwner == 0) {
+                    pipeOwner = 2;
+                    break;
+                }
+                if (pipeOwner == 2) {
+                    break;
+                }
+                if (pipeOwner == 3) {
+                    externalStdout = true;
+                    break;
+                }
+                // InteractiveRunner owns prompt parsing until it hands the pipes back.
+                release = interactiveSessionClosed;
+            }
+            try {
+                release.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
         }
-        stdoutPump = startPump("stdout", process.getInputStream(), stdoutSink);
+        if (!pumpsStarted.compareAndSet(false, true)) {
+            return true;
+        }
+        if (!externalStdout) {
+            stdoutPump = startPump("stdout", process.getInputStream(), stdoutSink);
+        }
         stderrPump = startPump("stderr", process.getErrorStream(), stderrSink);
+        return true;
     }
 
     private Thread startPump(String streamName, InputStream stream, @Nullable LineSink sink) {
@@ -382,6 +591,9 @@ public final class NativeExecutionHandle implements AutoCloseable {
         // Closing the streams unblocks a late callback/pump without affecting a reaped process.
         try { process.getInputStream().close(); } catch (IOException ignored) { }
         try { process.getErrorStream().close(); } catch (IOException ignored) { }
+        if (pipeOwner == 3 && !externalOutputFinished.get()) {
+            finishExternalOutput(false);
+        }
         return complete;
     }
 

@@ -1024,18 +1024,14 @@ public class MainActivity extends AppCompatActivity
             options.add("remote");
             options.add(path);
             FLog.d(TAG, "Adding local remote [%s] remote = %s", id, path);
-            Process process = rclone.configCreate(options);
-            if (null == process) {
+            ca.pkay.rcloneexplorer.util.NativeExecutionHandle execution = rclone.configCreateOwned(options);
+            if (execution == null) {
                 return;
             }
-            try {
-                process.waitFor();
-                if (process.exitValue() != 0) {
-                    FLog.w(TAG, "addLocalRemote: process error");
-                    return;
-                }
-            } catch (InterruptedException e) {
-                FLog.e(TAG, "addLocalRemote: process error", e);
+            ca.pkay.rcloneexplorer.util.NativeExecutionHandle.Outcome outcome =
+                    execution.await(60_000L, null, null);
+            if (!outcome.isSuccess()) {
+                FLog.w(TAG, "addLocalRemote: config create ended with state %s", outcome.getState());
                 return;
             }
             Set<String> renamedRemotes = pref.getStringSet(getString(R.string.pref_key_renamed_remotes), new HashSet<>());

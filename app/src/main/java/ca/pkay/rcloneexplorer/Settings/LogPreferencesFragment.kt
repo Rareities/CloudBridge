@@ -9,11 +9,10 @@ import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceManager
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle
 import de.schuelken.cloudbridge.extensions.tag
 import de.schuelken.cloudbridge.settings.preferences.ButtonPreference
-import java.io.BufferedReader
 import java.io.IOException
-import java.io.InputStreamReader
 import java.util.regex.Pattern
 
 
@@ -38,17 +37,20 @@ class LogPreferencesFragment : PreferenceFragmentCompat() {
     private fun sigquitAll() {
         Toast.makeText(context, getString(R.string.stopping_everything), Toast.LENGTH_LONG).show()
         try {
-            val runtime = Runtime.getRuntime()
-            val process = runtime.exec("ps")
-            val reader = BufferedReader(InputStreamReader(process.inputStream))
-            var line: String?
+            val execution = NativeExecutionHandle.launch(arrayOf("ps"), null, "list-native-processes")
             val output = StringBuilder()
-            while ((reader.readLine().also { line = it }) != null) {
-                output.append('\n')
-                output.append(line)
+            var exceededLimit = false
+            val outcome = execution.await(5_000L, { line ->
+                if (output.length + line.length + 1 <= 1024 * 1024) {
+                    output.append(line).append('\n')
+                } else {
+                    exceededLimit = true
+                }
+            }, null)
+            if (!outcome.isSuccess() || outcome.isOutputTruncated() || exceededLimit) {
+                FLog.e(tag(), "Unable to inspect native processes safely (%s)", outcome.getState())
+                return
             }
-
-            process.waitFor()
 
             val regex = "\\s+(\\d+)\\s+\\d+\\s+\\d+\\s+.+librclone.+$"
             val pattern = Pattern.compile(regex, Pattern.MULTILINE)
@@ -64,9 +66,7 @@ class LogPreferencesFragment : PreferenceFragmentCompat() {
             }
             Process.killProcess(Process.myPid())
         } catch (e: IOException) {
-            FLog.e(tag(), "Error executing shell commands", e)
-        } catch (e: InterruptedException) {
-            FLog.e(tag(), "Error executing shell commands", e)
+            FLog.e(tag(), "Unable to start native process inspection", e)
         }
     }
 }

@@ -58,6 +58,74 @@ public class NativeExecutionHandleTest {
     }
 
     @Test
+    public void interactivePipeHandoffResumesOwnedDraining() throws Exception {
+        ScriptedProcess process = new ScriptedProcess(4000, false, false);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "interactive-handoff-test", 100);
+        NativeExecutionHandle.InteractiveSession session = handle.openInteractiveSession();
+        AtomicInteger lines = new AtomicInteger();
+        CompletableFuture<NativeExecutionHandle.Outcome> completion = CompletableFuture.supplyAsync(
+                () -> handle.await(5000, null, line -> lines.incrementAndGet()));
+
+        try {
+            Thread.sleep(50);
+            assertFalse("await must not steal pipes from the interactive session", completion.isDone());
+        } finally {
+            session.close();
+        }
+
+        assertTrue(completion.get(5, TimeUnit.SECONDS).isSuccess());
+        assertEquals(4000, lines.get());
+    }
+
+    @Test
+    public void interactivePipesCanOnlyHaveOneOwner() {
+        ScriptedProcess process = new ScriptedProcess(0, true, true);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "interactive-exclusive-test", 20);
+        NativeExecutionHandle.InteractiveSession session = handle.openInteractiveSession();
+        try {
+            try {
+                handle.openInteractiveSession();
+                throw new AssertionError("A second interactive pipe owner was accepted");
+            } catch (IllegalStateException expected) {
+                // The first session remains the exclusive owner.
+            }
+        } finally {
+            session.close();
+            process.complete(0);
+        }
+        assertTrue(handle.await(1000, null, null).isSuccess());
+    }
+
+    @Test
+    public void externallyConsumedOutputPipeRemainsOwnedThroughEofAndReap() throws Exception {
+        ScriptedProcess process = new ScriptedProcess(512, false, false, false, true);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "external-output-pipe-test", 100);
+        InputStream output = handle.openOutputPipe();
+        byte[] buffer = new byte[1024];
+        int total = 0;
+        for (int read; (read = output.read(buffer)) >= 0; ) {
+            total += read;
+        }
+        output.close();
+
+        assertTrue(total > 0);
+        assertTrue(handle.await(5000, null, null).isSuccess());
+    }
+
+    @Test
+    public void earlyOutputPipeCloseIsNotReportedAsSuccessfulTransfer() throws Exception {
+        ScriptedProcess process = new ScriptedProcess(10, false, false, false, true);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "early-output-pipe-test", 100);
+        InputStream output = handle.openOutputPipe();
+        assertTrue(output.read() >= 0);
+        output.close();
+
+        NativeExecutionHandle.Outcome outcome = handle.await(5000, null, null);
+        assertEquals(NativeExecutionHandle.TerminalState.FAILED, outcome.getState());
+        assertTrue(outcome.isOutputTruncated());
+    }
+
+    @Test
     public void cancellationReapsProcessBeforeReleasingResource() {
         ScriptedProcess process = new ScriptedProcess(0, true, false);
         NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "cancel-test", 50);

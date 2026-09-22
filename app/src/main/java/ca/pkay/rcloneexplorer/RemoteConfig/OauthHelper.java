@@ -8,14 +8,12 @@ import ca.pkay.rcloneexplorer.InteractiveRunner;
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.Rclone;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Provides utility methods for authorization of OAuth remotes
@@ -24,56 +22,89 @@ public class OauthHelper {
 
     private static final String TAG = "OAuthHelper";
     private static final String regex = "go to the following link: ([^\\s]+)";
+    private static final Pattern authUrlPattern = Pattern.compile(regex, 0);
     private static final OauthProcessToken oauthProcessToken = new OauthProcessToken();
 
     // Since OAuth always blocks port 53682, only a single authentication
     // attempt is allowed at a time.
+    public interface ExecutionFactory {
+        NativeExecutionHandle launch();
+    }
+
     static class OauthProcessToken {
 
-        private volatile WeakReference<UrlAuthThread> threadAuthThread;
-        private volatile WeakReference<InteractiveRunner> runner;
+        private NativeExecutionHandle execution;
+        private InteractiveRunner runner;
 
-        public synchronized boolean acquire(UrlAuthThread controlThread) {
-            boolean oldAttemptStopped = forceRelease();
-            this.threadAuthThread = new WeakReference<>(controlThread);
-            return oldAttemptStopped;
+        synchronized NativeExecutionHandle startAttempt(ExecutionFactory factory) {
+            if (!forceRelease() || Thread.currentThread().isInterrupted()) {
+                return null;
+            }
+            NativeExecutionHandle next = factory.launch();
+            if (next != null) {
+                execution = next;
+                runner = null;
+            }
+            return next;
         }
 
-        public synchronized boolean acquire(InteractiveRunner runner) {
-            boolean oldAttemptStopped = forceRelease();
-            this.runner = new WeakReference<>(runner);
-            return oldAttemptStopped;
+        synchronized boolean registerRunner(InteractiveRunner candidate,
+                                            NativeExecutionHandle candidateExecution) {
+            if (execution != candidateExecution) {
+                candidate.stopAndAwait();
+                return false;
+            }
+            runner = candidate;
+            return true;
         }
 
-        public synchronized boolean forceRelease() {
-            UrlAuthThread oldThread = threadAuthThread != null ? threadAuthThread.get() : null;
-            InteractiveRunner oldRunner = runner != null ? runner.get() : null;
-            boolean killed = false;
-
-            if (oldThread != null) {
-                if (!oldThread.isStopped()) {
-                    FLog.d(TAG, "Removing old auth attempt");
-                    oldThread.forceStop();
-                    killed = true;
-                }
+        synchronized boolean forceRelease() {
+            NativeExecutionHandle current = execution;
+            InteractiveRunner currentRunner = runner;
+            if (current == null) {
+                runner = null;
+                return true;
             }
 
-            if (oldRunner != null) {
-                FLog.d(TAG, "Removing old re-auth attempt");
-                oldRunner.forceStop();
-                killed = true;
+            boolean stopped;
+            if (currentRunner != null) {
+                stopped = currentRunner.stopAndAwait();
+            } else {
+                NativeExecutionHandle.Outcome outcome = current.cancelAndAwait(null, null);
+                stopped = (outcome.isConfirmed() || current.hasConfirmedReap())
+                        && current.hasConfirmedReap();
             }
 
-            return killed;
+            if (!stopped || !current.hasConfirmedReap()) {
+                return false;
+            }
+            execution = null;
+            runner = null;
+            return true;
+        }
+
+        synchronized void release(NativeExecutionHandle completed) {
+            if (execution == completed && completed.hasConfirmedReap()) {
+                execution = null;
+                runner = null;
+            }
         }
     }
 
     /**
      * Ensure that an OAuth attempt can be made.
      */
-    public static void registerRunner(InteractiveRunner runner) {
-        oauthProcessToken.forceRelease();
-        oauthProcessToken.acquire(runner);
+    public static NativeExecutionHandle startAttempt(ExecutionFactory factory) {
+        return oauthProcessToken.startAttempt(factory);
+    }
+
+    public static boolean registerRunner(InteractiveRunner runner,
+                                         NativeExecutionHandle execution) {
+        return oauthProcessToken.registerRunner(runner, execution);
+    }
+
+    public static void release(NativeExecutionHandle execution) {
+        oauthProcessToken.release(execution);
     }
 
     /**
@@ -84,82 +115,37 @@ public class OauthHelper {
      * @return true if successful
      **/
     public static boolean createOptionsWithOauth(ArrayList<String> options, Rclone rclone, Context context) {
-        // Since authorization uses a fixed port, shut down previous attempt.
-        oauthProcessToken.forceRelease();
-
-        Process process = rclone.configCreate(options);
-        if (null == process) {
+        // Reserve the fixed OAuth port only after the previous owner has been stopped and reaped.
+        NativeExecutionHandle execution = oauthProcessToken.startAttempt(
+                () -> rclone.configCreateOwned(options));
+        if (execution == null) {
             return false;
         }
-        UrlAuthThread currentAuth = new OauthHelper.UrlAuthThread(process, context);
-        oauthProcessToken.acquire(currentAuth);
-        currentAuth.start();
-        boolean exitedNormally = false;
+        AtomicBoolean browserLaunched = new AtomicBoolean(false);
         try {
-            process.waitFor();
-            exitedNormally = true;
-        } catch (InterruptedException e) {
-            FLog.d(TAG, "Auth stopped by process interrupt");
-            currentAuth.forceStop();
+            NativeExecutionHandle.Outcome outcome = execution.await(
+                    NativeExecutionHandle.NO_TIMEOUT, null, line -> {
+                        Matcher matcher = authUrlPattern.matcher(line);
+                        if (matcher.find() && browserLaunched.compareAndSet(false, true)) {
+                            String url = matcher.group(1);
+                            if (url != null) {
+                                launchBrowser(context.getApplicationContext(), url);
+                            }
+                        }
+                    });
+            return outcome.isSuccess();
+        } finally {
+            if (!execution.hasConfirmedReap()) {
+                execution.cancelAndAwait(null, null);
+            }
+            oauthProcessToken.release(execution);
         }
-        return exitedNormally && 0 == process.exitValue();
     }
 
     /**
      * Monitor a rclone process for an authentication url and launch a browser
      * tab for the user. Note: this consumes the processes InputStream (stdout).
      */
-    public static class UrlAuthThread extends Thread {
-        private static final Pattern pattern = Pattern.compile(regex, 0);
-
-        private static final String TAG = "UrlAuthThread";
-        private final Process process;
-        private final Context context;
-        private volatile boolean stopped = false;
-
-        public UrlAuthThread(Process process, Context context) {
-            this.process = process;
-            this.context = context;
-        }
-
-        public void run() {
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while (null != (line = br.readLine())) {
-                    Matcher matcher = pattern.matcher(line);
-                    if (matcher.find()) {
-                        String url = matcher.group(1);
-                        if (url != null) {
-                            launchBrowser(context, url);
-                        }
-
-                        // Do NOT break here, or the stream will be closed.
-                        // When rclone then tries to write to the stream, it will receive SIGPIPE
-                        // and rclone will exit confused why it can't just output its log messages.
-                        // Instead, wait for rclone to close the stream.
-                    }
-                }
-            } catch (IOException e) {
-                if (stopped) {
-                    FLog.v(TAG, "Authentication attempt stopped");
-                    return;
-                }
-                stopped = true;
-                FLog.e(TAG, "doInBackground: could not read auth url", e);
-                process.destroy();
-            }
-        }
-
-        public void forceStop() {
-            stopped = true;
-            process.destroy();
-        }
-
-        public boolean isStopped() {
-            return stopped;
-        }
-    }
-
     static void launchBrowser(@NonNull Context context, @NonNull String url) {
         CustomTabsIntent.Builder builder = new CustomTabsIntent.Builder();
         CustomTabsIntent customTabsIntent = builder.build();
@@ -191,7 +177,7 @@ public class OauthHelper {
                     launchBrowser(context, url);
                 }
             } else {
-                FLog.w(TAG, "onTrigger: could not extract auth URL from buffer: %s", cliBuffer);
+                FLog.w(TAG, "OAuth prompt did not contain a usable authorization URL");
             }
         }
 

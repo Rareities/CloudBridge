@@ -1318,7 +1318,7 @@ public class VirtualContentProvider extends SingleRootProvider {
                 ParcelFileDescriptor[] descriptors = ParcelFileDescriptor.createReliablePipe();
                 consumer = descriptors[0];
                 producer = descriptors[1];
-                PipeTransferThread pipeTransfer = new PipeTransferThread(rclone.downloadToPipe(documentId),
+                PipeTransferThread pipeTransfer = new PipeTransferThread(rclone.downloadToPipe(documentId, signal),
                         new ParcelFileDescriptor.AutoCloseOutputStream(producer), signal, len);
                 pipeTransfer.start();
                 return consumer;
@@ -1334,7 +1334,7 @@ public class VirtualContentProvider extends SingleRootProvider {
                 producer = descriptors[1];
                 PipeTransferThread pipeTransfer = new PipeTransferThread(
                         new ParcelFileDescriptor.AutoCloseInputStream(consumer),
-                        rclone.uploadFromPipe(documentId), signal, len);
+                        rclone.uploadFromPipe(documentId, signal), signal, len);
                 pipeTransfer.start();
                 return producer;
             } catch (IOException e) {
@@ -1672,16 +1672,17 @@ public class VirtualContentProvider extends SingleRootProvider {
                         break;
                     }
                 }
-                FLog.v(TAG, "Stopping Pipe Transfer, cancelled=" + cancellationSignal.isCanceled());
-                is.close();
                 os.flush();
-                os.close();
             } catch (IOException e) {
+                cancellationSignal.cancel();
                 if (e.getCause() instanceof ErrnoException && ((ErrnoException) e.getCause()).errno == OsConstants.EPIPE) {
                     FLog.v(TAG, "Pipe closed unexpectedly, Pipe Transfer stopped");
                 } else {
                     FLog.e(TAG, "PipeTransferThread, cancelled=%s", cancellationSignal.isCanceled(), e);
                 }
+            } finally {
+                try { is.close(); } catch (IOException ignored) { }
+                try { os.close(); } catch (IOException ignored) { }
             }
         }
     }
