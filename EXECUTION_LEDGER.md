@@ -326,9 +326,19 @@ Two sandboxed Gradle retries failed because a Gradle worker was denied access to
 Datastore JAR; the identical offline test/lint command passed outside that sandbox. These
 were environment failures, not passing runs. No repository was pushed and no PR created.
 
+### WP05 continuation: metadata commands and fault coverage
+
+CloudBridge commit `a217378` moves `link`, `md5sum`, `sha1sum` and `--version` text commands
+to one bounded native handle that drains stdout/stderr concurrently. The prior `waitFor()`
+before stdout read could deadlock on full output. The forced-kill path now reflects the
+public `Process` API rather than an inaccessible concrete Android process class. JVM tests
+cover forced-kill timeout, concurrent stop/finish sharing one terminal result, and failed
+launch. The complete unit suite is **44 PASS**; Android lint still passes with 98 warnings
+and the 6 baseline-filtered errors. This is another bounded slice, **not WP05 acceptance**.
+
 ## Next work
 
-Continue WP05, not WP06: migrate listing/hash/config/OAuth/reconnect/interactive and direct
+Continue WP05, not WP06: migrate listing/config/OAuth/reconnect/interactive and remaining direct
 `Rclone` helpers, then run process/resource fault and Android lifecycle tests. Keep the
 CloudBridge -> Rareities/rclone immutable pin; do not infer that the Git remote URL or a
 successful JVM build proves a native APK contains that fork. Only disposable data may be
