@@ -336,6 +336,18 @@ cover forced-kill timeout, concurrent stop/finish sharing one terminal result, a
 launch. The complete unit suite is **44 PASS**; Android lint still passes with 98 warnings
 and the 6 baseline-filtered errors. This is another bounded slice, **not WP05 acceptance**.
 
+CloudBridge commit `a3f700f` removes a listing-path debug log of the entire native process
+environment. A password containing spaces could leave a suffix visible after regex-based
+redaction, so process environments must not be logged at all. This one-line source change
+passed `git diff --check`; a post-change Gradle run passed 44 JVM tests and lint (98 warnings,
+6 baseline-filtered errors). No live credential was used.
+
+The local CloudBridge checkout has an archive-derived root (`800bbc19`), and the GitHub
+master object `c4928762` is absent from its object database. Although `origin` points to
+`Rareities/CloudBridge`, these local commits cannot be treated as a normal fast-forward or
+safe PR branch until a history-preserving clone/import is performed. Do not force-push the
+archive-derived history over the remote repository.
+
 ## Next work
 
 Continue WP05, not WP06: migrate listing/config/OAuth/reconnect/interactive and remaining direct
