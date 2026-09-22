@@ -23,6 +23,7 @@ import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.notifications.prototypes.WorkerNotification
 import ca.pkay.rcloneexplorer.notifications.support.StatusObject
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle
 import ca.pkay.rcloneexplorer.util.SyncLog
 import ca.pkay.rcloneexplorer.util.TransferLocks
 import ca.pkay.rcloneexplorer.util.WifiConnectivitiyUtil
@@ -81,12 +82,13 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private val sIsLoggingEnabled = mPreferences.getBoolean(getString(R.string.pref_key_logs), false)
     private var sConnectivityChanged = false
 
-    private var sRcloneProcess: Process? = null
+    private var sRcloneProcess: NativeExecutionHandle? = null
     private val statusObject = StatusObject(mContext)
     private var failureReason = FAILURE_REASON.NO_FAILURE
     private var endNotificationAlreadyPosted = false
     private var silentRun = false
     private val ongoingNotificationID = Random.nextInt()
+    private var lastNotificationUpdateMs = 0L
 
 
     private var mTitle: String = mNotificationManager?.initialTitle ?: ""
@@ -118,6 +120,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 // do not instantiate rclone when you dont want it to run.
                 // It will immediately run!
                 val transferLocks = TransferLocks.acquire(mContext, "ephemeral")
+                var locksAttachedToExecution = false
                 try {
                     when(type){
                     Type.DOWNLOAD -> {
@@ -129,7 +132,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).downloadFile(
+                        sRcloneProcess = Rclone(mContext).downloadFileOwned(
                             remoteItem,
                             fileItem,
                             target
@@ -139,7 +142,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                         val target = inputData.getString(UPLOAD_TARGETPATH)
                         val file = inputData.getString(UPLOAD_FILE)
 
-                        sRcloneProcess = Rclone(mContext).uploadFile(
+                        sRcloneProcess = Rclone(mContext).uploadFileOwned(
                             remoteItem,
                             target,
                             file
@@ -154,7 +157,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).moveTo(
+                        sRcloneProcess = Rclone(mContext).moveToOwned(
                             remoteItem,
                             fileItem,
                             target
@@ -168,15 +171,22 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).deleteItems(
+                        sRcloneProcess = Rclone(mContext).deleteItemsOwned(
                             remoteItem,
                             fileItem
                         )
                     }
-                }
-                handleSync(mTitle)
+                    }
+                    if (sRcloneProcess != null && transferLocks != null) {
+                        locksAttachedToExecution = sRcloneProcess!!.attachResource(transferLocks)
+                    }
+                    handleSync(mTitle)
                 } finally {
-                    transferLocks?.release()
+                    if (!locksAttachedToExecution) {
+                        transferLocks?.release()
+                    } else if (sRcloneProcess?.getOutcome() == null) {
+                        sRcloneProcess?.close()
+                    }
                 }
             } else {
                 log("Preconditions are not met!")
@@ -186,7 +196,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
             postSync()
             // Indicate whether the work finished successfully with the Result
-            return Result.success()
+            return if (failureReason == FAILURE_REASON.NO_FAILURE) Result.success() else Result.failure()
         }
         log("Critical: No valid ephemeral type passed!")
         return Result.failure()
@@ -201,7 +211,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     private fun finishWork() {
-        sRcloneProcess?.destroy()
+        sRcloneProcess?.cancelAndAwait(null, null)
         mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
         postSync()
     }
@@ -216,63 +226,54 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     private fun handleSync(title: String) {
-        if (sRcloneProcess != null) {
-            val localProcessReference = sRcloneProcess!!
-            try {
-                val reader = BufferedReader(InputStreamReader(localProcessReference.errorStream))
-                val iterator = reader.lineSequence().iterator()
-                // Throttle notification rebuilds: rclone emits a stats line roughly every second,
-                // but with -vvv there can be many more log lines. Rebuilding a Notification and
-                // calling setForegroundAsync() on every line wastes CPU that the transfer needs.
-                var lastNotifyMs = 0L
-                val minNotifyIntervalMs = 500L
-                while(iterator.hasNext()) {
-                    val line = iterator.next()
-                    try {
-                        val logline = JSONObject(line)
-                        //todo: migrate this to StatusObject, so that we can handle everything properly.
-                        if (logline.getString("level") == "error") {
-                            if (sIsLoggingEnabled) {
-                                log2File?.log(line)
-                            }
-                        }
-
-                        // Process all log lines so stats/progress advance the notification
-                        statusObject.parseLoglineToStatusObject(logline)
-
-                        // Only rebuild when there is content to show, and at most once per
-                        // minNotifyIntervalMs to avoid notification churn on busy logs.
-                        if (statusObject.notificationContent.isNotEmpty()) {
-                            val now = System.currentTimeMillis()
-                            if (now - lastNotifyMs >= minNotifyIntervalMs) {
-                                lastNotifyMs = now
-                                updateForegroundNotification(mNotificationManager?.updateNotification(
-                                    title,
-                                    statusObject.notificationContent,
-                                    statusObject.notificationBigText,
-                                    statusObject.notificationPercent,
-                                    ongoingNotificationID
-                                ))
-                            }
-                        }
-                    } catch (e: JSONException) {
-                        FLog.e(tag(), "Error: the offending line: $line")
+        val execution = sRcloneProcess
+        if (execution != null) {
+            execution.await(
+                NativeExecutionHandle.NO_TIMEOUT,
+                null,
+                NativeExecutionHandle.LineSink { line -> handleNativeLogLine(title, line) }
+            ).also { outcome ->
+                if (!outcome.isSuccess()) {
+                    failureReason = when (outcome.state) {
+                        NativeExecutionHandle.TerminalState.CANCELLED,
+                        NativeExecutionHandle.TerminalState.INTERRUPTED -> FAILURE_REASON.CANCELLED
+                        else -> FAILURE_REASON.RCLONE_ERROR
                     }
                 }
-            } catch (e: InterruptedIOException) {
-                FLog.e(tag(), "onHandleIntent: I/O interrupted, stream closed", e)
-            } catch (e: IOException) {
-                FLog.e(tag(), "onHandleIntent: error reading stdout", e)
-            }
-            try {
-                localProcessReference.waitFor()
-            } catch (e: InterruptedException) {
-                FLog.e(tag(), "onHandleIntent: error waiting for process", e)
             }
         } else {
             log("Sync: No Rclone Process!")
+            failureReason = FAILURE_REASON.RCLONE_ERROR
         }
         mNotificationManager?.cancelSyncNotification(ongoingNotificationID)
+    }
+
+    private fun handleNativeLogLine(title: String, line: String) {
+        try {
+            val logline = JSONObject(line)
+            if (logline.optString("level") == "error" && sIsLoggingEnabled) {
+                log2File?.log(line)
+            }
+
+            statusObject.parseLoglineToStatusObject(logline)
+
+            // Rebuild at most twice per second while the execution handle drains the pipe.
+            if (statusObject.notificationContent.isNotEmpty()) {
+                val now = System.currentTimeMillis()
+                if (now - lastNotificationUpdateMs >= 500L) {
+                    lastNotificationUpdateMs = now
+                    updateForegroundNotification(mNotificationManager?.updateNotification(
+                        title,
+                        statusObject.notificationContent,
+                        statusObject.notificationBigText,
+                        statusObject.notificationPercent,
+                        ongoingNotificationID
+                    ))
+                }
+            }
+        } catch (e: JSONException) {
+            FLog.e(tag(), "Error: the offending line: $line")
+        }
     }
 
     private fun postSync() {

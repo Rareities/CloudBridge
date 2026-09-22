@@ -90,6 +90,7 @@ import ca.pkay.rcloneexplorer.Services.StreamingService;
 import ca.pkay.rcloneexplorer.Services.ThumbnailsLoadingService;
 import ca.pkay.rcloneexplorer.util.ActivityHelper;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import ca.pkay.rcloneexplorer.util.LargeParcel;
 import ca.pkay.rcloneexplorer.workmanager.EphemeralTaskManager;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
@@ -1812,7 +1813,7 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         private int openAs;
         private LoadingDialog loadingDialog;
         private String fileLocation;
-        private Process process;
+        private NativeExecutionHandle process;
         private volatile boolean isCancelled = false;
         private String mimeType;
 
@@ -1827,7 +1828,9 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         private void cancelProcess() {
             isCancelled = true;
             if (null != process) {
-                process.destroy();
+                // The AsyncTask's background await owns the bounded reap; do not block the UI
+                // thread while the cancel button is being handled.
+                process.cancel();
             }
         }
 
@@ -1860,29 +1863,25 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
 
             fileLocation = saveLocation + "/" + fileItem.getName();
 
-            process = rclone.downloadFile(remote, fileItem, saveLocation);
+            process = rclone.downloadFileOwned(remote, fileItem, saveLocation);
 
             if (process != null) {
-                try {
-                    process.waitFor();
-                } catch (InterruptedException e) {
+                NativeExecutionHandle.Outcome outcome = process.await(
+                        NativeExecutionHandle.NO_TIMEOUT, null, null);
+                if (!outcome.isSuccess()) {
                     if (!isCancelled) {
-                        FLog.e(TAG, "DownloadAndOpen/doInBackground: error waiting for process", e);
+                        FLog.e(TAG, "DownloadAndOpen/doInBackground: download exited with state %s", outcome.getState());
                     }
                     return false;
                 }
             }
 
-            if (process != null && process.exitValue() == 0) {
+            if (process != null && process.getOutcome() != null && process.getOutcome().isSuccess()) {
                 File savedFile = new File(fileLocation);
                 savedFile.setReadOnly();
             }
 
-            if (process != null && process.exitValue() != 0) {
-                rclone.logErrorOutput(process);
-            }
-
-            return process != null && process.exitValue() == 0;
+            return process != null && process.getOutcome() != null && process.getOutcome().isSuccess();
         }
 
         @Override

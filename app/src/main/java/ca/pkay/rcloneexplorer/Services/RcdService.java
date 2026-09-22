@@ -285,15 +285,18 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
 
     private void shutdown() {
         FLog.d(TAG, "Service shutting down");
-        if (activeTransferLocks != null) {
+        boolean nativeStopped = true;
+        if (null != rcloneRcd) {
+            nativeStopped = rcloneRcd.stopRcd();
+            if (nativeStopped) {
+                rcloneRcd = null;
+            }
+        }
+        if (nativeStopped && activeTransferLocks != null) {
             activeTransferLocks.release();
             activeTransferLocks = null;
         }
-        if (null != rcloneRcd) {
-            rcloneRcd.stopRcd();
-            rcloneRcd = null;
-        }
-        shutdown = true;
+        shutdown = nativeStopped;
     }
 
     /**
@@ -345,6 +348,9 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
 
     public RcloneRcd getLocalRcd() {
         synchronized (onlineLock) {
+            if (rcloneRcd != null && rcloneRcd.hasUnconfirmedStop()) {
+                throw new IllegalStateException("Previous rcd exit was not confirmed");
+            }
             if (null == rcloneRcd || !rcloneRcd.isAlive()) {
                 FLog.d(TAG, "Creating rcd process");
                 rcloneRcd = new RcloneRcd(getApplicationContext(), this);

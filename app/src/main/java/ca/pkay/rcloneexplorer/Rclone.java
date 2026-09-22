@@ -60,6 +60,7 @@ import ca.pkay.rcloneexplorer.rclone.Provider;
 import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
 import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.LogRedactor;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import ca.pkay.rcloneexplorer.util.SyncLog;
 import es.dmoral.toasty.Toasty;
 import io.github.x0b.safdav.SafAccessProvider;
@@ -820,6 +821,25 @@ public class Rclone {
         return serve(protocol, port, allowRemoteAccess, user, password, remote, servePath, null);
     }
 
+    /** WP05 owner boundary for a long-lived rclone serve process. */
+    @Nullable
+    public NativeExecutionHandle serveOwned(int protocol, int port, boolean allowRemoteAccess,
+                                            @Nullable String user, @Nullable String password,
+                                            @NonNull RemoteItem remote, @Nullable String servePath) {
+        return serveOwned(protocol, port, allowRemoteAccess, user, password, remote, servePath, null);
+    }
+
+    /** WP05 owner boundary variant retaining the optional serve base URL used by thumbnails. */
+    @Nullable
+    public NativeExecutionHandle serveOwned(int protocol, int port, boolean allowRemoteAccess,
+                                            @Nullable String user, @Nullable String password,
+                                            @NonNull RemoteItem remote, @Nullable String servePath,
+                                            @Nullable String baseUrl) {
+        return NativeExecutionHandle.adopt(
+                serve(protocol, port, allowRemoteAccess, user, password, remote, servePath, baseUrl),
+                "serve");
+    }
+
     /**
      * This is only kept for legacy purposes. It was used before md5-checksum was introduced.
      * @param remoteItem
@@ -936,6 +956,35 @@ public class Rclone {
         }
     }
 
+    /**
+     * WP05 compatibility adapter for the durable sync worker. The legacy command builders still
+     * expose Process for older UI callers, but the worker receives the single owner boundary as
+     * soon as the native process is launched.
+     */
+    @Nullable
+    public NativeExecutionHandle syncOwned(RemoteItem remoteItem, String localPath, String remotePath,
+                                           int syncDirection, boolean useMD5Sum,
+                                           ArrayList<FilterEntry> filters, boolean deleteExcluded,
+                                           String transfersOverride) {
+        return NativeExecutionHandle.adopt(
+                sync(remoteItem, localPath, remotePath, syncDirection, useMD5Sum, filters,
+                        deleteExcluded, transfersOverride),
+                "sync");
+    }
+
+    /** WP05 compatibility adapter for cloud-to-cloud sync/copy operations. */
+    @Nullable
+    public NativeExecutionHandle syncOwned(RemoteItem remoteItem, String remotePath,
+                                           RemoteItem remoteItem2, String remotePath2,
+                                           int syncDirection, boolean useMD5Sum,
+                                           ArrayList<FilterEntry> filters, boolean deleteExcluded,
+                                           String transfersOverride) {
+        return NativeExecutionHandle.adopt(
+                sync(remoteItem, remotePath, remoteItem2, remotePath2, syncDirection, useMD5Sum,
+                        filters, deleteExcluded, transfersOverride),
+                "cloud-sync");
+    }
+
     public Process downloadFile(RemoteItem remote, FileItem downloadItem, String downloadPath) {
         String[] command;
         String remoteFilePath;
@@ -997,6 +1046,18 @@ public class Rclone {
             return null;
         }
 
+    }
+
+    /** WP05 compatibility adapter for the ephemeral transfer worker. */
+    @Nullable
+    public NativeExecutionHandle downloadFileOwned(RemoteItem remote, FileItem downloadItem, String downloadPath) {
+        return NativeExecutionHandle.adopt(downloadFile(remote, downloadItem, downloadPath), "download");
+    }
+
+    /** WP05 compatibility adapter for the ephemeral transfer worker. */
+    @Nullable
+    public NativeExecutionHandle uploadFileOwned(RemoteItem remote, String uploadPath, String uploadFile) {
+        return NativeExecutionHandle.adopt(uploadFile(remote, uploadPath, uploadFile), "upload");
     }
 
     // Can't pass \u0000 as cmd arg - encode like rclone with U+2400
@@ -1098,6 +1159,18 @@ public class Rclone {
         }
 
         return process;
+    }
+
+    /** WP05 compatibility adapter for the ephemeral transfer worker. */
+    @Nullable
+    public NativeExecutionHandle moveToOwned(RemoteItem remote, FileItem moveItem, String newLocation) {
+        return NativeExecutionHandle.adopt(moveTo(remote, moveItem, newLocation), "move");
+    }
+
+    /** WP05 compatibility adapter for the ephemeral transfer worker. */
+    @Nullable
+    public NativeExecutionHandle deleteItemsOwned(RemoteItem remote, FileItem deleteItem) {
+        return NativeExecutionHandle.adopt(deleteItems(remote, deleteItem), "delete");
     }
 
     public Boolean moveTo(RemoteItem remote, String oldFile, String newFile) {

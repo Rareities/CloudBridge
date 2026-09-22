@@ -29,6 +29,7 @@ import ca.pkay.rcloneexplorer.notifications.SyncServiceNotifications
 import ca.pkay.rcloneexplorer.notifications.SyncServiceNotifications.Companion.GROUP_ID
 import ca.pkay.rcloneexplorer.notifications.support.StatusObject
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle
 import ca.pkay.rcloneexplorer.util.SyncLog
 import ca.pkay.rcloneexplorer.util.TransferLocks
 import ca.pkay.rcloneexplorer.util.WifiConnectivitiyUtil
@@ -82,7 +83,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private val sIsLoggingEnabled = mPreferences.getBoolean(getString(R.string.pref_key_logs), false)
     private var sConnectivityChanged = false
 
-    private var sRcloneProcess: Process? = null
+    private var sRcloneProcess: NativeExecutionHandle? = null
     private val statusObject = StatusObject(mContext)
     private var failureReason = FAILURE_REASON.NO_FAILURE
     private var endNotificationAlreadyPosted = false
@@ -92,6 +93,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private var durableRunOwnerToken: String? = null
     private var durableRunFinished = false
     private var nativeExitCode: Int? = null
+    private var nativeCompletionUnconfirmed = false
 
 
     // Task
@@ -180,7 +182,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     }
 
     private fun finishWork() {
-        sRcloneProcess?.destroy()
+        sRcloneProcess?.cancelAndAwait(null, null)?.let {
+            if (!it.isConfirmed) nativeCompletionUnconfirmed = true
+        }
         mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
         postSync()
     }
@@ -200,6 +204,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         }
         if(arePreconditionsMet()) {
             val transferLocks = TransferLocks.acquire(mContext, "sync")
+            var locksAttachedToExecution = false
             try {
                 val taskFilter = if(mTask.filterId != null ) mDatabase.getFilter(mTask.filterId!!) else null;
                 val taskFilterList = taskFilter?.getFilters() ?: ArrayList()
@@ -207,7 +212,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                         || mTask.direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
                 sRcloneProcess = if (isCloudToCloud) {
                     val remoteItem2 = RemoteItem(mTask.remoteId2, mTask.remoteType2, "")
-                    mRclone.sync(
+                    mRclone.syncOwned(
                         remoteItem,
                         mTask.remotePath,
                         remoteItem2,
@@ -219,7 +224,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                         mTask.transfers?.toString()
                     )
                 } else {
-                    mRclone.sync(
+                    mRclone.syncOwned(
                         remoteItem,
                         mTask.localPath,
                         mTask.remotePath,
@@ -235,23 +240,33 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                     log("Sync: Rclone process could not be started for direction ${mTask.direction}")
                     return
                 }
+                if (transferLocks != null) {
+                    locksAttachedToExecution = sRcloneProcess!!.attachResource(transferLocks)
+                }
                 if (durableRunId != null && durableRunOwnerToken != null &&
                     !mRunRepository.markRunning(durableRunId!!, durableRunOwnerToken!!)) {
-                    sRcloneProcess?.destroy()
+                    val outcome = sRcloneProcess?.cancelAndAwait(null, null)
+                    nativeCompletionUnconfirmed = outcome == null || !outcome.isConfirmed
                     sRcloneProcess = null
                     failureReason = FAILURE_REASON.RCLONE_ERROR
                     log("Sync: durable run was no longer owned")
                     return
                 }
                 handleSync(mTitle)
-                if (isCloudToCloud) {
+                if (failureReason == FAILURE_REASON.NO_FAILURE && isCloudToCloud) {
                     // Refresh any open FileExplorer on the destination remote so copied content appears.
                     sendUploadFinishedBroadcast(mTask.remoteId2, mTask.remotePath2)
-                } else {
+                } else if (failureReason == FAILURE_REASON.NO_FAILURE) {
                     sendUploadFinishedBroadcast(remoteItem.name, mTask.remotePath)
                 }
             } finally {
-                transferLocks?.release()
+                if (!locksAttachedToExecution) {
+                    transferLocks?.release()
+                } else if (sRcloneProcess?.getOutcome() == null) {
+                    // An unexpected worker exception must still give the owner a chance to reap
+                    // before the surrounding scope exits and releases no native resources.
+                    sRcloneProcess?.close()
+                }
             }
         }
     }
@@ -267,55 +282,21 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
     private fun handleSync(title: String) {
         SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_start_sync))
-        if (sRcloneProcess != null) {
-            val localProcessReference = sRcloneProcess!!
-            try {
-                val reader = BufferedReader(InputStreamReader(localProcessReference.errorStream))
-                val iterator = reader.lineSequence().iterator()
-                while(iterator.hasNext()) {
-                    val line = iterator.next()
-                    try {
-                        val logline = JSONObject(line)
-                        //todo: migrate this to StatusObject, so that we can handle everything properly.
-                        if (logline.getString("level") == "error") {
-                            if (sIsLoggingEnabled) {
-                                log2File?.log(line)
-                            }
-                        }
-                        
-                        // Process all log lines for stats/progress updates, not just error/warning
-                        // This fixes the notification being stuck on "starting sync"
-                        statusObject.parseLoglineToStatusObject(logline)
-
-                        // Only update notification if we have content to show
-                        if (statusObject.notificationContent.isNotEmpty()) {
-                            updateForegroundNotification(mNotificationManager.updateSyncNotification(
-                                title,
-                                statusObject.notificationContent,
-                                statusObject.notificationBigText,
-                                statusObject.notificationPercent,
-                                ongoingNotificationID
-                            ))
-                        }
-                    } catch (e: JSONException) {
-                        FLog.e(TAG, "SyncService-Error: the offending line: $line")
-                        //FLog.e(TAG, "onHandleIntent: error reading json", e)
-                    }
+        val execution = sRcloneProcess
+        if (execution != null) {
+            val outcome = execution.await(
+                NativeExecutionHandle.NO_TIMEOUT,
+                null,
+                NativeExecutionHandle.LineSink { line -> handleNativeLogLine(title, line) }
+            )
+            nativeExitCode = outcome.exitCode
+            nativeCompletionUnconfirmed = !outcome.isConfirmed
+            if (!outcome.isSuccess()) {
+                failureReason = when (outcome.state) {
+                    NativeExecutionHandle.TerminalState.CANCELLED,
+                    NativeExecutionHandle.TerminalState.INTERRUPTED -> FAILURE_REASON.CANCELLED
+                    else -> FAILURE_REASON.RCLONE_ERROR
                 }
-            } catch (e: InterruptedIOException) {
-                FLog.e(TAG, "onHandleIntent: I/O interrupted, stream closed", e)
-            } catch (e: IOException) {
-                FLog.e(TAG, "onHandleIntent: error reading stdout", e)
-            }
-            try {
-                nativeExitCode = localProcessReference.waitFor()
-                if (nativeExitCode != 0) {
-                    failureReason = FAILURE_REASON.RCLONE_ERROR
-                }
-            } catch (e: InterruptedException) {
-                Thread.currentThread().interrupt()
-                FLog.e(TAG, "onHandleIntent: error waiting for process", e)
-                failureReason = FAILURE_REASON.RCLONE_ERROR
             }
         } else {
             log("Sync: No Rclone Process!")
@@ -323,11 +304,38 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         mNotificationManager.cancelSyncNotification(ongoingNotificationID)
     }
 
+    private fun handleNativeLogLine(title: String, line: String) {
+        try {
+            val logline = JSONObject(line)
+            if (logline.optString("level") == "error" && sIsLoggingEnabled) {
+                log2File?.log(line)
+            }
+
+            // Process all log lines for stats/progress updates, not just error/warning.
+            statusObject.parseLoglineToStatusObject(logline)
+
+            if (statusObject.notificationContent.isNotEmpty()) {
+                updateForegroundNotification(mNotificationManager.updateSyncNotification(
+                    title,
+                    statusObject.notificationContent,
+                    statusObject.notificationBigText,
+                    statusObject.notificationPercent,
+                    ongoingNotificationID
+                ))
+            }
+        } catch (e: JSONException) {
+            FLog.e(TAG, "SyncService-Error: the offending line: $line")
+        }
+    }
+
     private fun postSync() {
         if (endNotificationAlreadyPosted) {
             return
         }
         recordDurableRunOutcome()
+        if (durableRunId != null && durableRunOwnerToken != null && !durableRunFinished) {
+            failureReason = FAILURE_REASON.RCLONE_ERROR
+        }
         if (!::mTask.isInitialized) {
             endNotificationAlreadyPosted = true
             return
@@ -380,7 +388,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         if (durableRunFinished || durableRunId == null || durableRunOwnerToken == null) {
             return
         }
-        val state = when (failureReason) {
+        val state = if (nativeCompletionUnconfirmed) RunState.RECOVERY_REQUIRED else when (failureReason) {
+            FAILURE_REASON.RCLONE_ERROR -> RunState.FAILED
             FAILURE_REASON.NO_FAILURE -> {
                 if (nativeExitCode == 0) RunState.SUCCESS else RunState.FAILED
             }
@@ -391,7 +400,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             FAILURE_REASON.UNSUPPORTED_DIRECTION -> RunState.BLOCKED
             else -> RunState.FAILED
         }
-        val reason = when (failureReason) {
+        val reason = if (nativeCompletionUnconfirmed) "Native exit was not confirmed; profile requires recovery" else when (failureReason) {
             FAILURE_REASON.NO_FAILURE -> if (state == RunState.SUCCESS) null else "Native completion was not confirmed"
             FAILURE_REASON.CANCELLED -> "Cancellation requested"
             FAILURE_REASON.NO_UNMETERED -> "Unmetered network is required"

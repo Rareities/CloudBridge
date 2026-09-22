@@ -170,6 +170,21 @@ class RunRepository(context: Context) {
                         "$RUN_COLUMN_STATE IN ('PREFLIGHT','RUNNING','QUEUED')",
                 arrayOf(runId, ownerToken)
             )
+            if (updated == 1 && state == RunState.RECOVERY_REQUIRED) {
+                val run = get(db, runId)
+                if (run != null) {
+                    val profileValues = ContentValues()
+                    profileValues.put(DatabaseInfo.PROFILE_COLUMN_READINESS, ProfileReadiness.RECOVERY_REQUIRED.wireValue)
+                    profileValues.put(DatabaseInfo.PROFILE_COLUMN_REASON, reason ?: "Native completion was not confirmed")
+                    profileValues.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, System.currentTimeMillis())
+                    db.update(
+                        DatabaseInfo.PROFILE_TABLE_NAME,
+                        profileValues,
+                        "${DatabaseInfo.PROFILE_COLUMN_ID} = ?",
+                        arrayOf(run.profileId)
+                    )
+                }
+            }
             db.setTransactionSuccessful()
             updated == 1
         } finally {

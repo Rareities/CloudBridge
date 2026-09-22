@@ -14,6 +14,7 @@ import android.util.SparseArray;
 import androidx.annotation.IntDef;
 import androidx.preference.PreferenceManager;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -83,8 +84,9 @@ public class RcloneRcd {
 
     private final String configPath;
     private final String rclone;
-    private Process rcd;
+    private NativeExecutionHandle rcd;
     private boolean stopped = false;
+    private boolean unconfirmedStop = false;
     private Object mainThreadLock = new Object();
 
     final BlockingQueue<Integer> pendingJobs;
@@ -164,7 +166,8 @@ public class RcloneRcd {
                         "-vvv"));
             }
             parameters.add("rcd");
-            rcd = Runtime.getRuntime().exec(parameters.toArray(new String[0]), getEnv());
+            rcd = NativeExecutionHandle.launch(parameters.toArray(new String[0]), getEnv(), "rcd");
+            rcd.startDrainers();
         } catch (IOException e) {
             FLog.e(TAG, "startRcd: error", e);
             throw new RuntimeException(e);
@@ -267,16 +270,24 @@ public class RcloneRcd {
     /**
      * Stop the rcd server
      */
-    public void stopRcd() {
+    public boolean stopRcd() {
+        boolean confirmed = true;
         if (null != rcd) {
             FLog.d(TAG, "Stopping Rclone");
-            rcd.destroy();
+            confirmed = rcd.cancelAndAwait(null, null).isConfirmed();
+            unconfirmedStop = !confirmed;
         }
         if (null != jobsUpdateFuture) {
             jobsUpdateFuture.cancel(true);
         }
+        jobMonitorService.shutdownNow();
         jobStatusExecutor.shutdownNow();
         stopped = true;
+        return confirmed;
+    }
+
+    public boolean hasUnconfirmedStop() {
+        return unconfirmedStop;
     }
 
     /**
@@ -297,11 +308,14 @@ public class RcloneRcd {
      * @return 0: running, -1 exited normally, 1 exited with error
      */
     private @ProcessState int getProcessState() {
-        try {
-            return rcd.exitValue() != 0 ? ERROR : EXITED;
-        } catch (IllegalThreadStateException e) {
+        if (rcd == null) {
+            return EXITED;
+        }
+        if (rcd.isRunning()) {
             return RUNNING;
         }
+        NativeExecutionHandle.Outcome outcome = rcd.getOutcome();
+        return outcome != null && outcome.isSuccess() ? EXITED : ERROR;
     }
 
     /**
