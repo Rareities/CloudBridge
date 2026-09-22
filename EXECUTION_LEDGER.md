@@ -8,7 +8,7 @@ real Git checkout is available.
 ## Standing instructions
 
 - The complete handoff at `work/CloudBridge-rclone-Luna-Master-Handoff.md` is authoritative.
-- Work one bounded package at a time; WP03 is the next package after the completed WP02 entry.
+- Work one bounded package at a time; WP04 is the next package after the completed WP03 entry.
 - Preserve Bisync, Proton Drive, scheduling, Obsidian and useful CloudBridge functionality.
 - Fix defects at their owning layer and test rclone independently before app integration.
 - Missing device or live Proton access is `NOT RUN`, never a pass.
@@ -95,7 +95,7 @@ workspace.
 | rclone Proton/Internxt tests | PASS | `go test ./backend/protondrive ./backend/internxt` |
 | rclone broad test sweep | INCOMPLETE / environment failures | `go test ./...` reached source tests but was stopped after Windows test-server scripts were missing, symlink privilege tests failed, and WebDAV range behavior failed; not a clean pass |
 | CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `f4f622e` uses the immutable Rareities ref and fail-closed missing-property checks; `:rclone:tasks` and `:rclone:properties` pass under Gradle 8.13/JDK 17 and print the exact URL/ref/version; native compilation is NOT RUN |
-| Android unit/lint/debug build | PARTIAL | CloudBridge unit tests and lint pass under JDK 17/Gradle 8.13; the debug APK/native build remains NOT RUN because the NDK and `local.properties` are unavailable |
+| Android unit/lint/debug build | PARTIAL | CloudBridge 30 JVM unit tests and lint pass under JDK 17/Gradle 8.13; the debug APK/native build remains NOT RUN because the NDK and `local.properties` are unavailable |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
 | Live Proton Drive disposable-area tests | NOT RUN | No Proton credentials or approved disposable remote area |
@@ -204,10 +204,50 @@ and result truth are complete; those broader execution concerns remain owned by 
 later scheduling/result packages. Native compilation, device acceptance and live Proton
 workflow remain `NOT RUN`.
 
+## 2026-09-23 — WP03 config and database recoverability
+
+### Scoped implementation
+
+CloudBridge commit `c7f67e4` implements the bounded WP03 recoverability scope. Database and
+preference imports now parse and validate the complete bounded payload before mutation,
+including optional legacy arrays, typed/ranged preference values and cross-record references.
+Database replacement is one SQLite transaction; imported IDs are never reused and filter,
+follow-up and trigger references are remapped to the fresh row IDs. A failed insert rolls the
+transaction back instead of leaving a partially imported task set.
+
+ZIP backup import now stages and validates the config before changing any store, snapshots the
+existing database/preferences/config, and restores those snapshots if a later store update
+fails. Config entries and JSON are bounded, staged files stay inside the private app directory,
+and temporary files are cleaned on missing-entry and extraction failures. The old plaintext
+decrypt-over-config behavior was removed: a validated password is checked through rclone and
+stored only as AES-GCM ciphertext wrapped by an Android Keystore key. Keystore/key-loss errors
+leave the encrypted config and ciphertext intact and require explicit recovery. Rclone and
+RcloneRcd include the recovered password in their process environment without adding it to
+backup JSON or diagnostics.
+
+### WP03 verification
+
+| Gate | Result | Evidence |
+|---|---|---|
+| CloudBridge unit tests | PASS | `:app:testOssDebugUnitTest --no-daemon -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll`; 30 tests, 0 failures/errors, exit 0 |
+| CloudBridge lint | PASS with pre-existing findings | `:app:lintOssDebug --no-daemon -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll`; task passed; 91 warnings and 6 baseline-filtered errors were reported, with no task failure |
+| Import validation coverage | PASS (bounded) | Malformed/oversized imports, duplicate IDs, unknown references, legacy theme forms and invalid preference ranges are covered by `ImporterTest` and `SharedPreferencesBackupTest` |
+| Diff hygiene | PASS | `git diff --check` passed before commit |
+| Native Android artifact | NOT RUN | Android NDK and `local.properties` are unavailable; no APK or native rclone provenance was claimed |
+| Crash/disk-full fault injection and live Keystore | NOT RUN | No device or fault-injection harness is available in this workspace |
+| Samsung / live Proton acceptance | NOT RUN | No Galaxy S26 device or approved disposable Proton area/credentials are available |
+
+### WP03 acceptance status
+
+WP03 is **COMPLETE for the bounded import/rollback and production secret-storage
+implementation**. The source and tests are persisted, but full crash/disk-full fault injection,
+live Android Keystore behavior, native compilation, device acceptance and live Proton workflow
+remain `NOT RUN`. Importing an encrypted config whose password differs from the currently
+cached password remains an explicit unlock/recovery boundary, not a silent downgrade.
+
 ## Next package
 
-WP03 — config and database recoverability is the next bounded package. It must read this
+WP04 — authoritative profiles and run state is the next bounded package. It must read this
 ledger and the current source, preserve the existing CloudBridge -> Rareities/rclone pin,
-and verify backup/restore, migration, export/import and corruption behavior before any
-broader scheduling or provider work. A moving branch or fallback to `thies2005/rclone`
-remains prohibited.
+and establish the profile/run-state model before broader scheduling, Bisync or provider work.
+A moving branch or fallback to `thies2005/rclone` remains prohibited.
