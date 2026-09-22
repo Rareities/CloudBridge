@@ -289,9 +289,47 @@ boundary remains WP05. Android database migration, process-death, duplicate-disp
 terminal-write fault tests require instrumentation or a device. Bisync execution remains
 intentionally blocked until its native preflight/guard package proves safe semantics.
 
-## Next package
+## 2026-09-23 — WP05 native lifetime, first operation-family slice
 
-WP05 — own the complete native lifetime is the next bounded package. It must read this ledger
-and the current source, preserve the existing CloudBridge -> Rareities/rclone pin, and migrate
-process launch, output draining, cancellation, timeout, exit/reap and resource release behind
-one execution handle. A moving branch or fallback to `thies2005/rclone` remains prohibited.
+CloudBridge commit `6e665b0` is an **in-progress WP05 slice, not package acceptance**. A
+`NativeExecutionHandle` now owns dual-pipe bounded draining, cancellation, timeout, confirmed
+exit/reap, single terminal outcome and release of attached resources only after reap. Late
+confirmed exit releases resources even if an earlier bounded wait was `UNCONFIRMED`; the run
+outcome remains conservatively unconfirmed. Sync and ephemeral workers, file-open download,
+streaming and thumbnail servers, and the RCD process now use the handle. Sync reports nonzero
+native exit as failure and marks a profile recovery-required if exit cannot be confirmed. RCD
+shutdown no longer releases its transfer locks before a confirmed stop.
+
+The migration deliberately uses owned adapters over existing `Rclone` process-returning
+methods. Listing, hashing, interactive config, OAuth/reconnect, Internxt reauth and several
+direct `Rclone` helpers still own raw `Process` objects. The same-operation dual-owner
+boundary must be removed family by family before WP05 can pass. Unconfirmed ephemeral or
+serving exits lack durable cross-operation coordination; this is an open safety defect, not
+evidence of WP05 completion. Concurrent stop/finish, process-death and lifecycle rotation
+still need instrumentation. The next slice must audit every raw `Process` caller and preserve
+its interactive pipe semantics while moving it under one owner.
+
+### WP05 slice verification and source refresh
+
+| Gate | Result | Evidence |
+|---|---|---|
+| CloudBridge JVM tests | PASS | `:app:testOssDebugUnitTest --offline --no-daemon -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll`; 41 tests, exit 0 |
+| CloudBridge lint | PASS with existing baseline | `:app:lintOssDebug` in the same Gradle run; 98 warnings and 6 baseline-filtered errors, task exit 0 |
+| Native-handle edge tests | PASS (JVM model) | Full stderr pipe, cancel/reap/resource order, bounded unconfirmed exit, late reap and no-deadline wait |
+| Diff hygiene | PASS | `git diff --check` passed before source commit |
+| Repository heads | UNCHANGED at refresh | `Rareities/CloudBridge` master `c492876258ca841232229249519abe92ff77c3a4`; `Rareities/rclone` master `1583cce1e28340e5d064ed955179f5f2b31e7757` |
+| Open PRs / CI | NONE OBSERVED | GitHub connector returned no open user PRs, commit statuses or PR-triggered workflow runs on either head; this is not a CI pass |
+| Native Android artifact | NOT RUN | NDK and `local.properties` unavailable; `-x :rclone:buildAll` skips native compilation |
+| Galaxy S26 / live Proton | NOT RUN | No device, firmware/API observation, credentials or verified disposable test area available |
+
+Two sandboxed Gradle retries failed because a Gradle worker was denied access to a cached
+Datastore JAR; the identical offline test/lint command passed outside that sandbox. These
+were environment failures, not passing runs. No repository was pushed and no PR created.
+
+## Next work
+
+Continue WP05, not WP06: migrate listing/hash/config/OAuth/reconnect/interactive and direct
+`Rclone` helpers, then run process/resource fault and Android lifecycle tests. Keep the
+CloudBridge -> Rareities/rclone immutable pin; do not infer that the Git remote URL or a
+successful JVM build proves a native APK contains that fork. Only disposable data may be
+used for later live Proton testing; verify the target scope or create a unique subdirectory.
