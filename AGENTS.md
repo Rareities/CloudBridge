@@ -32,7 +32,9 @@ Keep this repository easy to upgrade from upstream rclone.
 - The rclone source is controlled by `de.schuelken.cloudbridge.rCloneRepoUrl` and `de.schuelken.cloudbridge.rCloneRef` in `gradle.properties`.
 - To upgrade rclone, prefer changing only `rCloneRef` (and `rCloneRepoUrl` only if switching forks), then rebuild.
 - Do not modify generated or fetched rclone source under `rclone/cache/`.
-- Do not reintroduce the deprecated `rclone/patches/` flow. The fork already contains project-specific rclone changes, including Internxt auto-token-renewal.
+- Do not reintroduce the deprecated `rclone/patches/` flow. Keep backend changes in the
+  selected Rareities/rclone repository and verify provider behavior before carrying forward
+  any app-specific behavior from an older engine fork.
 - Prefer Android-side integration changes in `app/` over Go-side changes in rclone.
 - If a Go-side rclone change is unavoidable, keep it in the Rareities rclone fork at `https://github.com/Rareities/rclone`; do not vendor local source patches here.
 

@@ -66,6 +66,19 @@ upstream history.
 requires a deliberate toolchain/build compatibility change and independent engine validation;
 it must not be hidden behind a moving ref or a fallback URL.
 
+The local integration pin is now recorded in CloudBridge commit `f4f622e`:
+
+- repository: `https://github.com/Rareities/rclone.git`
+- immutable ref: `1583cce1e28340e5d064ed955179f5f2b31e7757`
+- declared engine version: `1.76.0`
+- declared minimum Go version: `1.26.0`
+- missing repository/ref properties now fail the Gradle rclone configuration instead of
+  silently falling back to an unpinned upstream source
+
+This is a source/configuration pin, not integrated Android acceptance. The app build and
+native artifact provenance remain `NOT RUN` until JDK 17, Gradle, Android SDK/NDK and a clean
+fetch of the pinned repository are available.
+
 ### Environment and test gates
 
 | Gate | Result | Evidence / consequence |
@@ -78,6 +91,7 @@ it must not be hidden behind a moving ref or a fallback URL.
 | rclone sync/operations tests | PASS | `go test ./fs/sync ./fs/operations` |
 | rclone Proton/Internxt tests | PASS | `go test ./backend/protondrive ./backend/internxt` |
 | rclone broad test sweep | INCOMPLETE / environment failures | `go test ./...` reached source tests but was stopped after Windows test-server scripts were missing, symlink privilege tests failed, and WebDAV range behavior failed; not a clean pass |
+| CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `f4f622e` uses the immutable Rareities ref and fail-closed missing-property checks; clean Gradle/native verification is NOT RUN |
 | Android unit/lint/debug build | NOT RUN | `gradlew --version` could not download Gradle 8.13 because sandbox network is denied; current Java is OpenJDK 8 while project requires JDK 17; no local.properties/NDK was found |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
@@ -89,9 +103,9 @@ Baseline identity, current app pin, repository instructions, CI/PR refresh and g
 recorded in the local evidence commits above. Standalone engine build and focused safety,
 Proton and Internxt tests now have evidence, but WP00 build/test acceptance remains incomplete
 because the Android toolchain, acceptance device/provider access and full upstream Git metadata
-are unavailable. No feature implementation or app pin change is claimed. The next bounded work
-is WP01 engine reconciliation; CloudBridge must not switch repositories until the selected
-Rareities/rclone revision and its required toolchain/dependency behavior are reviewed.
+are unavailable. The app pin is now changed locally, but native artifact provenance and
+integrated behavior are not claimed. The next bounded work is WP01 engine reconciliation and
+provider-parity review before any remote publication.
 
 ## Next package
 
