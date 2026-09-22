@@ -36,6 +36,7 @@ import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject;
 import ca.pkay.rcloneexplorer.Items.Task;
 import ca.pkay.rcloneexplorer.R;
+import ca.pkay.rcloneexplorer.util.ShortcutCapabilities;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
 import es.dmoral.toasty.Toasty;
 
@@ -255,6 +256,8 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
         intent.setAction(TASK_SYNC_ACTION);
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
         intent.putExtra(EXTRA_TASK_ID, task.getId());
+        intent.putExtra(ShortcutCapabilities.EXTRA_CAPABILITY,
+                ShortcutCapabilities.issueOrGet(c, task.getId()));
 
         String id = String.valueOf(task.getTitle()+task.getLocalPath()+task.getRemotePath()+task.getDirection());
         ShortcutInfoCompat shortcut = new ShortcutInfoCompat.Builder(c, id)

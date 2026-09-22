@@ -1,7 +1,6 @@
 package ca.pkay.rcloneexplorer.workmanager
 
 import android.content.Context
-import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import ca.pkay.rcloneexplorer.Rclone
@@ -32,13 +31,13 @@ class SessionGuardianWorker(
         val rclone = Rclone(mContext)
 
         try {
-            Log.d(TAG, "Session Guardian started")
+            FLog.d(TAG, "Session Guardian started")
             FLog.d(TAG, "Checking session health for all remotes")
 
             // Get all remotes
             val remotes = rclone.getRemotes()
             if (remotes.isEmpty()) {
-                Log.d(TAG, "No remotes configured, skipping health check")
+                FLog.d(TAG, "No remotes configured, skipping health check")
                 return@withContext Result.success()
             }
 
@@ -48,7 +47,7 @@ class SessionGuardianWorker(
             // Dump config to find OAuth-enabled remotes
             val configDump = rclone.configDump()
             if (configDump == null || configDump.isEmpty()) {
-                Log.e(TAG, "Failed to dump rclone config")
+                FLog.e(TAG, "Failed to dump rclone config")
                 return@withContext Result.success()
             }
 
@@ -74,39 +73,35 @@ class SessionGuardianWorker(
                     }
 
                     oauthRemotesChecked++
-                    Log.d(TAG, "Checking session health for remote: $remoteName")
+                    FLog.d(TAG, "Checking session health for remote: $remoteName")
 
                     // Probe health using lsd with max-depth 1
                     // This is a lightweight operation that will trigger reAuthorize in Go backend if needed
                     val result = rclone.listDirectories(remoteName, 1)
 
                     if (result.isSuccess) {
-                        Log.d(TAG, "Session healthy for remote: $remoteName")
+                        FLog.d(TAG, "Session healthy for remote: $remoteName")
                     } else if (result.isNetworkError) {
                         // DNS failure, timeout, connection refused — NOT an auth problem.
                         // Don't alarm the user; the next periodic run will retry.
-                        Log.w(TAG, "Network error checking remote: $remoteName (exit code: ${result.exitCode}), skipping notification. stderr: ${result.stderr.take(200)}")
-                        FLog.w(TAG, "Network error for $remoteName, not a session issue")
+                        FLog.w(TAG, "Network error checking remote: $remoteName (exit code: ${result.exitCode}), skipping notification. stderr: ${result.stderr.take(200)}")
                     } else {
                         // rclone returns process exit codes (0/1/...) rather than HTTP status codes.
                         // A non-zero, non-network result means the probe failed after backend retry/re-auth attempts.
-                        Log.w(TAG, "Health check failed for remote: $remoteName (exit code: ${result.exitCode}). Manual reconnect may be required. stderr: ${result.stderr.take(200)}")
+                        FLog.w(TAG, "Health check failed for remote: $remoteName (exit code: ${result.exitCode}). Manual reconnect may be required. stderr: ${result.stderr.take(200)}")
                         failedHealthChecks++
                         val notifyManager = AppErrorNotificationManager(mContext)
                         notifyManager.showSessionExpiredNotification(remoteName)
                     }
 
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error checking remote ${remote.name}: ${e.message}", e)
                     FLog.e(TAG, "Error checking remote ${remote.name}", e)
                 }
             }
 
-            Log.d(TAG, "Session Guardian completed. Checked $oauthRemotesChecked OAuth remotes, failed checks: $failedHealthChecks")
             FLog.d(TAG, "Session Guardian completed. Checked: $oauthRemotesChecked, Failed: $failedHealthChecks")
 
         } catch (e: Exception) {
-            Log.e(TAG, "Session Guardian failed: ${e.message}", e)
             FLog.e(TAG, "Session Guardian failed", e)
             // Don't return failure - we want the worker to continue scheduling
         }

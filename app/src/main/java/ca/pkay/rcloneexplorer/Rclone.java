@@ -57,6 +57,7 @@ import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject;
 import ca.pkay.rcloneexplorer.rclone.Provider;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.LogRedactor;
 import ca.pkay.rcloneexplorer.util.SyncLog;
 import es.dmoral.toasty.Toasty;
 import io.github.x0b.safdav.SafAccessProvider;
@@ -263,10 +264,21 @@ public class Rclone {
         }
 
         StringBuilder stringBuilder = new StringBuilder(100);
+        boolean outputTruncated = false;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                stringBuilder.append(line).append("\n");
+                if (stringBuilder.length() < LogRedactor.MAX_DIAGNOSTIC_CHARS) {
+                    int remaining = LogRedactor.MAX_DIAGNOSTIC_CHARS - stringBuilder.length();
+                    if (line.length() + 1 > remaining) {
+                        stringBuilder.append(line, 0, Math.max(0, remaining - 1));
+                        outputTruncated = true;
+                    } else {
+                        stringBuilder.append(line).append("\n");
+                    }
+                } else {
+                    outputTruncated = true;
+                }
             }
         } catch (InterruptedIOException iioe) {
             FLog.i(TAG, "logErrorOutput: process died while reading. Log may be incomplete.");
@@ -278,7 +290,10 @@ public class Rclone {
             }
             return;
         }
-        String logOutput = stringBuilder.toString();
+        if (outputTruncated) {
+            stringBuilder.append("\n***diagnostic-output-truncated***");
+        }
+        String logOutput = LogRedactor.redact(stringBuilder.toString());
         log2File.log(logOutput);
         SyncLog.error(context, "Rclone operation", logOutput);
     }

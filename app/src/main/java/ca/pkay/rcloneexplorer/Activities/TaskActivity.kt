@@ -2,7 +2,6 @@ package ca.pkay.rcloneexplorer.Activities
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
@@ -31,6 +30,7 @@ import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.SpinnerAdapters.FilterSpinnerAdapter
 import ca.pkay.rcloneexplorer.util.ActivityHelper
+import ca.pkay.rcloneexplorer.util.FLog
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import es.dmoral.toasty.Toasty
 import java.io.UnsupportedEncodingException
@@ -98,7 +98,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 }
 
                 // Todo: check if this provider is still valid; search other occurences
-                Log.e("TaskActivity provider", "recieved path: $path")
+                FLog.e("TaskActivity provider", "received path: %s", path)
                 val provider = "content://io.github.x0b.rcx.vcp/tree/rclone/remotes/"
                 if (path.startsWith(provider)) {
                     val parts = path.substring(provider.length).split(":").toTypedArray()

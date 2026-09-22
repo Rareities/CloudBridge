@@ -1,6 +1,6 @@
 package ca.pkay.rcloneexplorer.rclone
 
-import android.util.Log
+import ca.pkay.rcloneexplorer.util.FLog
 import de.schuelken.cloudbridge.extensions.tag
 import org.json.JSONObject
 import java.util.Objects
@@ -59,7 +59,7 @@ class ProviderOption {
 
                 return item
             } catch (e: Exception) {
-                Log.e(tag(), data.toString(4))
+                FLog.e(tag(), "%s", data.toString(4))
             }
 
             return null

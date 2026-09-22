@@ -8,7 +8,6 @@ import android.os.Bundle
 import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
-import android.util.Log
 import android.util.TypedValue
 import android.view.ContextThemeWrapper
 import android.view.LayoutInflater
@@ -34,6 +33,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
+import ca.pkay.rcloneexplorer.util.FLog
 import ca.pkay.rcloneexplorer.Rclone.RCLONE_CONFIG_NAME_KEY
 import ca.pkay.rcloneexplorer.rclone.Provider
 import ca.pkay.rcloneexplorer.rclone.ProviderOption
@@ -84,7 +84,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         rclone = Rclone(this.context)
         mProvider = rclone!!.getProvider(mProviderTitle)
         if(mProvider == null) {
-            Log.e(this::class.java.simpleName, "Unknown Provider: $mProviderTitle")
+            FLog.e(this::class.java.simpleName, "Unknown Provider: $mProviderTitle")
             Toast.makeText(this.mContext, R.string.dynamic_config_unknown_error, Toast.LENGTH_LONG).show()
             requireActivity().finish()
         }
@@ -168,7 +168,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
 
     fun setSearchterm (term: String) {
         mOptionFilter = term
-        Log.e(TAG, "Filter:: $term")
+        FLog.e(TAG, "Filter:: $term")
         setUpForm()
     }
 
@@ -268,7 +268,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
                     setTextInputListener(input, it.name)
                 }
                 else -> {
-                    Log.e(this::class.java.simpleName, "Unknown Provideroption: ${it.type}")
+                    FLog.e(this::class.java.simpleName, "Unknown Provideroption: ${it.type}")
                     val unknownType = getAttachedEditText(it.name, layout)
                     //unknownType.hint = it.type
                     updateValue(unknownType, it)
@@ -299,7 +299,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
                     }
                 }
                 else -> {
-                    Log.e(TAG, "Input Class not supported! ${view::class.java}")
+                    FLog.e(TAG, "Input Class not supported! ${view::class.java}")
                 }
             }
         } else {
@@ -315,7 +315,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
                     (view as CheckBox).isChecked = mOptionMap[option.name].toBoolean()
                 }
                 else -> {
-                    Log.e(TAG, "Input Class not supported! ${view::class.java}")
+                    FLog.e(TAG, "Input Class not supported! ${view::class.java}")
                 }
             }
         }

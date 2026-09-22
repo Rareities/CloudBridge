@@ -28,6 +28,7 @@ import java.util.Collections;
 public class SyncLog {
 
     private static int loglength = 4;
+    private static final long MAX_LOG_BYTES = 1024L * 1024L;
 
     public static String TIMESTAMP = "timestamp";
     public static String TITLE = "title";
@@ -66,6 +67,9 @@ public class SyncLog {
     private static void appendLog(Context c, String entry){
 
         File log = new File(c.getFilesDir().getPath() + "/sync.log");
+        if (log.length() > MAX_LOG_BYTES && (!log.delete() || log.exists())) {
+            return;
+        }
         try {
             FileWriter writer = new FileWriter(log, true);
             writer.append(System.lineSeparator());
@@ -82,8 +86,8 @@ public class SyncLog {
         long now = System.currentTimeMillis();
         try {
             json.put(TIMESTAMP, now);
-            json.put(CONTENT, content);
-            json.put(TITLE, title);
+            json.put(CONTENT, LogRedactor.redact(content));
+            json.put(TITLE, LogRedactor.redact(title));
             json.put(TYPE, type);
         } catch (JSONException e) {
             e.printStackTrace();

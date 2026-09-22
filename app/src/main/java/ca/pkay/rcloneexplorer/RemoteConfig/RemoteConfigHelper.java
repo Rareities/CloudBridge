@@ -2,11 +2,11 @@ package ca.pkay.rcloneexplorer.RemoteConfig;
 
 import android.content.Context;
 import android.os.Environment;
-import android.util.Log;
 import android.widget.Toast;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.Rclone;
+import ca.pkay.rcloneexplorer.util.FLog;
 import es.dmoral.toasty.Toasty;
 import io.github.x0b.safdav.SafAccessProvider;
 import io.github.x0b.safdav.file.SafConstants;
@@ -61,7 +61,7 @@ public class RemoteConfigHelper {
                     errorOutput.append(line).append("\n");
                 }
             } catch (java.io.IOException e) {
-                Log.e("RemoteConfigHelper", "Error reading stderr", e);
+                FLog.e("RemoteConfigHelper", "Error reading stderr", e);
             }
         });
         errorReader.start();
@@ -85,8 +85,8 @@ public class RemoteConfigHelper {
         } catch (InterruptedException ignored) {}
         
         if (0 != exitCode) {
-            Log.e("RemoteConfigHelper", "rclone config create failed with exit code: " + exitCode);
-            Log.e("RemoteConfigHelper", "rclone stderr: " + errorOutput.toString());
+            FLog.e("RemoteConfigHelper", "rclone config create failed with exit code: %s", exitCode);
+            FLog.e("RemoteConfigHelper", "rclone stderr: %s", errorOutput.toString());
             Toasty.error(context, context.getString(R.string.error_creating_remote), Toast.LENGTH_SHORT, true).show();
         } else {
             Toasty.success(context, context.getString(R.string.remote_creation_success), Toast.LENGTH_SHORT, true).show();

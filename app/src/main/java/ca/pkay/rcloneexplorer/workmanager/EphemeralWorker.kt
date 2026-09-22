@@ -40,7 +40,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.random.Random
-import android.util.Log
 import android.webkit.MimeTypeMap
 import de.schuelken.cloudbridge.notifications.implementations.DeleteWorkerNotification
 import de.schuelken.cloudbridge.notifications.implementations.MoveWorkerNotification
@@ -257,8 +256,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             }
                         }
                     } catch (e: JSONException) {
-                        Log.e(tag(), "Error: the offending line: $line")
-                        //FLog.e(TAG, "onHandleIntent: error reading json", e)
+                        FLog.e(tag(), "Error: the offending line: $line")
                     }
                 }
             } catch (e: InterruptedIOException) {

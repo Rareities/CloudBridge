@@ -2,9 +2,9 @@ package ca.pkay.rcloneexplorer.notifications.support
 
 import android.content.Context
 import android.text.format.Formatter
-import android.util.Log
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.R
+import ca.pkay.rcloneexplorer.util.FLog
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -101,7 +101,7 @@ class StatusObject(var mContext: Context){
             mLogline = logLine
 
             var error = ErrorObject(getErrorObject(), getErrorMessage())
-            Log.e(TAG, error.mErrorObject + " - " + error.mErrorMessage)
+            FLog.e(TAG, "%s - %s", error.mErrorObject, error.mErrorMessage)
             mErrorList.add(error)
         }
 
@@ -262,7 +262,7 @@ class StatusObject(var mContext: Context){
 
     fun printErrors(){
         mErrorList.forEach {
-            Log.e(TAG, it.mErrorObject + " - " + it.mErrorMessage)
+            FLog.e(TAG, "%s - %s", it.mErrorObject, it.mErrorMessage)
         }
     }
 

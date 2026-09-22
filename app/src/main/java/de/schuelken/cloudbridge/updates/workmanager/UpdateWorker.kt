@@ -1,7 +1,6 @@
 package de.schuelken.cloudbridge.updates.workmanager
 
 import android.content.Context
-import android.util.Log
 import androidx.preference.PreferenceManager
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -9,6 +8,7 @@ import ca.pkay.rcloneexplorer.BuildConfig
 import ca.pkay.rcloneexplorer.R
 import de.schuelken.cloudbridge.extensions.tag
 import de.schuelken.cloudbridge.notifications.AppUpdateNotification
+import ca.pkay.rcloneexplorer.util.FLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -26,7 +26,7 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
 
     override suspend fun doWork(): Result {
 
-        Log.e(tag(), "Try to check updates...")
+        FLog.e(tag(), "Try to check updates...")
 
         // this is supposed to only run on startup and once a week.
         if(!checkForUpdates) {
@@ -45,7 +45,7 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
         try {
             checkGithubReleases()
         } catch (e: Exception) {
-            Log.e(tag(), "Error: ${e.message}")
+            FLog.e(tag(), "Error checking updates", e)
         }
 
         // Indicate whether the work finished successfully with the Result
@@ -71,7 +71,7 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
 
         OkHttpClient().newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                Log.e(tag(), "Release API returned HTTP ${response.code}")
+                FLog.e(tag(), "Release API returned HTTP ${response.code}")
                 return@withContext
             }
             val body = response.body?.string()
@@ -83,7 +83,7 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
             val newest = releases.getJSONObject(0)
             val tagName = newest.optString("tag_name")
             if (isNewerVersion(BuildConfig.VERSION_NAME, tagName)) {
-                Log.e(tag(), "Update found: $tagName")
+                FLog.e(tag(), "Update found: $tagName")
                 setFoundVersion(tagName)
                 setChangelog(newest.optString("body"))
                 notifyIfRequired()
@@ -123,7 +123,7 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
         if (ignoredVersion != lastFoundVersion){
             AppUpdateNotification(mContext).showNotification(lastFoundVersion)
         } else {
-            Log.e(tag(), "Hide this version, because it is ignored.")
+            FLog.e(tag(), "Hide this version, because it is ignored.")
         }
     }
 

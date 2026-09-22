@@ -4,6 +4,7 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.os.AsyncTask;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.LogRedactor;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -33,7 +34,7 @@ public class Log2File {
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         String currentDateTime = dateFormat.format(new Date());
 
-        String logMessage = currentDateTime + " - " + message + "\n";
+        String logMessage = currentDateTime + " - " + LogRedactor.redact(message) + "\n";
 
         new WriteToFile(logFile, logMessage).execute();
     }
