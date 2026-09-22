@@ -35,6 +35,13 @@ GitHub refresh on 2026-09-22/23 returned no open or closed PR entries and no wor
 for either Rareities repository. This is current connector evidence, not proof that CI is
 configured or that the source builds.
 
+The upstream rclone master moved beyond the handoff snapshot: `rclone/rclone` is now
+`1e92520076ccc319fdae29e6fdc6a75bd523b5a2`. GitHub comparison of Rareities `1583cce…` to
+that upstream head reports 170 upstream commits with no commits unique to the Rareities side
+(`merge_base` is `1583cce…`). This supports a possible fast-forward review, but does not
+authorize blindly replacing the fork or pushing remote history. The current upstream and
+Rareities `go.mod` files both require Go 1.26.0.
+
 The bundled Git executable has no `git-remote-https` helper. Direct archive download required
 approved network access. The archives did not contain upstream `.git` history, so each source
 tree was initialized locally from the verified archive and given an evidence-only baseline
@@ -88,7 +95,9 @@ Rareities/rclone revision and its required toolchain/dependency behavior are rev
 
 ## Next package
 
-WP01: independently update and validate the standalone Rareities/rclone engine. Before changing
-the CloudBridge pin, compare the fork with the selected upstream snapshot, preserve required
-Internxt/Proton behavior, record patch provenance, run engine tests, and resolve the Go 1.26
-toolchain requirement.
+WP01: independently update and validate the standalone Rareities/rclone engine. The current
+Rareities source builds with Go 1.26.8 and focused sync/operations, Proton and Internxt tests
+pass, but the full suite is not clean on this Windows environment. Before changing the
+CloudBridge pin, review the 170-commit upstream fast-forward candidate, preserve required
+Internxt/Proton behavior, record patch provenance, and decide whether a remote fork update is
+needed. Do not claim WP01 complete until that decision and its independent evidence are recorded.
