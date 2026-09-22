@@ -360,9 +360,45 @@ origin/master...HEAD` passed. Native rclone compilation, debug/release APKs, R8,
 firmware/API acceptance and live Proton remain `NOT RUN`. This is a reviewable local branch,
 not a completed application or authorization to push incomplete WP05 work.
 
+### WP05 continuation: listing/config drains and stop/restart safety
+
+CloudBridge commit `23b973e` moves directory listing and cached config-dump reads to a
+bounded text capture that drains both native pipes concurrently. Listing output is limited
+to 16 MiB and config JSON to 4 MiB; over-limit, incomplete-drain, timeout and cancelled
+results fail closed. Local/alias `lsjson` exit code 6 remains the explicit compatibility
+exception only when output is complete. The handle now refuses to report success if its
+output pump did not finish within a bounded grace period. JVM tests cover a full stdout
+pipe and a late output callback; these do not substitute for large-listing device tests.
+
+The same commit serializes ephemeral launch against stop requests, preventing a worker
+stopped before process assignment from starting a later transfer. RCD shutdown now attempts
+reap off the service main thread. It persists an exit-unconfirmed guard before teardown,
+retains the guard across service recreation, refuses a second RCD launch, and clears the
+guard only after confirmed exit. A late reap can be observed on a retry. A code review
+identified the pre-existing/new stop-race and service-recreation risks. Follow-up review
+confirmed those three fixes but found that an app-process death can leave the persisted RCD
+guard blocked indefinitely. This is an intentional fail-closed state until a recovery path
+can prove the old native process has ended; automatic unguarded clearing is prohibited.
+Android lifecycle instrumentation and an explicit verified recovery flow remain open gates.
+
+Verification on `codex/luna-implementation`: **46 JVM tests PASS**, `:app:lintOssDebug`
+**PASS** with its existing baseline, and `git diff --check` **PASS**. The history-preserving
+`codex/luna-engine` branch independently passed `go build -buildvcs=false -mod=readonly
+./...` and focused sync/operations/Proton/Internxt tests. Native APK, R8, Galaxy S26 and
+live Proton tests remain **NOT RUN**. Interactive config, OAuth/reconnect, binary streaming,
+other direct `Process` helpers, config lease, cross-operation locking and device lifecycle
+tests remain WP05 work; do not advance to WP06 or claim WP05 acceptance.
+
+CloudBridge commit `714a4e0` additionally moves durable `markRunning` before native sync
+launch, serializes both sync and ephemeral launch with stop requests, and makes receiver
+registration/unregistration idempotent across stop-before-start and connectivity callbacks.
+The post-change branch again passed **46 JVM tests** and Android lint (85 warnings, 6
+baseline-filtered errors). WorkManager/device stop-before-launch and process-death tests
+remain **NOT RUN**; the JVM suite cannot prove those Android lifecycle interleavings.
+
 ## Next work
 
-Continue WP05, not WP06: migrate listing/config/OAuth/reconnect/interactive and remaining direct
+Continue WP05, not WP06: migrate remaining config/OAuth/reconnect/interactive and direct
 `Rclone` helpers, then run process/resource fault and Android lifecycle tests. Keep the
 CloudBridge -> Rareities/rclone immutable pin; do not infer that the Git remote URL or a
 successful JVM build proves a native APK contains that fork. Only disposable data may be
