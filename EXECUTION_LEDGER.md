@@ -67,7 +67,7 @@ it must not be hidden behind a moving ref or a fallback URL.
 | Refresh repositories, PRs and CI | PASS | GitHub API evidence recorded above |
 | Source archive acquisition | PASS with limitation | Immutable branch SHA and archive hash recorded; no local Git history |
 | Standalone rclone build/tests | NOT RUN | Go executable is not installed or on PATH |
-| Android unit/lint/debug build | NOT RUN | Current Java is OpenJDK 8; project requires JDK 17; no local.properties/NDK was found |
+| Android unit/lint/debug build | NOT RUN | `gradlew --version` could not download Gradle 8.13 because sandbox network is denied; current Java is OpenJDK 8 while project requires JDK 17; no local.properties/NDK was found |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
 | Live Proton Drive disposable-area tests | NOT RUN | No Proton credentials or approved disposable remote area |
