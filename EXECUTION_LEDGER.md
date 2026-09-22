@@ -8,7 +8,7 @@ real Git checkout is available.
 ## Standing instructions
 
 - The complete handoff at `work/CloudBridge-rclone-Luna-Master-Handoff.md` is authoritative.
-- Work one bounded package at a time; the current package is WP00.
+- Work one bounded package at a time; WP01 is the current package for this ledger update.
 - Preserve Bisync, Proton Drive, scheduling, Obsidian and useful CloudBridge functionality.
 - Fix defects at their owning layer and test rclone independently before app integration.
 - Missing device or live Proton access is `NOT RUN`, never a pass.
@@ -103,15 +103,70 @@ Baseline identity, current app pin, repository instructions, CI/PR refresh and g
 recorded in the local evidence commits above. Standalone engine build and focused safety,
 Proton and Internxt tests now have evidence, but WP00 build/test acceptance remains incomplete
 because the Android toolchain, acceptance device/provider access and full upstream Git metadata
-are unavailable. The app pin is now changed locally, but native artifact provenance and
-integrated behavior are not claimed. The next bounded work is WP01 engine reconciliation and
-provider-parity review before any remote publication.
+are unavailable. The app pin is already changed locally in the pre-existing `f4f622e` commit;
+this WP01 update does not change it. Native artifact provenance and integrated behavior are not
+claimed. WP01 engine reconciliation follows below.
+
+## 2026-09-23 — WP01 engine reconciliation
+
+### Reconciliation evidence
+
+The fresh GitHub comparison is recorded in local evidence commits `30ba9ba` (CloudBridge)
+and `19d72e8` (rclone). Rareities/rclone master is
+`1583cce1e28340e5d064ed955179f5f2b31e7757`; upstream `rclone/rclone` master is
+`1e92520076ccc319fdae29e6fdc6a75bd523b5a2`. The comparison reports `ahead_by=170`,
+`behind_by=0`, `total_commits=170`, and merge base equal to the Rareities head. No fork-only
+commits are reported. Both `go.mod` files require Go `1.26.0`.
+
+The authoritative rclone source remains the verified Rareities master archive, represented by
+the local evidence baseline `b9ba7bb3bdd75ee01643c6d1dae3024fcd6cba61`. The local
+`19d72e8` commit is documentation only; it is not a substitute for the remote Rareities
+commit and no rclone source patch was added. Existing workspace caches were used with the
+verified Go 1.26.8 toolchain; no duplicate checkout or cache was created.
+
+### Independent engine validation
+
+Against the unchanged Rareities source, with `GOTOOLCHAIN=local`, `GOWORK=off`, the existing
+workspace module/build caches, and `-mod=readonly`:
+
+- `go version` — PASS: `go1.26.8 windows/amd64`.
+- `go build -buildvcs=false -mod=readonly ./...` — PASS, exit 0.
+- `go test -mod=readonly ./fs/sync ./fs/operations` — PASS, exit 0 (Go reported cached results).
+- `go test -mod=readonly ./backend/protondrive ./backend/internxt` — PASS, exit 0 (Go reported
+  cached results).
+
+The earlier broad `go test ./...` result remains `INCOMPLETE / environment failures` as
+recorded above: missing Windows test-server scripts, symlink privilege failures, and a
+WebDAV range behavior failure. Live Proton, Samsung acceptance, Android integration, and
+remote CI remain `NOT RUN`.
+
+### Bounded decision
+
+No safe rclone engine source change is justified by the current evidence. The candidate is a
+large unreviewed fast-forward rather than a targeted fix, the archive checkout has no full
+upstream Git history for a reviewable local fast-forward, no fork-only patch or reproducible
+defect was identified, and the unchanged engine passes the required independent build and
+focused safety/provider gates. The 170 upstream commits are therefore not blindly ported,
+cherry-picked, or silently substituted.
+
+The CloudBridge checkout already contains the exact Rareities URL/ref in `gradle.properties`
+from the pre-existing `f4f622e` commit. No further URL/ref change was made in WP01. The
+configuration pin is not integrated Android acceptance: clean Gradle/native verification,
+remote CI, device acceptance, and live Proton testing remain open or `NOT RUN` as recorded
+above.
+
+### WP01 status
+
+WP01 is **COMPLETE for the bounded reconciliation decision**: current Rareities/rclone is
+validated and retained without a source change, with provenance, tests, residual risks and
+the app-integration boundary recorded. This is not a claim that the 170 upstream commits,
+Android integration, live Proton workflow, acceptance device, or full test suite are complete.
+No later work package was started in this turn.
 
 ## Next package
 
-WP01: independently update and validate the standalone Rareities/rclone engine. The current
-Rareities source builds with Go 1.26.8 and focused sync/operations, Proton and Internxt tests
-pass, but the full suite is not clean on this Windows environment. Before changing the
-CloudBridge pin, review the 170-commit upstream fast-forward candidate, preserve required
-Internxt/Proton behavior, record patch provenance, and decide whether a remote fork update is
-needed. Do not claim WP01 complete until that decision and its independent evidence are recorded.
+No later package was started. Any next candidate must review the exact upstream
+`1e92520076ccc319fdae29e6fdc6a75bd523b5a2` changes (or another explicitly selected immutable
+revision), preserve Internxt/Proton and native compatibility, rerun independent gates, and
+then separately verify the existing CloudBridge -> Rareities/rclone pin. A moving branch or
+fallback to `thies2005/rclone` remains prohibited.
