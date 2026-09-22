@@ -83,6 +83,8 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private var sConnectivityChanged = false
 
     private var sRcloneProcess: NativeExecutionHandle? = null
+    private val nativeLaunchLock = Any()
+    @Volatile private var stopRequested = false
     private val statusObject = StatusObject(mContext)
     private var failureReason = FAILURE_REASON.NO_FAILURE
     private var endNotificationAlreadyPosted = false
@@ -132,21 +134,21 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).downloadFileOwned(
+                        launchOwnedIfRunning { Rclone(mContext).downloadFileOwned(
                             remoteItem,
                             fileItem,
                             target
-                        )
+                        ) }
                     }
                     Type.UPLOAD -> {
                         val target = inputData.getString(UPLOAD_TARGETPATH)
                         val file = inputData.getString(UPLOAD_FILE)
 
-                        sRcloneProcess = Rclone(mContext).uploadFileOwned(
+                        launchOwnedIfRunning { Rclone(mContext).uploadFileOwned(
                             remoteItem,
                             target,
                             file
-                        )
+                        ) }
                     }
                     Type.MOVE -> {
                         val target = inputData.getString(MOVE_TARGETPATH)
@@ -157,11 +159,11 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).moveToOwned(
+                        launchOwnedIfRunning { Rclone(mContext).moveToOwned(
                             remoteItem,
                             fileItem,
                             target
-                        )
+                        ) }
                     }
                     Type.DELETE -> {
                         val fileItem = getFileitemFromParcel(DELETE_FILE)
@@ -171,16 +173,21 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).deleteItemsOwned(
+                        launchOwnedIfRunning { Rclone(mContext).deleteItemsOwned(
                             remoteItem,
                             fileItem
-                        )
+                        ) }
                     }
                     }
                     if (sRcloneProcess != null && transferLocks != null) {
                         locksAttachedToExecution = sRcloneProcess!!.attachResource(transferLocks)
                     }
-                    handleSync(mTitle)
+                    if (stopRequested || isStopped) {
+                        sRcloneProcess?.cancelAndAwait(null, null)
+                        failureReason = FAILURE_REASON.CANCELLED
+                    } else {
+                        handleSync(mTitle)
+                    }
                 } finally {
                     if (!locksAttachedToExecution) {
                         transferLocks?.release()
@@ -203,6 +210,10 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     override fun onStopped() {
+        synchronized(nativeLaunchLock) {
+            stopRequested = true
+            sRcloneProcess?.cancel()
+        }
         super.onStopped()
         SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_sync_cancelled))
         SyncLog.info(mContext, mTitle, statusObject.toString())
@@ -214,6 +225,22 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
         sRcloneProcess?.cancelAndAwait(null, null)
         mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
         postSync()
+    }
+
+    private fun launchOwnedIfRunning(launch: () -> NativeExecutionHandle?): NativeExecutionHandle? {
+        synchronized(nativeLaunchLock) {
+            if (stopRequested || isStopped) {
+                failureReason = FAILURE_REASON.CANCELLED
+                return null
+            }
+            val started = launch()
+            sRcloneProcess = started
+            if (stopRequested || isStopped) {
+                started?.cancel()
+                failureReason = FAILURE_REASON.CANCELLED
+            }
+            return started
+        }
     }
 
     fun prepareNotificationManager(type: Type): WorkerNotification {

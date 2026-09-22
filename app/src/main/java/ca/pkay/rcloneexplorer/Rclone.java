@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.net.InetAddress;
 import java.util.zip.ZipEntry;
@@ -73,6 +74,9 @@ public class Rclone {
     private static final String TAG = "Rclone";
     private static final long MAX_BACKUP_ENTRY_BYTES = 4L * 1024L * 1024L;
     private static final long METADATA_COMMAND_TIMEOUT_MILLIS = 5L * 60L * 1000L;
+    private static final long LISTING_TIMEOUT_MILLIS = 15L * 60L * 1000L;
+    private static final int MAX_LISTING_JSON_CHARS = 16 * 1024 * 1024;
+    private static final int MAX_CONFIG_JSON_CHARS = 4 * 1024 * 1024;
     public static final int SYNC_DIRECTION_LOCAL_TO_REMOTE = 1;
     public static final int SYNC_DIRECTION_REMOTE_TO_LOCAL = 2;
     public static final int SERVE_PROTOCOL_HTTP = 1;
@@ -351,36 +355,22 @@ public class Rclone {
         } else {
             command = createCommandWithOptions("lsjson", remoteAndPath);
         }
-        String[] env = getRcloneEnv();
         JSONArray results;
-        Process process = null;
         try {
-            process = getRuntimeProcess(command, env);
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            process.waitFor();
+            CapturedText result = runBoundedTextCommand(command, getRcloneEnv(), "lsjson",
+                    MAX_LISTING_JSON_CHARS, LISTING_TIMEOUT_MILLIS);
             // For local/alias remotes, exit(6) is not a fatal error.
-            if (process.exitValue() != 0 && (process.exitValue() != 6 || !remote.isRemoteType(RemoteItem.LOCAL, RemoteItem.ALIAS))) {
-                logErrorOutput(process);
+            boolean allowedExitSix = result.outcome.getState() == NativeExecutionHandle.TerminalState.FAILED
+                    && Integer.valueOf(6).equals(result.outcome.getExitCode())
+                    && remote.isRemoteType(RemoteItem.LOCAL, RemoteItem.ALIAS);
+            if (result.exceededLimit || result.outcome.isOutputTruncated()
+                    || (!result.outcome.isSuccess() && !allowedExitSix)) {
+                FLog.e(TAG, "getDirectoryContent: listing ended with state %s",
+                        result.outcome.getState());
                 return null;
             }
-
-            String outputStr = output.toString();
-            results = new JSONArray(outputStr);
-
-        } catch (InterruptedException e) {
-            logErrorOutput(process);
-            FLog.d(TAG, "getDirectoryContent: Aborted refreshing folder");
-            return null;
+            results = new JSONArray(result.text);
         } catch (IOException | JSONException e) {
-            logErrorOutput(process);
             FLog.e(TAG, "getDirectoryContent: Could not get folder content", e);
             return null;
         }
@@ -408,7 +398,6 @@ public class Rclone {
                 FileItem fileItem = new FileItem(remote, filePath, fileName, fileSize, fileModTime, mimeType, fileIsDir, startAtRoot);
                 fileItemList.add(fileItem);
             } catch (JSONException e) {
-                logErrorOutput(process);
                 FLog.e(TAG, "getDirectoryContent: Could not decode JSON", e);
                 return null;
             }
@@ -486,31 +475,22 @@ public class Rclone {
             }
         }
         String[] command = createCommand("config", "dump");
-        StringBuilder output = new StringBuilder();
-        Process process = null;
         try {
-            process = getRuntimeProcess(command, getRcloneEnv());
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-            process.waitFor();
-            if (process.exitValue() != 0) {
+            CapturedText result = runBoundedTextCommand(command, getRcloneEnv(), "config-dump",
+                    MAX_CONFIG_JSON_CHARS, METADATA_COMMAND_TIMEOUT_MILLIS);
+            if (!result.outcome.isSuccess() || result.exceededLimit
+                    || result.outcome.isOutputTruncated()) {
                 Toasty.error(context, context.getString(R.string.error_getting_remotes), Toast.LENGTH_SHORT, true).show();
-                logErrorOutput(process);
                 return null;
             }
-            JSONObject parsed = new JSONObject(output.toString());
+            JSONObject parsed = new JSONObject(result.text);
             synchronized (this) {
                 cachedRemotesConfig = parsed;
                 cachedConfMtime = mtime;
                 cachedConfLength = length;
             }
             return parsed;
-        } catch (IOException | InterruptedException | JSONException e) {
-            logErrorOutput(process);
+        } catch (IOException | JSONException e) {
             FLog.e(TAG, "getRemotes: error retrieving remotes", e);
             return null;
         }
@@ -1297,6 +1277,40 @@ public class Rclone {
         String[] split = line.split("\\s+");
         return split[0].trim().isEmpty()
                 ? context.getString(R.string.hash_unsupported) : split[0];
+    }
+
+    private static final class CapturedText {
+        final String text;
+        final NativeExecutionHandle.Outcome outcome;
+        final boolean exceededLimit;
+
+        CapturedText(String text, NativeExecutionHandle.Outcome outcome, boolean exceededLimit) {
+            this.text = text;
+            this.outcome = outcome;
+            this.exceededLimit = exceededLimit;
+        }
+    }
+
+    /** Drain both pipes while retaining at most maxChars of stdout, including line separators. */
+    private CapturedText runBoundedTextCommand(String[] command, String[] env, String label,
+                                               int maxChars, long timeoutMillis) throws IOException {
+        StringBuilder output = new StringBuilder(Math.min(maxChars, 4096));
+        AtomicBoolean exceededLimit = new AtomicBoolean(false);
+        NativeExecutionHandle handle = NativeExecutionHandle.launch(command, env, label);
+        NativeExecutionHandle.Outcome outcome = handle.await(timeoutMillis, line -> {
+            if (exceededLimit.get()) {
+                return;
+            }
+            if (line.length() + 1 > maxChars - output.length()) {
+                exceededLimit.set(true);
+                return;
+            }
+            output.append(line).append('\n');
+        }, null);
+        boolean tooLarge = exceededLimit.get();
+        String captured = outcome.isConfirmed() && !outcome.isOutputTruncated() && !tooLarge
+                ? output.toString() : "";
+        return new CapturedText(captured, outcome, tooLarge);
     }
 
     /** A small text-only command: drain both pipes before reporting its first stdout line. */

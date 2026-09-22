@@ -274,7 +274,7 @@ public class RcloneRcd {
         boolean confirmed = true;
         if (null != rcd) {
             FLog.d(TAG, "Stopping Rclone");
-            confirmed = rcd.cancelAndAwait(null, null).isConfirmed();
+            confirmed = rcd.cancelAndAwait(null, null).isConfirmed() || rcd.hasConfirmedReap();
             unconfirmedStop = !confirmed;
         }
         if (null != jobsUpdateFuture) {

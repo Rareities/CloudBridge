@@ -13,14 +13,18 @@ import android.content.res.Configuration;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.SparseArray;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+import androidx.preference.PreferenceManager;
 
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.RcloneRcd;
@@ -36,6 +40,8 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     private static final String CHANNEL_ID = "ca.pkay.rcexplorer.rcd_channel";
     private static final String CHANNEL_NAME = "Rclone";
     private static final int PERSISTENT_NOTIFICATION_ID = 200;
+    private static final String RCD_RECOVERY_REQUIRED = "rcd_native_exit_unconfirmed";
+    private static volatile boolean processRecoveryRequired;
     public static final String ACTION_START_FOREGROUND = "ca.pkay.rcloneexplorer.RcdService.StartForeground";
     public static final String ACTION_STOP_FOREGROUND = "ca.pkay.rcloneexplorer.RcdService.StopForeground";
 
@@ -51,14 +57,15 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
      */
     private static final int ALIVE_SECONDS_CRITICAL = 30;
 
-    private RcloneRcd rcloneRcd;
-    private boolean shutdown;
+    private volatile RcloneRcd rcloneRcd;
+    private volatile boolean shutdown;
+    private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
     private volatile boolean available;
     private final Object onlineLock = new Object();
     private long initNanosTimestamp = 0;
     // Held only while VCP/rcd jobs are actively running, so the device does not enter Doze
     // and stall transfers with the screen off.
-    private TransferLocks activeTransferLocks;
+    private volatile TransferLocks activeTransferLocks;
 
     private final IBinder binder = new RcdBinder();
     private NotificationManagerCompat notificationManager;
@@ -77,6 +84,9 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
 
     @Override
     public void onRcdJobsUpdate(@NonNull SparseArray<RcloneRcd.JobStatusResponse> status) {
+        if (shutdownRequested.get() || processRecoveryRequired) {
+            return;
+        }
         onNotifyUse();
         if(shutdown) {
             FLog.w(TAG, "Unexpected jobs update after service shutdown, reviving service");
@@ -124,7 +134,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
             if (activeTransferLocks == null) {
                 activeTransferLocks = TransferLocks.acquire(this, "rcd");
             }
-        } else if (activeTransferLocks != null) {
+        } else if (!shutdownRequested.get() && activeTransferLocks != null) {
             activeTransferLocks.release();
             activeTransferLocks = null;
         }
@@ -176,9 +186,8 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
         shutdown = false;
         if (intent != null && ACTION_STOP_FOREGROUND.equals(intent.getAction())) {
             FLog.d(TAG, "Removing foreground service");
-            shutdown();
-            stopForeground(true);
-            stopSelf();
+            showNotification();
+            requestShutdown(true);
         } else {
             showNotification();
         }
@@ -207,8 +216,8 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
 
     @Override
     public void onDestroy() {
+        requestShutdown(false);
         super.onDestroy();
-        shutdown();
     }
 
     @Override
@@ -276,27 +285,69 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
         if (null != rcloneRcd) {
             if (!rcloneRcd.hasPendingJobs()) {
                 FLog.d(TAG, "No running jobs, killing service");
-                shutdown();
-                stopForeground(true);
-                stopSelf();
+                requestShutdown(true);
             }
         }
     }
 
-    private void shutdown() {
-        FLog.d(TAG, "Service shutting down");
-        boolean nativeStopped = true;
-        if (null != rcloneRcd) {
-            nativeStopped = rcloneRcd.stopRcd();
-            if (nativeStopped) {
-                rcloneRcd = null;
+    private void requestShutdown(boolean stopWhenConfirmed) {
+        if (!shutdownRequested.compareAndSet(false, true)) {
+            return;
+        }
+        RcloneRcd stopping = rcloneRcd;
+        if (stopping == null) {
+            // A recreated service does not own the old process. It must never clear a
+            // persisted guard merely because its own rcloneRcd field is empty.
+            if (!processRecoveryRequired && !PreferenceManager.getDefaultSharedPreferences(this)
+                    .getBoolean(RCD_RECOVERY_REQUIRED, false)) {
+                shutdown = true;
             }
+            if (stopWhenConfirmed) {
+                // This service owns no process. Leaving it foreground cannot confirm or
+                // clear the old guard, which remains persisted for the next instance.
+                stopForeground(true);
+                stopSelf();
+            }
+            shutdownRequested.set(false);
+            return;
         }
-        if (nativeStopped && activeTransferLocks != null) {
-            activeTransferLocks.release();
-            activeTransferLocks = null;
+        // Persist the conservative guard before any async stop. A new service instance must
+        // not launch another RCD after an unconfirmed exit or process death during teardown.
+        processRecoveryRequired = true;
+        boolean persisted = PreferenceManager.getDefaultSharedPreferences(this).edit()
+                .putBoolean(RCD_RECOVERY_REQUIRED, true).commit();
+        if (!persisted) {
+            FLog.e(TAG, "Could not persist RCD recovery guard; native restart remains blocked in process");
         }
-        shutdown = nativeStopped;
+        Thread reaper = new Thread(() -> {
+            boolean nativeStopped = stopping.stopRcd();
+            if (nativeStopped) {
+                boolean cleared = PreferenceManager.getDefaultSharedPreferences(this).edit()
+                        .remove(RCD_RECOVERY_REQUIRED).commit();
+                processRecoveryRequired = !cleared;
+                if (cleared) {
+                    rcloneRcd = null;
+                    if (activeTransferLocks != null) {
+                        activeTransferLocks.release();
+                        activeTransferLocks = null;
+                    }
+                    shutdown = true;
+                }
+            }
+            if (!nativeStopped || processRecoveryRequired) {
+                FLog.e(TAG, "RCD exit not confirmed or recovery guard could not be cleared");
+                shutdownRequested.set(false); // allow a later bounded retry, never a new RCD
+                return;
+            }
+            if (stopWhenConfirmed) {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    stopForeground(true);
+                    stopSelf();
+                });
+            }
+        }, "cloudbridge-rcd-shutdown");
+        reaper.setDaemon(true);
+        reaper.start();
     }
 
     /**
@@ -348,6 +399,11 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
 
     public RcloneRcd getLocalRcd() {
         synchronized (onlineLock) {
+            if (shutdownRequested.get() || processRecoveryRequired
+                    || PreferenceManager.getDefaultSharedPreferences(this)
+                    .getBoolean(RCD_RECOVERY_REQUIRED, false)) {
+                throw new IllegalStateException("Previous rcd exit requires recovery");
+            }
             if (rcloneRcd != null && rcloneRcd.hasUnconfirmedStop()) {
                 throw new IllegalStateException("Previous rcd exit was not confirmed");
             }

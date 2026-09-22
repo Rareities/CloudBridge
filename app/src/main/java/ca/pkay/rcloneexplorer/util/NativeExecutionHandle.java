@@ -30,6 +30,7 @@ public final class NativeExecutionHandle implements AutoCloseable {
 
     public static final long NO_TIMEOUT = 0L;
     public static final long DEFAULT_TERMINATION_GRACE_MILLIS = 1500L;
+    public static final long MIN_OUTPUT_DRAIN_GRACE_MILLIS = 5000L;
     public static final int MAX_CALLBACK_LINE_CHARS = 64 * 1024;
 
     public enum TerminalState {
@@ -199,7 +200,10 @@ public final class NativeExecutionHandle implements AutoCloseable {
             return acceptTerminal(new Outcome(TerminalState.UNCONFIRMED, null, outputTruncated), false);
         }
 
-        joinPumps(terminationGraceMillis);
+        boolean outputComplete = joinPumps(Math.max(terminationGraceMillis, MIN_OUTPUT_DRAIN_GRACE_MILLIS));
+        if (!outputComplete) {
+            outputTruncated = true;
+        }
         Integer exitCode = readExitCode();
         TerminalState state;
         if (interrupted) {
@@ -208,6 +212,8 @@ public final class NativeExecutionHandle implements AutoCloseable {
             state = TerminalState.TIMED_OUT;
         } else if (cancelRequested.get()) {
             state = TerminalState.CANCELLED;
+        } else if (!outputComplete) {
+            state = TerminalState.FAILED;
         } else {
             state = exitCode != null && exitCode == 0 ? TerminalState.SUCCEEDED : TerminalState.FAILED;
         }
@@ -231,6 +237,11 @@ public final class NativeExecutionHandle implements AutoCloseable {
     /** Returns the live state without transferring ownership of the underlying Process. */
     public boolean isRunning() {
         return outcome == null && isProcessAlive(process);
+    }
+
+    /** A later reap may confirm exit after a bounded caller reported UNCONFIRMED. */
+    public boolean hasConfirmedReap() {
+        return processReaped.getCount() == 0L && !isProcessAlive(process);
     }
 
     private void startPumps(@Nullable LineSink stdoutSink, @Nullable LineSink stderrSink) {
@@ -361,15 +372,17 @@ public final class NativeExecutionHandle implements AutoCloseable {
         reaper.start();
     }
 
-    private void joinPumps(long timeoutMillis) {
+    private boolean joinPumps(long timeoutMillis) {
+        boolean complete = false;
         try {
-            pumpsFinished.await(timeoutMillis, TimeUnit.MILLISECONDS);
+            complete = pumpsFinished.await(timeoutMillis, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
         // Closing the streams unblocks a late callback/pump without affecting a reaped process.
         try { process.getInputStream().close(); } catch (IOException ignored) { }
         try { process.getErrorStream().close(); } catch (IOException ignored) { }
+        return complete;
     }
 
     @Nullable

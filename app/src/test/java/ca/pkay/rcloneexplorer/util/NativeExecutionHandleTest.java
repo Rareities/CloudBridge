@@ -45,6 +45,19 @@ public class NativeExecutionHandleTest {
     }
 
     @Test
+    public void drainsFullStdoutPipeBeforeReportingSuccess() {
+        ScriptedProcess process = new ScriptedProcess(4000, false, false, false, true);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "stdout-pipe-test", 100);
+        AtomicInteger lines = new AtomicInteger();
+
+        NativeExecutionHandle.Outcome outcome = handle.await(5000,
+                line -> lines.incrementAndGet(), null);
+
+        assertTrue(outcome.isSuccess());
+        assertEquals(4000, lines.get());
+    }
+
+    @Test
     public void cancellationReapsProcessBeforeReleasingResource() {
         ScriptedProcess process = new ScriptedProcess(0, true, false);
         NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "cancel-test", 50);
@@ -83,10 +96,12 @@ public class NativeExecutionHandleTest {
 
         assertEquals(NativeExecutionHandle.TerminalState.UNCONFIRMED,
                 handle.await(5, null, null).getState());
+        assertFalse(handle.hasConfirmedReap());
         assertEquals(0, resource.closeCount.get());
 
         process.complete(0);
         assertTrue(resource.closed.await(2, TimeUnit.SECONDS));
+        assertTrue(handle.hasConfirmedReap());
         assertEquals(1, resource.closeCount.get());
     }
 
@@ -155,6 +170,32 @@ public class NativeExecutionHandleTest {
         }
     }
 
+    @Test
+    public void slowOutputCallbackCannotTurnIncompleteDrainIntoSuccess() throws Exception {
+        ScriptedProcess process = new ScriptedProcess(1, false, false);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "late-callback-test", 10);
+        CountDownLatch callbackEntered = new CountDownLatch(1);
+        CountDownLatch releaseCallback = new CountDownLatch(1);
+        CompletableFuture<NativeExecutionHandle.Outcome> completion = CompletableFuture.supplyAsync(
+                () -> handle.await(1000, null, line -> {
+                    callbackEntered.countDown();
+                    try {
+                        releaseCallback.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }));
+
+        try {
+            assertTrue(callbackEntered.await(1, TimeUnit.SECONDS));
+            NativeExecutionHandle.Outcome outcome = completion.get(8, TimeUnit.SECONDS);
+            assertEquals(NativeExecutionHandle.TerminalState.FAILED, outcome.getState());
+            assertTrue(outcome.isOutputTruncated());
+        } finally {
+            releaseCallback.countDown();
+        }
+    }
+
     private static final class CountingResource implements AutoCloseable {
         private final AtomicInteger closeCount = new AtomicInteger();
         private final CountDownLatch closed = new CountDownLatch(1);
@@ -185,6 +226,11 @@ public class NativeExecutionHandleTest {
 
         private ScriptedProcess(int lines, boolean waitForDestroy, boolean ignoreDestroy,
                                 boolean ignoreForcedDestroy) {
+            this(lines, waitForDestroy, ignoreDestroy, ignoreForcedDestroy, false);
+        }
+
+        private ScriptedProcess(int lines, boolean waitForDestroy, boolean ignoreDestroy,
+                                boolean ignoreForcedDestroy, boolean writeStdout) {
             try {
                 stdoutWriter = new PipedOutputStream(stdout);
                 stderrWriter = new PipedOutputStream(stderr);
@@ -195,10 +241,11 @@ public class NativeExecutionHandleTest {
             this.ignoreForcedDestroy = ignoreForcedDestroy;
             writer = new Thread(() -> {
                 try {
+                    PipedOutputStream output = writeStdout ? stdoutWriter : stderrWriter;
                     for (int i = 0; i < lines; i++) {
-                        stderrWriter.write(("{\"line\":" + i + "}\n").getBytes());
+                        output.write(("{\"line\":" + i + "}\n").getBytes());
                     }
-                    stderrWriter.flush();
+                    output.flush();
                     if (waitForDestroy) {
                         finished.await();
                     } else {
