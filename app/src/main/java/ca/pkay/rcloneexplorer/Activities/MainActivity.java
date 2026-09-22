@@ -59,6 +59,7 @@ import java.util.UUID;
 
 import ca.pkay.rcloneexplorer.AppShortcutsHelper;
 import ca.pkay.rcloneexplorer.BuildConfig;
+import ca.pkay.rcloneexplorer.Database.json.Exporter;
 import ca.pkay.rcloneexplorer.Database.json.Importer;
 import ca.pkay.rcloneexplorer.workmanager.SessionGuardianScheduler;
 import ca.pkay.rcloneexplorer.Database.json.SharedPreferencesBackup;
@@ -738,42 +739,79 @@ public class MainActivity extends AppCompatActivity
             loadingDialog.show(getSupportFragmentManager(), "loading dialog");
         }
 
-        //todo: Check shared preferences if they will be overridden by the onPostExecute
-        //todo: This assumes that zip-files are uncorrupted. That means that if the rclone.conf is valid,
-        //todo: but the jsons are not, we import half a configuration package.
-
         @Override
         protected Boolean doInBackground(Uri... uris) {
 
             ContentResolver resolver = context.getContentResolver();
             String mime = resolver.getType(uris[0]);
 
-            if(mime.equals("application/zip")) {
+            if("application/zip".equals(mime)) {
+                String importedDatabase = null;
+                String importedPreferences = null;
+                String previousDatabase = null;
+                String previousPreferences = null;
+                File stagedConfig = null;
+                File previousConfig = null;
+                boolean storesChanged = false;
                 try {
-                    boolean validRclone = rclone.copyConfigFileFromZip(uris[0]);
-                    if(!validRclone) {
+                    // Read and validate every part before touching the current configuration.
+                    importedDatabase = rclone.readDatabaseJson(uris[0]);
+                    importedPreferences = rclone.readSharedPrefs(uris[0]);
+                    Importer.validate(importedDatabase);
+                    SharedPreferencesBackup.validate(importedPreferences);
+
+                    stagedConfig = rclone.stageConfigFileFromZip(uris[0]);
+                    if(stagedConfig == null) {
                         statusCode = FAILURE_ZIP_INVALID_CONF;
                         return false;
                     }
-                    statusCode = SUCCESS_IMPORT;
-                } catch (Exception e) {
-                    statusCode = FAILURE_ZIP_MISSING_CONF;
-                    return false;
-                }
 
-                try {
-                    String json = rclone.readDatabaseJson(uris[0]);
-                    Importer.importJson(json, context);
-                    json = rclone.readSharedPrefs(uris[0]);
-                    SharedPreferencesBackup.importJson(json, context);
+                    // Keep a recoverable snapshot for the cross-store commit below.
+                    previousDatabase = Exporter.create(context);
+                    previousPreferences = SharedPreferencesBackup.export(context);
+                    previousConfig = rclone.snapshotConfigFile();
+
+                    storesChanged = true;
+                    Importer.importJson(importedDatabase, context);
+                    SharedPreferencesBackup.importJson(importedPreferences, context);
+                    rclone.commitStagedConfigFile(stagedConfig);
+                    stagedConfig = null;
+                    if (previousConfig != null) {
+                        previousConfig.delete();
+                        previousConfig = null;
+                    }
+                    statusCode = SUCCESS_IMPORT;
+                    return true;
                 } catch (JSONException e) {
                     statusCode = FAILURE_ZIP_INVALID_JSON;
-                    return false;
                 } catch (Exception e) {
                     statusCode = FAILURE_ZIP_NO_JSON;
-                    return false;
+                    FLog.e(TAG, "Backup import failed; attempting rollback", e);
                 }
-                return true;
+
+                // If any later part failed, restore every store that may have changed.
+                try {
+                    if (previousDatabase != null) {
+                        Importer.importJson(previousDatabase, context);
+                    }
+                    if (previousPreferences != null) {
+                        SharedPreferencesBackup.importJson(previousPreferences, context);
+                    }
+                    if (storesChanged) {
+                        rclone.restoreConfigSnapshot(previousConfig);
+                    }
+                } catch (Exception rollbackError) {
+                    FLog.e(TAG, "Backup rollback failed; configuration may require recovery", rollbackError);
+                    statusCode = FAILURE_UNSPECIFIED;
+                } finally {
+                    if (previousConfig != null) {
+                        previousConfig.delete();
+                    }
+                }
+                if (stagedConfig != null && stagedConfig.exists()) {
+                    stagedConfig.delete();
+                }
+                return false;
             }
 
             try {

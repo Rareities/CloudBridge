@@ -26,6 +26,7 @@ import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
 import java.util.ArrayList
+import java.util.HashMap
 
 class DatabaseHandler(context: Context?) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -423,6 +424,94 @@ class DatabaseHandler(context: Context?) :
         val retcode = db.delete(Filter.TABLE_NAME, selection, selectionArgs)
         db.close()
         return retcode
+    }
+
+    /**
+     * Replaces the user-owned task configuration as one SQLite transaction.
+     *
+     * Imported row ids are intentionally not reused.  This keeps an import from
+     * accidentally colliding with a partially migrated database and lets the
+     * references between filters, tasks and triggers be remapped after all rows
+     * have been validated by the importer.
+     */
+    fun replaceAll(
+        importedTriggers: List<Trigger>,
+        importedFilters: List<Filter>,
+        importedTasks: List<Task>
+    ) {
+        val db = writableDatabase
+        val filterIds = HashMap<Long, Long>()
+        val taskIds = HashMap<Long, Long>()
+        val insertedTasks = ArrayList<Pair<Long, Task>>()
+
+        db.beginTransaction()
+        try {
+            db.delete(Trigger.TABLE_NAME, null, null)
+            db.delete(Task.TABLE_NAME, null, null)
+            db.delete(Filter.TABLE_NAME, null, null)
+
+            for (filter in importedFilters) {
+                val rowId = db.insertOrThrow(Filter.TABLE_NAME, null, getFilterContentValues(filter))
+                filterIds[filter.id] = rowId
+            }
+
+            for (task in importedTasks) {
+                val values = getTaskContentValues(task)
+                val importedFilterId = task.filterId
+                if (importedFilterId == null) {
+                    values.putNull(Task.COLUMN_NAME_FILTER_ID)
+                } else {
+                    val filterId = filterIds[importedFilterId]
+                        ?: throw IllegalArgumentException("Task references an unknown filter")
+                    values.put(Task.COLUMN_NAME_FILTER_ID, filterId)
+                }
+                // Follow-up tasks are filled in after every task has a fresh id.
+                values.putNull(Task.COLUMN_NAME_ONFAIL_FOLLOWUP)
+                values.putNull(Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP)
+                val rowId = db.insertOrThrow(Task.TABLE_NAME, null, values)
+                taskIds[task.id] = rowId
+                insertedTasks.add(Pair(rowId, task))
+            }
+
+            for ((rowId, task) in insertedTasks) {
+                val values = ContentValues()
+                putMappedTaskReference(values, Task.COLUMN_NAME_ONFAIL_FOLLOWUP, task.onFailFollowup, taskIds)
+                putMappedTaskReference(values, Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP, task.onSuccessFollowup, taskIds)
+                db.update(
+                    Task.TABLE_NAME,
+                    values,
+                    Task.COLUMN_NAME_ID + " = ?",
+                    arrayOf(rowId.toString())
+                )
+            }
+
+            for (trigger in importedTriggers) {
+                val targetId = taskIds[trigger.triggerTarget]
+                    ?: throw IllegalArgumentException("Trigger references an unknown task")
+                val values = getTriggerContentValues(trigger)
+                values.put(Trigger.COLUMN_NAME_TARGET, targetId)
+                db.insertOrThrow(Trigger.TABLE_NAME, null, values)
+            }
+
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
+    }
+
+    private fun putMappedTaskReference(
+        values: ContentValues,
+        column: String,
+        importedId: Long?,
+        taskIds: HashMap<Long, Long>
+    ) {
+        if (importedId == null) {
+            values.putNull(column)
+        } else {
+            values.put(column, taskIds[importedId]
+                ?: throw IllegalArgumentException("Task references an unknown follow-up task"))
+        }
     }
 
     private fun getFilterContentValuesWithID(t: Filter): ContentValues {

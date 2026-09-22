@@ -14,6 +14,7 @@ import android.util.SparseArray;
 import androidx.annotation.IntDef;
 import androidx.preference.PreferenceManager;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -77,6 +78,8 @@ public class RcloneRcd {
     private final Context context;
     //private final Log2File log2File;
     private final ObjectMapper mapper;
+    private final ConfigSecretStore configSecretStore;
+    private volatile String configPassword;
 
     private final String configPath;
     private final String rclone;
@@ -107,6 +110,13 @@ public class RcloneRcd {
         this.jobsUpdateHandler = handler;
         configPath = context.getFilesDir().getPath() + "/rclone.conf";
         rclone = context.getApplicationInfo().nativeLibraryDir + "/librclone.so";
+        configSecretStore = new ConfigSecretStore(context);
+        try {
+            configPassword = configSecretStore.load();
+        } catch (Exception e) {
+            configPassword = null;
+            FLog.w(TAG, "Unable to unlock stored rclone config password for rcd");
+        }
         mapper = new ObjectMapper();
         mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
         mapper.setVisibility(PropertyAccessor.FIELD, JsonAutoDetect.Visibility.NON_PRIVATE);
@@ -200,6 +210,10 @@ public class RcloneRcd {
         environmentValues.add("SSL_CERT_DIR=/system/etc/security/cacerts");
 
         environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
+
+        if (configPassword != null && !configPassword.isEmpty()) {
+            environmentValues.add("RCLONE_CONFIG_PASS=" + configPassword);
+        }
 
         return environmentValues.toArray(new String[0]);
     }
