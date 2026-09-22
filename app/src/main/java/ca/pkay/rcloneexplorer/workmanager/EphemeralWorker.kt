@@ -84,6 +84,8 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
     private var sRcloneProcess: NativeExecutionHandle? = null
     private val nativeLaunchLock = Any()
+    private val receiverLock = Any()
+    private var receiverRegistered = false
     @Volatile private var stopRequested = false
     private val statusObject = StatusObject(mContext)
     private var failureReason = FAILURE_REASON.NO_FAILURE
@@ -222,8 +224,17 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     private fun finishWork() {
+        synchronized(nativeLaunchLock) {
+            stopRequested = true
+            sRcloneProcess?.cancel()
+        }
         sRcloneProcess?.cancelAndAwait(null, null)
-        mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
+        synchronized(receiverLock) {
+            if (receiverRegistered) {
+                mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
+                receiverRegistered = false
+            }
+        }
         postSync()
     }
 
@@ -453,7 +464,12 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private fun registerBroadcastReceivers() {
         val intentFilter = IntentFilter()
         intentFilter.addAction(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION)
-        mContext.registerReceiver(connectivityChangeBroadcastReceiver, intentFilter)
+        synchronized(receiverLock) {
+            if (!stopRequested && !isStopped && !receiverRegistered) {
+                mContext.registerReceiver(connectivityChangeBroadcastReceiver, intentFilter)
+                receiverRegistered = true
+            }
+        }
     }
 
     private val connectivityChangeBroadcastReceiver: BroadcastReceiver =

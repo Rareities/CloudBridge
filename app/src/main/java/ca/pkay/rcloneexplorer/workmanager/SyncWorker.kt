@@ -84,6 +84,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private var sConnectivityChanged = false
 
     private var sRcloneProcess: NativeExecutionHandle? = null
+    private val nativeLaunchLock = Any()
+    private val receiverLock = Any()
+    private var receiverRegistered = false
+    @Volatile private var stopRequested = false
     private val statusObject = StatusObject(mContext)
     private var failureReason = FAILURE_REASON.NO_FAILURE
     private var endNotificationAlreadyPosted = false
@@ -172,21 +176,48 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     }
 
     override fun onStopped() {
+        synchronized(nativeLaunchLock) {
+            stopRequested = true
+            sRcloneProcess?.cancel()
+        }
         super.onStopped()
         SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_sync_cancelled))
         SyncLog.info(mContext, mTitle, statusObject.toString())
         failureReason = FAILURE_REASON.CANCELLED
-        if (::mTask.isInitialized) {
-            finishWork()
-        }
+        finishWork()
     }
 
     private fun finishWork() {
+        synchronized(nativeLaunchLock) {
+            stopRequested = true
+            sRcloneProcess?.cancel()
+        }
         sRcloneProcess?.cancelAndAwait(null, null)?.let {
             if (!it.isConfirmed) nativeCompletionUnconfirmed = true
         }
-        mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
+        synchronized(receiverLock) {
+            if (receiverRegistered) {
+                mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
+                receiverRegistered = false
+            }
+        }
         postSync()
+    }
+
+    private fun launchOwnedIfRunning(launch: () -> NativeExecutionHandle?): NativeExecutionHandle? {
+        synchronized(nativeLaunchLock) {
+            if (stopRequested || isStopped) {
+                failureReason = FAILURE_REASON.CANCELLED
+                return null
+            }
+            val started = launch()
+            sRcloneProcess = started
+            if (stopRequested || isStopped) {
+                started?.cancel()
+                failureReason = FAILURE_REASON.CANCELLED
+            }
+            return started
+        }
     }
 
     private fun handleTask() {
@@ -210,7 +241,17 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 val taskFilterList = taskFilter?.getFilters() ?: ArrayList()
                 val isCloudToCloud = mTask.direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
                         || mTask.direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
-                sRcloneProcess = if (isCloudToCloud) {
+                if (stopRequested || isStopped) {
+                    failureReason = FAILURE_REASON.CANCELLED
+                    return
+                }
+                if (durableRunId != null && durableRunOwnerToken != null &&
+                    !mRunRepository.markRunning(durableRunId!!, durableRunOwnerToken!!)) {
+                    failureReason = FAILURE_REASON.RCLONE_ERROR
+                    log("Sync: durable run was no longer owned")
+                    return
+                }
+                launchOwnedIfRunning { if (isCloudToCloud) {
                     val remoteItem2 = RemoteItem(mTask.remoteId2, mTask.remoteType2, "")
                     mRclone.syncOwned(
                         remoteItem,
@@ -234,22 +275,21 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                         mTask.deleteExcluded,
                         mTask.transfers?.toString()
                     )
-                }
+                } }
                 if (sRcloneProcess == null) {
-                    failureReason = FAILURE_REASON.RCLONE_ERROR
+                    if (failureReason != FAILURE_REASON.CANCELLED) {
+                        failureReason = FAILURE_REASON.RCLONE_ERROR
+                    }
                     log("Sync: Rclone process could not be started for direction ${mTask.direction}")
                     return
                 }
                 if (transferLocks != null) {
                     locksAttachedToExecution = sRcloneProcess!!.attachResource(transferLocks)
                 }
-                if (durableRunId != null && durableRunOwnerToken != null &&
-                    !mRunRepository.markRunning(durableRunId!!, durableRunOwnerToken!!)) {
+                if (stopRequested || isStopped) {
                     val outcome = sRcloneProcess?.cancelAndAwait(null, null)
                     nativeCompletionUnconfirmed = outcome == null || !outcome.isConfirmed
-                    sRcloneProcess = null
-                    failureReason = FAILURE_REASON.RCLONE_ERROR
-                    log("Sync: durable run was no longer owned")
+                    failureReason = FAILURE_REASON.CANCELLED
                     return
                 }
                 handleSync(mTitle)
@@ -576,7 +616,12 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private fun registerBroadcastReceivers() {
         val intentFilter = IntentFilter()
         intentFilter.addAction(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION)
-        mContext.registerReceiver(connectivityChangeBroadcastReceiver, intentFilter)
+        synchronized(receiverLock) {
+            if (!stopRequested && !isStopped && !receiverRegistered) {
+                mContext.registerReceiver(connectivityChangeBroadcastReceiver, intentFilter)
+                receiverRegistered = true
+            }
+        }
     }
 
     private val connectivityChangeBroadcastReceiver: BroadcastReceiver =
