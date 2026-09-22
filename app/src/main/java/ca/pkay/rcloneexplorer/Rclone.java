@@ -77,6 +77,7 @@ public class Rclone {
     private static final long LISTING_TIMEOUT_MILLIS = 15L * 60L * 1000L;
     private static final int MAX_LISTING_JSON_CHARS = 16 * 1024 * 1024;
     private static final int MAX_CONFIG_JSON_CHARS = 4 * 1024 * 1024;
+    private static final int MAX_ABOUT_JSON_CHARS = 256 * 1024;
     public static final int SYNC_DIRECTION_LOCAL_TO_REMOTE = 1;
     public static final int SYNC_DIRECTION_REMOTE_TO_LOCAL = 2;
     public static final int SERVE_PROTOCOL_HTTP = 1;
@@ -1359,29 +1360,20 @@ public class Rclone {
     public AboutResult aboutRemote(RemoteItem remoteItem) {
         String remoteName = remoteItem.getName() + ':';
         String[] command = createCommand("about", "--json", remoteName);
-        StringBuilder output = new StringBuilder();
         AboutResult stats;
-        Process process;
         JSONObject aboutJSON;
 
         try {
-            process = getRuntimeProcess(command, getRcloneEnv());
-            try(BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))){
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-            process.waitFor();
-            if (0 != process.exitValue()) {
-                FLog.e(TAG, "aboutRemote: rclone error, exit(%d)", process.exitValue());
-                FLog.e(TAG, "aboutRemote: ", output);
-                logErrorOutput(process);
+            CapturedText result = runBoundedTextCommand(command, getRcloneEnv(), "about",
+                    MAX_ABOUT_JSON_CHARS, METADATA_COMMAND_TIMEOUT_MILLIS);
+            if (!result.outcome.isSuccess() || result.exceededLimit
+                    || result.outcome.isOutputTruncated()) {
+                FLog.e(TAG, "aboutRemote: native command ended with state %s",
+                        result.outcome.getState());
                 return new AboutResult();
             }
-
-            aboutJSON = new JSONObject(output.toString());
-        } catch (IOException | InterruptedException | JSONException e) {
+            aboutJSON = new JSONObject(result.text);
+        } catch (IOException | JSONException e) {
             FLog.e(TAG, "aboutRemote: unexpected error", e);
             return new AboutResult();
         }
@@ -1403,27 +1395,17 @@ public class Rclone {
 
     public String configDump() {
         String[] command = createCommand("config", "dump");
-        StringBuilder output = new StringBuilder();
-        Process process;
-
         try {
-            process = getRuntimeProcess(command, getRcloneEnv());
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                FLog.e(TAG, "configDump: rclone error, exit(%d)", process.exitValue());
-                logErrorOutput(process);
+            CapturedText result = runBoundedTextCommand(command, getRcloneEnv(), "config-dump",
+                    MAX_CONFIG_JSON_CHARS, METADATA_COMMAND_TIMEOUT_MILLIS);
+            if (!result.outcome.isSuccess() || result.exceededLimit
+                    || result.outcome.isOutputTruncated()) {
+                FLog.e(TAG, "configDump: native command ended with state %s",
+                        result.outcome.getState());
                 return null;
             }
-
-            return output.toString();
-        } catch (IOException | InterruptedException e) {
+            return result.text;
+        } catch (IOException e) {
             FLog.e(TAG, "configDump: unexpected error", e);
             return null;
         }
@@ -1556,35 +1538,16 @@ public class Rclone {
 
     public Boolean decryptConfig(String password) {
         String[] command = createCommand("--ask-password=false", "config", "show");
-        Process process;
-
+        NativeExecutionHandle handle;
         try {
-            process = getRuntimeProcess(command, getRcloneEnv("RCLONE_CONFIG_PASS=" + password));
+            handle = NativeExecutionHandle.launch(command,
+                    getRcloneEnv("RCLONE_CONFIG_PASS=" + password), "decrypt-config");
         } catch (IOException e) {
             FLog.e(TAG, "decryptConfig: error running rclone", e);
             return false;
         }
-
-        Thread stdoutDrain = drain(process.getInputStream());
-        Thread stderrDrain = drain(process.getErrorStream());
-        stdoutDrain.start();
-        stderrDrain.start();
-        try {
-            process.waitFor();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            process.destroy();
-            FLog.e(TAG, "decryptConfig: error waiting for rclone", e);
-            return false;
-        }
-        try {
-            stdoutDrain.join(1000);
-            stderrDrain.join(1000);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        if (process.exitValue() != 0) {
+        // Do not persist or log the plaintext config/show output.
+        if (!handle.await(METADATA_COMMAND_TIMEOUT_MILLIS, null, null).isSuccess()) {
             return false;
         }
 
@@ -1597,19 +1560,6 @@ public class Rclone {
             return false;
         }
         return true;
-    }
-
-    private static Thread drain(final InputStream stream) {
-        return new Thread(() -> {
-            try (InputStream input = stream) {
-                byte[] buffer = new byte[4096];
-                while (input.read(buffer) != -1) {
-                    // Drain without retaining config plaintext or secret-bearing stderr.
-                }
-            } catch (IOException ignored) {
-                // The process may close the pipe while it exits.
-            }
-        }, "rclone-config-drain");
     }
 
     public boolean isConfigFileCreated() {
