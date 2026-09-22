@@ -412,10 +412,43 @@ post-change branch passed **47 JVM tests** and Android lint (85 warnings, 6
 baseline-filtered errors). Session-guardian behavior on live Proton, timeout and process
 death remains **NOT RUN**.
 
+### WP05 execution milestone — 2026-09-23
+
+CloudBridge commit `0337d85` migrates interactive config creation/update, OAuth/reconnect,
+metadata/mutation helpers, settings diagnostics and VCP streaming to the shared
+`NativeExecutionHandle`. Interactive pipes have exclusive ownership and are handed back to
+bounded drainers before reap; upload/download pipes are owned and cancellation-aware. OAuth's
+fixed-port reservation now stops and confirms reap of the previous process before launching
+the next attempt. Reconnect cleanup waits for the runner and process. Prompt/password/input
+transcripts and raw process environment logging remain excluded. Raw `Process` construction
+and lifecycle methods are now confined to private Rclone launch plumbing and the central
+handle; unrelated `android.os.Process` calls are process self-diagnostics/termination.
+
+Validation: on 2026-09-23, `:app:testOssDebugUnitTest :app:lintOssDebug --no-daemon
+-Pkotlin.compiler.execution.strategy=in-process` passed; the XML report contains 53 tests,
+0 failures and 0 errors across 11 suites. Lint's configured baseline continues to filter
+pre-existing findings; no new unfiltered error was reported. `:rclone:buildAll` was up to
+date in that incremental run; a prior full build compiled arm64-v8a, armeabi-v7a, x86 and
+x86_64. Standalone Go build, focused sync/operations/Proton/Internxt tests, Proton tests
+repeated 100 times and `go vet` passed on `codex/luna-engine`.
+
+The provisional universal debug APK contains all four ABIs and SHA-256
+`CA9DD6D6B413359A5A4E0CBA1F64DA2BD4993CD6FECA2BE3288ADBDDC9FC6A27`. It is debug-signed and
+embeds rclone base pin `1583cce1e28340e5d064ed955179f5f2b31e7757`; it is not a release
+candidate. No local release keystore/signing environment is configured. No Android device,
+AVD or system image is present, so lifecycle instrumentation and Galaxy S26 / One UI
+acceptance are `NOT RUN`. Live Proton/official-client tests are also `NOT RUN`; no Proton
+credentials or data were used. An unconfirmed RCD exit intentionally remains guarded, but
+post-app-process-death recovery is still open.
+
+WP05 implementation is sufficiently migrated to proceed to WP06, while lifecycle/recovery
+and real-device acceptance remain explicit open gates. Do not treat Gradle `UP-TO-DATE` as a
+fresh test execution; 53/53 is from the last executed full test result.
+
 ## Next work
 
-Continue WP05, not WP06: migrate remaining config/OAuth/reconnect/interactive and direct
-`Rclone` helpers, then run process/resource fault and Android lifecycle tests. Keep the
-CloudBridge -> Rareities/rclone immutable pin; do not infer that the Git remote URL or a
-successful JVM build proves a native APK contains that fork. Only disposable data may be
-used for later live Proton testing; verify the target scope or create a unique subdirectory.
+Begin WP06 using the WP05 owner boundary. Revisit WP05 lifecycle/RCD recovery gaps during the
+later fault/device packages. Keep the CloudBridge -> Rareities/rclone immutable pin and do
+not infer that the remote URL or a successful JVM build proves the final integrated engine.
+Only disposable data may be used for live Proton testing; verify the target scope or create a
+unique disposable subdirectory.
