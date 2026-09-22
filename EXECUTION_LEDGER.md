@@ -404,6 +404,14 @@ independent raw-process/drainer thread pair from `decryptConfig`. The branch aga
 cover interactive config creation/update, OAuth/reconnect or binary pipe streaming, and no
 live Keystore/Proton validation was run.
 
+CloudBridge commit `a4aed7c` moves the `lsd` directory probe under the same owned
+native lifetime. It drains stdout/stderr concurrently but retains only a bounded error
+category needed by the session guardian, not raw provider stderr. The existing network
+versus non-network classification remains explicit and has a JVM regression test. The
+post-change branch passed **47 JVM tests** and Android lint (85 warnings, 6
+baseline-filtered errors). Session-guardian behavior on live Proton, timeout and process
+death remains **NOT RUN**.
+
 ## Next work
 
 Continue WP05, not WP06: migrate remaining config/OAuth/reconnect/interactive and direct
