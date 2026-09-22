@@ -66,7 +66,11 @@ it must not be hidden behind a moving ref or a fallback URL.
 | Read repository instructions | PASS | CloudBridge and rclone `AGENTS.md` read in full before source changes |
 | Refresh repositories, PRs and CI | PASS | GitHub API evidence recorded above |
 | Source archive acquisition | PASS with limitation | Immutable branch SHA and archive hash recorded; no local Git history |
-| Standalone rclone build/tests | NOT RUN | Go executable is not installed or on PATH |
+| Go toolchain | PASS | Official Go 1.26.8 archive; SHA-256 `B92C3B2ADAE85A11BA71FE7216DAF0D84E82AF4C8AB6C5625807F28622043A59`; satisfies rclone `go 1.26.0` |
+| Standalone rclone build | PASS with limitation | `go build -buildvcs=false ./...`; normal VCS stamping is unavailable because the source is an archive import |
+| rclone sync/operations tests | PASS | `go test ./fs/sync ./fs/operations` |
+| rclone Proton/Internxt tests | PASS | `go test ./backend/protondrive ./backend/internxt` |
+| rclone broad test sweep | INCOMPLETE / environment failures | `go test ./...` reached source tests but was stopped after Windows test-server scripts were missing, symlink privilege tests failed, and WebDAV range behavior failed; not a clean pass |
 | Android unit/lint/debug build | NOT RUN | `gradlew --version` could not download Gradle 8.13 because sandbox network is denied; current Java is OpenJDK 8 while project requires JDK 17; no local.properties/NDK was found |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
@@ -75,11 +79,12 @@ it must not be hidden behind a moving ref or a fallback URL.
 ### WP00 acceptance status
 
 Baseline identity, current app pin, repository instructions, CI/PR refresh and gap list are
-recorded in the local evidence commits above. WP00 build/test acceptance remains incomplete
-because the required toolchains and full upstream Git metadata are unavailable. No feature
-implementation is claimed. The next bounded work requires provisioning Go 1.26, JDK 17,
-Android NDK 29 and a full Git checkout, or an explicitly documented equivalent; independent
-rclone tests may proceed before app integration.
+recorded in the local evidence commits above. Standalone engine build and focused safety,
+Proton and Internxt tests now have evidence, but WP00 build/test acceptance remains incomplete
+because the Android toolchain, acceptance device/provider access and full upstream Git metadata
+are unavailable. No feature implementation or app pin change is claimed. The next bounded work
+is WP01 engine reconciliation; CloudBridge must not switch repositories until the selected
+Rareities/rclone revision and its required toolchain/dependency behavior are reviewed.
 
 ## Next package
 
