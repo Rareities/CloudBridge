@@ -8,7 +8,7 @@ real Git checkout is available.
 ## Standing instructions
 
 - The complete handoff at `work/CloudBridge-rclone-Luna-Master-Handoff.md` is authoritative.
-- Work one bounded package at a time; WP01 is the current package for this ledger update.
+- Work one bounded package at a time; WP03 is the next package after the completed WP02 entry.
 - Preserve Bisync, Proton Drive, scheduling, Obsidian and useful CloudBridge functionality.
 - Fix defects at their owning layer and test rclone independently before app integration.
 - Missing device or live Proton access is `NOT RUN`, never a pass.
@@ -76,9 +76,10 @@ The local integration pin is now recorded in CloudBridge commit `f4f622e`:
 - missing repository/ref properties now fail the Gradle rclone configuration instead of
   silently falling back to an unpinned upstream source
 
-This is a source/configuration pin, not integrated Android acceptance. The app build and
-native artifact provenance remain `NOT RUN` until JDK 17, Gradle, Android SDK/NDK and a clean
-fetch of the pinned repository are available.
+This is a source/configuration pin, not integrated Android acceptance. The app's native
+artifact provenance and integrated behavior remain `NOT RUN` because the Android NDK,
+`local.properties`, and a clean fetch of the pinned repository are not available in this
+workspace.
 
 ### Environment and test gates
 
@@ -94,7 +95,7 @@ fetch of the pinned repository are available.
 | rclone Proton/Internxt tests | PASS | `go test ./backend/protondrive ./backend/internxt` |
 | rclone broad test sweep | INCOMPLETE / environment failures | `go test ./...` reached source tests but was stopped after Windows test-server scripts were missing, symlink privilege tests failed, and WebDAV range behavior failed; not a clean pass |
 | CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `f4f622e` uses the immutable Rareities ref and fail-closed missing-property checks; `:rclone:tasks` and `:rclone:properties` pass under Gradle 8.13/JDK 17 and print the exact URL/ref/version; native compilation is NOT RUN |
-| Android unit/lint/debug build | NOT RUN | Android SDK/NDK and `local.properties` are still unavailable; no native artifact or app test was produced |
+| Android unit/lint/debug build | PARTIAL | CloudBridge unit tests and lint pass under JDK 17/Gradle 8.13; the debug APK/native build remains NOT RUN because the NDK and `local.properties` are unavailable |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
 | Live Proton Drive disposable-area tests | NOT RUN | No Proton credentials or approved disposable remote area |
@@ -105,7 +106,7 @@ Baseline identity, current app pin, repository instructions, CI/PR refresh and g
 recorded in the local evidence commits above. Standalone engine build and focused safety,
 Proton and Internxt tests now have evidence, and the Gradle configuration resolves the exact
 Rareities URL/ref/version under JDK 17. WP00 build/test acceptance remains incomplete because
-the Android SDK/NDK, acceptance device/provider access and full upstream Git metadata are
+the Android NDK, acceptance device/provider access and full upstream Git metadata are
 unavailable. The app pin is already changed locally in the pre-existing `f4f622e` commit; this
 WP01 update does not change it. Native artifact provenance and integrated behavior are not
 claimed. WP01 engine reconciliation follows below.
@@ -165,12 +166,48 @@ WP01 is **COMPLETE for the bounded reconciliation decision**: current Rareities/
 validated and retained without a source change, with provenance, tests, residual risks and
 the app-integration boundary recorded. This is not a claim that the 170 upstream commits,
 Android integration, live Proton workflow, acceptance device, or full test suite are complete.
-No later work package was started in this turn.
+WP02 secure execution inputs and diagnostics follows below.
+
+## 2026-09-23 — WP02 secure execution inputs and diagnostics
+
+### Scoped implementation
+
+CloudBridge commit `d50bb21` implements the bounded WP02 input and diagnostic hardening
+scope. `LogRedactor` is now the shared sink for formatted application logs, file logs, sync
+logs and rclone stderr. It redacts configured/authentication values, bearer tokens,
+`content://` URIs and absolute paths, and bounds diagnostic text at 16 KiB. Sync-log growth
+is capped at 1 MiB. The audited configuration, provider, worker and update paths no longer
+send their rclone/config payloads or exception details through raw logging sinks.
+
+The exported shortcut route now requires the exact sync action, a typed positive task ID and
+a per-task capability token. Tokens are issued when pinned shortcuts are created and checked
+before a task is queued; invalid or legacy shortcuts fail closed. Existing shortcuts created
+before this capability was added must be recreated, which is an intentional safe-compatibility
+boundary.
+
+### WP02 verification
+
+| Gate | Result | Evidence |
+|---|---|---|
+| CloudBridge unit tests | PASS | `:app:testOssDebugUnitTest --no-daemon -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll`; 22 tests, exit 0 |
+| CloudBridge lint | PASS with pre-existing findings | `:app:lintOssDebug --no-daemon -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll`; task passed; existing warnings/baseline findings remain |
+| Diff hygiene | PASS | `git diff --check` passed before commit |
+| Native Android artifact | NOT RUN | Android NDK and `local.properties` are unavailable; no APK or native rclone provenance was claimed |
+| Samsung / live Proton acceptance | NOT RUN | No Galaxy S26 device or approved disposable Proton area/credentials are available |
+
+### WP02 acceptance status
+
+WP02 is **COMPLETE for the audited CloudBridge shortcut and diagnostic sinks**. The unit and
+lint gates pass, and the source commit is persisted. This does not claim that every process
+launch/input path has been audited or that process lifetime, cancellation, output draining
+and result truth are complete; those broader execution concerns remain owned by WP05 and the
+later scheduling/result packages. Native compilation, device acceptance and live Proton
+workflow remain `NOT RUN`.
 
 ## Next package
 
-No later package was started. Any next candidate must review the exact upstream
-`1e92520076ccc319fdae29e6fdc6a75bd523b5a2` changes (or another explicitly selected immutable
-revision), preserve Internxt/Proton and native compatibility, rerun independent gates, and
-then separately verify the existing CloudBridge -> Rareities/rclone pin. A moving branch or
-fallback to `thies2005/rclone` remains prohibited.
+WP03 — config and database recoverability is the next bounded package. It must read this
+ledger and the current source, preserve the existing CloudBridge -> Rareities/rclone pin,
+and verify backup/restore, migration, export/import and corruption behavior before any
+broader scheduling or provider work. A moving branch or fallback to `thies2005/rclone`
+remains prohibited.
