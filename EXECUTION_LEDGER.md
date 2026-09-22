@@ -67,7 +67,7 @@ upstream history.
 requires a deliberate toolchain/build compatibility change and independent engine validation;
 it must not be hidden behind a moving ref or a fallback URL.
 
-The local integration pin is now recorded in CloudBridge commit `f4f622e`:
+The local integration pin is now recorded in CloudBridge commit `98044da`:
 
 - repository: `https://github.com/Rareities/rclone.git`
 - immutable ref: `1583cce1e28340e5d064ed955179f5f2b31e7757`
@@ -94,7 +94,7 @@ workspace.
 | rclone sync/operations tests | PASS | `go test ./fs/sync ./fs/operations` |
 | rclone Proton/Internxt tests | PASS | `go test ./backend/protondrive ./backend/internxt` |
 | rclone broad test sweep | INCOMPLETE / environment failures | `go test ./...` reached source tests but was stopped after Windows test-server scripts were missing, symlink privilege tests failed, and WebDAV range behavior failed; not a clean pass |
-| CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `f4f622e` uses the immutable Rareities ref and fail-closed missing-property checks; `:rclone:tasks` and `:rclone:properties` pass under Gradle 8.13/JDK 17 and print the exact URL/ref/version; native compilation is NOT RUN |
+| CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `98044da` uses the immutable Rareities ref and fail-closed missing-property checks; `:rclone:tasks` and `:rclone:properties` pass under Gradle 8.13/JDK 17 and print the exact URL/ref/version; native compilation is NOT RUN |
 | Android unit/lint/debug build | PARTIAL | CloudBridge 36 JVM unit tests and lint pass under JDK 17/Gradle 8.13; the debug APK/native build remains NOT RUN because the NDK and `local.properties` are unavailable |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
@@ -107,7 +107,7 @@ recorded in the local evidence commits above. Standalone engine build and focuse
 Proton and Internxt tests now have evidence, and the Gradle configuration resolves the exact
 Rareities URL/ref/version under JDK 17. WP00 build/test acceptance remains incomplete because
 the Android NDK, acceptance device/provider access and full upstream Git metadata are
-unavailable. The app pin is already changed locally in the pre-existing `f4f622e` commit; this
+unavailable. The app pin is already changed locally in the pre-existing `98044da` commit; this
 WP01 update does not change it. Native artifact provenance and integrated behavior are not
 claimed. WP01 engine reconciliation follows below.
 
@@ -154,7 +154,7 @@ focused safety/provider gates. The 170 upstream commits are therefore not blindl
 cherry-picked, or silently substituted.
 
 The CloudBridge checkout already contains the exact Rareities URL/ref in `gradle.properties`
-from the pre-existing `f4f622e` commit. No further URL/ref change was made in WP01. The
+from the pre-existing `98044da` commit. No further URL/ref change was made in WP01. The
 configuration pin is not integrated Android acceptance: native compilation, remote CI, device
 acceptance, and live Proton testing remain open or `NOT RUN` as recorded above. Gradle
 configuration evaluation is now independently evidenced; it does not prove native artifact
@@ -172,7 +172,7 @@ WP02 secure execution inputs and diagnostics follows below.
 
 ### Scoped implementation
 
-CloudBridge commit `d50bb21` implements the bounded WP02 input and diagnostic hardening
+CloudBridge commit `f3bd473` implements the bounded WP02 input and diagnostic hardening
 scope. `LogRedactor` is now the shared sink for formatted application logs, file logs, sync
 logs and rclone stderr. It redacts configured/authentication values, bearer tokens,
 `content://` URIs and absolute paths, and bounds diagnostic text at 16 KiB. Sync-log growth
@@ -208,7 +208,7 @@ workflow remain `NOT RUN`.
 
 ### Scoped implementation
 
-CloudBridge commit `c7f67e4` implements the bounded WP03 recoverability scope. Database and
+CloudBridge commit `3ab1d6b` implements the bounded WP03 recoverability scope. Database and
 preference imports now parse and validate the complete bounded payload before mutation,
 including optional legacy arrays, typed/ranged preference values and cross-record references.
 Database replacement is one SQLite transaction; imported IDs are never reused and filter,
@@ -249,7 +249,7 @@ cached password remains an explicit unlock/recovery boundary, not a silent downg
 
 ### Scoped implementation
 
-CloudBridge commit `fcc86ed` adds a versioned profile/run state layer without replacing the
+CloudBridge commit `acc4f5c` adds a versioned profile/run state layer without replacing the
 legacy task UI in one unsafe migration. Legacy numeric tasks are mapped to stable UUID profile
 rows with semantic revision, explicit mode, endpoint/settings snapshot, SHA-256 fingerprint,
 engine pin and separate readiness. The first migration is deterministic; a retired profile's
@@ -291,7 +291,7 @@ intentionally blocked until its native preflight/guard package proves safe seman
 
 ## 2026-09-23 — WP05 native lifetime, first operation-family slice
 
-CloudBridge commit `6e665b0` is an **in-progress WP05 slice, not package acceptance**. A
+CloudBridge commit `a3c87f0` is an **in-progress WP05 slice, not package acceptance**. A
 `NativeExecutionHandle` now owns dual-pipe bounded draining, cancellation, timeout, confirmed
 exit/reap, single terminal outcome and release of attached resources only after reap. Late
 confirmed exit releases resources even if an earlier bounded wait was `UNCONFIRMED`; the run
@@ -328,7 +328,7 @@ were environment failures, not passing runs. No repository was pushed and no PR 
 
 ### WP05 continuation: metadata commands and fault coverage
 
-CloudBridge commit `a217378` moves `link`, `md5sum`, `sha1sum` and `--version` text commands
+CloudBridge commit `c67488d` moves `link`, `md5sum`, `sha1sum` and `--version` text commands
 to one bounded native handle that drains stdout/stderr concurrently. The prior `waitFor()`
 before stdout read could deadlock on full output. The forced-kill path now reflects the
 public `Process` API rather than an inaccessible concrete Android process class. JVM tests
@@ -336,17 +336,29 @@ cover forced-kill timeout, concurrent stop/finish sharing one terminal result, a
 launch. The complete unit suite is **44 PASS**; Android lint still passes with 98 warnings
 and the 6 baseline-filtered errors. This is another bounded slice, **not WP05 acceptance**.
 
-CloudBridge commit `a3f700f` removes a listing-path debug log of the entire native process
+CloudBridge commit `416a237` removes a listing-path debug log of the entire native process
 environment. A password containing spaces could leave a suffix visible after regex-based
 redaction, so process environments must not be logged at all. This one-line source change
 passed `git diff --check`; a post-change Gradle run passed 44 JVM tests and lint (98 warnings,
 6 baseline-filtered errors). No live credential was used.
 
-The local CloudBridge checkout has an archive-derived root (`800bbc19`), and the GitHub
-master object `c4928762` is absent from its object database. Although `origin` points to
-`Rareities/CloudBridge`, these local commits cannot be treated as a normal fast-forward or
-safe PR branch until a history-preserving clone/import is performed. Do not force-push the
-archive-derived history over the remote repository.
+The original CloudBridge checkout has an archive-derived root (`800bbc19`). Its package
+commits were replayed onto `codex/luna-implementation`, which descends from the real GitHub
+master `c4928762`; the original checkout remains rollback evidence. The rclone WP01 decision
+ledger was likewise replayed onto `codex/luna-engine`, descended from Rareities/rclone
+`1583cce1`. The two expected modify/delete conflicts were resolved by adding the local
+execution/requirements ledgers, which do not exist on either remote master. Other than
+line-ending/executable-bit differences in four scripts, the CloudBridge application tree
+matches the archive checkout. No branch was pushed and no PR created; do not force-push the
+archive-derived history. Commit IDs above refer to the history-preserving branches.
+
+The history-preserving CloudBridge branch independently passed
+`:app:testOssDebugUnitTest :app:lintOssDebug --offline --no-daemon
+-Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll` (44 JVM tests;
+lint task passed with 85 warnings and 6 baseline-filtered errors). `git diff --check
+origin/master...HEAD` passed. Native rclone compilation, debug/release APKs, R8, Galaxy
+firmware/API acceptance and live Proton remain `NOT RUN`. This is a reviewable local branch,
+not a completed application or authorization to push incomplete WP05 work.
 
 ## Next work
 
