@@ -57,9 +57,10 @@ upstream history.
 
 `work/CloudBridge/gradle.properties` currently contains:
 
-- `de.schuelken.cloudbridge.rCloneRepoUrl=https://github.com/thies2005/rclone.git`
-- `de.schuelken.cloudbridge.rCloneRef=94f543c9d4df4f7a29c87c9b76abf7bb341b5d33`
-- app Go requirement `1.25.0`
+- `de.schuelken.cloudbridge.rCloneRepoUrl=https://github.com/Rareities/rclone.git`
+- `de.schuelken.cloudbridge.rCloneRef=1583cce1e28340e5d064ed955179f5f2b31e7757`
+- app Go requirement `1.26.0`
+- rclone version `1.76.0`
 - NDK `29.0.14206865`, compiler/toolchain API `33`, min/compile/target SDK `23/36/36`
 
 `work/rclone/go.mod` requires Go `1.26.0`. Updating the app pin to Rareities/rclone therefore
@@ -87,12 +88,13 @@ fetch of the pinned repository are available.
 | Refresh repositories, PRs and CI | PASS | GitHub API evidence recorded above |
 | Source archive acquisition | PASS with limitation | Immutable branch SHA and archive hash recorded; no local Git history |
 | Go toolchain | PASS | Official Go 1.26.8 archive; SHA-256 `B92C3B2ADAE85A11BA71FE7216DAF0D84E82AF4C8AB6C5625807F28622043A59`; satisfies rclone `go 1.26.0` |
+| JDK / Gradle launcher | PASS | Temurin JDK 17.0.20.1 archive; local SHA-256 `E53A79C3C3D86865BD7E787903884331068E71321714FFD44F145785AFFC7CB0`; Gradle wrapper 8.13 runs successfully |
 | Standalone rclone build | PASS with limitation | `go build -buildvcs=false ./...`; normal VCS stamping is unavailable because the source is an archive import |
 | rclone sync/operations tests | PASS | `go test ./fs/sync ./fs/operations` |
 | rclone Proton/Internxt tests | PASS | `go test ./backend/protondrive ./backend/internxt` |
 | rclone broad test sweep | INCOMPLETE / environment failures | `go test ./...` reached source tests but was stopped after Windows test-server scripts were missing, symlink privilege tests failed, and WebDAV range behavior failed; not a clean pass |
-| CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `f4f622e` uses the immutable Rareities ref and fail-closed missing-property checks; clean Gradle/native verification is NOT RUN |
-| Android unit/lint/debug build | NOT RUN | `gradlew --version` could not download Gradle 8.13 because sandbox network is denied; current Java is OpenJDK 8 while project requires JDK 17; no local.properties/NDK was found |
+| CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `f4f622e` uses the immutable Rareities ref and fail-closed missing-property checks; `:rclone:tasks` and `:rclone:properties` pass under Gradle 8.13/JDK 17 and print the exact URL/ref/version; native compilation is NOT RUN |
+| Android unit/lint/debug build | NOT RUN | Android SDK/NDK and `local.properties` are still unavailable; no native artifact or app test was produced |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
 | Live Proton Drive disposable-area tests | NOT RUN | No Proton credentials or approved disposable remote area |
@@ -101,10 +103,11 @@ fetch of the pinned repository are available.
 
 Baseline identity, current app pin, repository instructions, CI/PR refresh and gap list are
 recorded in the local evidence commits above. Standalone engine build and focused safety,
-Proton and Internxt tests now have evidence, but WP00 build/test acceptance remains incomplete
-because the Android toolchain, acceptance device/provider access and full upstream Git metadata
-are unavailable. The app pin is already changed locally in the pre-existing `f4f622e` commit;
-this WP01 update does not change it. Native artifact provenance and integrated behavior are not
+Proton and Internxt tests now have evidence, and the Gradle configuration resolves the exact
+Rareities URL/ref/version under JDK 17. WP00 build/test acceptance remains incomplete because
+the Android SDK/NDK, acceptance device/provider access and full upstream Git metadata are
+unavailable. The app pin is already changed locally in the pre-existing `f4f622e` commit; this
+WP01 update does not change it. Native artifact provenance and integrated behavior are not
 claimed. WP01 engine reconciliation follows below.
 
 ## 2026-09-23 — WP01 engine reconciliation
@@ -151,9 +154,10 @@ cherry-picked, or silently substituted.
 
 The CloudBridge checkout already contains the exact Rareities URL/ref in `gradle.properties`
 from the pre-existing `f4f622e` commit. No further URL/ref change was made in WP01. The
-configuration pin is not integrated Android acceptance: clean Gradle/native verification,
-remote CI, device acceptance, and live Proton testing remain open or `NOT RUN` as recorded
-above.
+configuration pin is not integrated Android acceptance: native compilation, remote CI, device
+acceptance, and live Proton testing remain open or `NOT RUN` as recorded above. Gradle
+configuration evaluation is now independently evidenced; it does not prove native artifact
+provenance or app behavior.
 
 ### WP01 status
 
