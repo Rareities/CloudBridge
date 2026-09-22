@@ -8,7 +8,7 @@ real Git checkout is available.
 ## Standing instructions
 
 - The complete handoff at `work/CloudBridge-rclone-Luna-Master-Handoff.md` is authoritative.
-- Work one bounded package at a time; WP04 is the next package after the completed WP03 entry.
+- Work one bounded package at a time; WP05 is the next package after the completed WP04 entry.
 - Preserve Bisync, Proton Drive, scheduling, Obsidian and useful CloudBridge functionality.
 - Fix defects at their owning layer and test rclone independently before app integration.
 - Missing device or live Proton access is `NOT RUN`, never a pass.
@@ -95,7 +95,7 @@ workspace.
 | rclone Proton/Internxt tests | PASS | `go test ./backend/protondrive ./backend/internxt` |
 | rclone broad test sweep | INCOMPLETE / environment failures | `go test ./...` reached source tests but was stopped after Windows test-server scripts were missing, symlink privilege tests failed, and WebDAV range behavior failed; not a clean pass |
 | CloudBridge -> Rareities/rclone configuration pin | PASS with limitation | Commit `f4f622e` uses the immutable Rareities ref and fail-closed missing-property checks; `:rclone:tasks` and `:rclone:properties` pass under Gradle 8.13/JDK 17 and print the exact URL/ref/version; native compilation is NOT RUN |
-| Android unit/lint/debug build | PARTIAL | CloudBridge 30 JVM unit tests and lint pass under JDK 17/Gradle 8.13; the debug APK/native build remains NOT RUN because the NDK and `local.properties` are unavailable |
+| Android unit/lint/debug build | PARTIAL | CloudBridge 36 JVM unit tests and lint pass under JDK 17/Gradle 8.13; the debug APK/native build remains NOT RUN because the NDK and `local.properties` are unavailable |
 | Release/R8/signing/ APK inspection | NOT RUN | No compatible Android build toolchain or signing evidence |
 | Samsung Galaxy S26 / One UI acceptance | NOT RUN | No acceptance device access in this environment |
 | Live Proton Drive disposable-area tests | NOT RUN | No Proton credentials or approved disposable remote area |
@@ -245,9 +245,53 @@ live Android Keystore behavior, native compilation, device acceptance and live P
 remain `NOT RUN`. Importing an encrypted config whose password differs from the currently
 cached password remains an explicit unlock/recovery boundary, not a silent downgrade.
 
+## 2026-09-23 — WP04 authoritative profiles and run state
+
+### Scoped implementation
+
+CloudBridge commit `fcc86ed` adds a versioned profile/run state layer without replacing the
+legacy task UI in one unsafe migration. Legacy numeric tasks are mapped to stable UUID profile
+rows with semantic revision, explicit mode, endpoint/settings snapshot, SHA-256 fingerprint,
+engine pin and separate readiness. The first migration is deterministic; a retired profile's
+UUID cannot be silently reused after a delete/recreate cycle. Legacy Bisync directions 5/6 and
+unknown directions become repair-required rather than being coerced into one-way sync.
+
+Run rows capture the requested mode, profile revision/fingerprint, endpoint/settings snapshot,
+engine pin, requested/due/start/finish times, owner token/generation, cancellation flag and
+nullable result counters. A partial unique index prevents more than one queued/preflight/running
+owner for a profile. Profile edits and deletes invalidate active ownership in the same SQLite
+transaction; a worker claim rechecks revision/fingerprint/readiness before native launch. App
+startup reconciles preflight/running rows conservatively to interrupted/recovery state.
+
+Task create/edit/delete and full backup import update the profile ledger transactionally. The
+WorkManager adapter now queues a durable run ID and owner token, records confirmed native exit
+outcomes, returns failure for failed syncs, and refuses stale or repair-required claims. Older
+WorkManager requests without the new fields use a compatibility adapter that creates a durable
+run before claiming it.
+
+### WP04 verification
+
+| Gate | Result | Evidence |
+|---|---|---|
+| CloudBridge unit tests | PASS | `:app:testOssDebugUnitTest --no-daemon -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll`; 36 tests, 0 failures/errors, exit 0 |
+| CloudBridge lint | PASS with pre-existing findings | `:app:lintOssDebug --no-daemon -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll`; task passed; 98 warnings and 6 baseline-filtered errors were reported |
+| Profile/run invariants | PASS (model) | Profile/run state tests cover stable legacy mapping, mode non-coercion, fingerprint changes, fail-closed unknown states and explicit active/terminal states |
+| Transactional legacy writes | IMPLEMENTED / device DB test pending | Task writes, import replacement, profile invalidation and run claim/finish use SQLite transactions; Android instrumentation/fault-injection execution was unavailable |
+| Native Android artifact | NOT RUN | Android NDK and `local.properties` are unavailable; no APK or native rclone provenance was claimed |
+| Samsung / live Proton acceptance | NOT RUN | No Galaxy S26 device or approved disposable Proton area/credentials are available |
+
+### WP04 residuals and acceptance status
+
+WP04 is **COMPLETE for the bounded profile/run ownership implementation**, but not full
+application acceptance. Ephemeral file-explorer work still uses its compatibility path, UI
+readiness presentation is not yet migrated, and the complete native lifetime/stream/cancel
+boundary remains WP05. Android database migration, process-death, duplicate-dispatch and
+terminal-write fault tests require instrumentation or a device. Bisync execution remains
+intentionally blocked until its native preflight/guard package proves safe semantics.
+
 ## Next package
 
-WP04 — authoritative profiles and run state is the next bounded package. It must read this
-ledger and the current source, preserve the existing CloudBridge -> Rareities/rclone pin,
-and establish the profile/run-state model before broader scheduling, Bisync or provider work.
-A moving branch or fallback to `thies2005/rclone` remains prohibited.
+WP05 — own the complete native lifetime is the next bounded package. It must read this ledger
+and the current source, preserve the existing CloudBridge -> Rareities/rclone pin, and migrate
+process launch, output draining, cancellation, timeout, exit/reap and resource release behind
+one execution handle. A moving branch or fallback to `thies2005/rclone` remains prohibited.
