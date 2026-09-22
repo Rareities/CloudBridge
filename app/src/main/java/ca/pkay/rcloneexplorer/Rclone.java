@@ -1413,31 +1413,32 @@ public class Rclone {
 
     public DirectoryProbeResult listDirectories(String remoteName, int maxDepth) {
         String[] command = createCommand("lsd", "--max-depth", String.valueOf(maxDepth), remoteName + ":");
-        Process process;
-
         try {
-            process = getRuntimeProcess(command, getRcloneEnv());
-
-            // Capture stderr so callers can classify the error type
-            StringBuilder stderrBuilder = new StringBuilder();
-            try (BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = errReader.readLine()) != null) {
-                    stderrBuilder.append(line).append("\n");
-                }
+            AtomicBoolean networkError = new AtomicBoolean(false);
+            NativeExecutionHandle handle = NativeExecutionHandle.launch(command, getRcloneEnv(), "lsd");
+            NativeExecutionHandle.Outcome outcome = handle.await(METADATA_COMMAND_TIMEOUT_MILLIS,
+                    null, line -> {
+                        if (DirectoryProbeResult.looksLikeNetworkError(line)) {
+                            networkError.set(true);
+                        }
+                    });
+            int exitCode = outcome.getExitCode() == null ? -1 : outcome.getExitCode();
+            if ((!outcome.isSuccess() && exitCode == 0) || outcome.isOutputTruncated()) {
+                exitCode = -1;
             }
-
-            process.waitFor();
-            return new DirectoryProbeResult(process.exitValue(), stderrBuilder.toString());
-        } catch (IOException | InterruptedException e) {
-            FLog.e(TAG, "listDirectories: error for remote " + remoteName, e);
-            return new DirectoryProbeResult(-1, e.getMessage() != null ? e.getMessage() : "process error");
+            // Do not expose raw, potentially secret-bearing stderr to the guardian worker.
+            String category = networkError.get() || outcome.getState() == NativeExecutionHandle.TerminalState.TIMED_OUT
+                    ? "network is unreachable" : exitCode == 0 ? "" : "rclone probe failed";
+            return new DirectoryProbeResult(exitCode, category);
+        } catch (IOException e) {
+            FLog.e(TAG, "listDirectories: native command failed to start", e);
+            return new DirectoryProbeResult(-1, "rclone probe failed");
         }
     }
 
     /**
-     * Result of a directory probe (lsd) operation, including both the exit code
-     * and any stderr output for error classification.
+     * Result of a directory probe (lsd) operation. The stderr field contains only a
+     * sanitized category, never raw provider output or credentials.
      */
     public static class DirectoryProbeResult {
         private final int exitCode;
@@ -1466,7 +1467,11 @@ public class Rclone {
          */
         public boolean isNetworkError() {
             if (exitCode == 0) return false;
-            String lower = stderr.toLowerCase(Locale.ROOT);
+            return looksLikeNetworkError(stderr);
+        }
+
+        private static boolean looksLikeNetworkError(String text) {
+            String lower = text.toLowerCase(Locale.ROOT);
             return lower.contains("dial tcp")
                 || lower.contains("connection refused")
                 || lower.contains("no such host")
