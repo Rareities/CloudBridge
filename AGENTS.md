@@ -34,11 +34,11 @@ Keep this repository easy to upgrade from upstream rclone.
 - Do not modify generated or fetched rclone source under `rclone/cache/`.
 - Do not reintroduce the deprecated `rclone/patches/` flow. The fork already contains project-specific rclone changes, including Internxt auto-token-renewal.
 - Prefer Android-side integration changes in `app/` over Go-side changes in rclone.
-- If a Go-side rclone change is unavoidable, keep it in the rclone fork at `https://github.com/thies2005/rclone`; do not vendor local source patches here.
+- If a Go-side rclone change is unavoidable, keep it in the Rareities rclone fork at `https://github.com/Rareities/rclone`; do not vendor local source patches here.
 
 ## Build
 
-Prerequisites: Go 1.25+, JDK 17, Android SDK with NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
+Prerequisites: Go 1.26+, JDK 17, Android SDK with NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
 
 ```sh
 ./gradlew assembleOssDebug

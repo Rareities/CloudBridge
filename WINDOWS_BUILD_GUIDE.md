@@ -21,11 +21,11 @@
    - Or run: `sdkmanager "ndk;29.0.14206865"`
    - Ensure NDK is installed to `%ANDROID_HOME%\ndk\29.0.14206865`
 
-4. **Go 1.25.0**
-   - Download: https://go.dev/dl/go1.25.0.windows-amd64.zip
+4. **Go 1.26+**
+   - Download: https://go.dev/dl/
    - Extract and add to PATH
    - Or use: `winget install Golang.Go`
-   - Verify: `go version` (should show go1.25.0)
+   - Verify: `go version` (should show go1.26.x or newer)
 
 5. **Git** (for cloning the repository)
    - Download: https://git-scm.com/download/win
@@ -37,7 +37,7 @@
 
 ```bash
 cd C:\Projects
-git clone https://github.com/thies2005/CloudBridge.git
+git clone https://github.com/Rareities/CloudBridge.git
 cd CloudBridge
 git pull origin master
 ```
@@ -55,7 +55,7 @@ java -version  # Should show version 17.x
 echo $env:ANDROID_HOME
 
 # Check Go
-go version  # Should show go1.25.0
+go version  # Should show go1.26.x or newer
 ```
 
 If any are missing, set them temporarily for this session:
@@ -79,7 +79,7 @@ $env:ANDROID_HOME = "C:\Users\$env:USERNAME\AppData\Local\Android\Sdk"
 ```
 
 This will:
-- Download rclone v1.74.0 and dependencies
+- Download the pinned rclone source ref from `gradle.properties` and its dependencies
 - Build `librclone.so` for arm64-v8a (Pixel 9)
 
 **Expected output location:**
@@ -131,10 +131,10 @@ Your built APK will include:
 
 ### Go version mismatch
 ```
-The required go version is: 1.25.0
-You are running: go version go1.25.x windows/amd64
+The required go version is: 1.26.0
+You are running: go version go1.26.x windows/amd64
 ```
-**Solution:** Install Go 1.25.x exactly; the build verifies the required version.
+**Solution:** Install Go 1.26.x or newer; the build verifies the required minor version.
 
 ### NDK not found
 ```
@@ -156,7 +156,7 @@ org.gradle.jvmargs=-Xmx6144M
 
 ### rclone compilation fails
 If rclone build fails, check:
-1. Go version: `go version` (must be ~1.25.x)
+1. Go version: `go version` (must be 1.26.x or newer)
 2. NDK path: `echo $env:ANDROID_HOME\ndk`
 3. Available disk space (need ~2GB for Go module cache)
 

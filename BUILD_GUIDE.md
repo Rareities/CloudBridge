@@ -3,7 +3,7 @@
 ## Option 1: Use GitHub Actions (RECOMMENDED)
 The repository already has a working GitHub Actions workflow (.github/workflows/android.yml) that:
 - Runs on Ubuntu Linux (proper build environment)
-- Uses JDK 17, Go 1.25.0, Android SDK/NDK
+- Uses JDK 17, Go 1.26+, Android SDK/NDK
 - Builds APKs for all architectures (arm, arm64, x86, x64, universal)
 - Uploads artifacts to GitHub
 

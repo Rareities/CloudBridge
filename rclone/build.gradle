@@ -14,7 +14,7 @@
 //  - windows x64
 //
 // Prerequisites:
-//  - go 1.25+
+//  - go 1.26+
 //  - Either Android SDK command-line tools, or the expected NDK version (see gradle.properties).
 //
 // rclone source:
@@ -31,8 +31,16 @@ ext {
     RCLONE_VERSION = project.properties['de.schuelken.cloudbridge.rCloneVersion']
     GO_REQ_VERSION = project.properties['de.schuelken.cloudbridge.goVersion']
 
-    RCLONE_REPO_URL = project.findProperty('de.schuelken.cloudbridge.rCloneRepoUrl') ?: 'https://github.com/rclone/rclone.git'
-    RCLONE_REF = project.findProperty('de.schuelken.cloudbridge.rCloneRef') ?: "v${RCLONE_VERSION}"
+    def configuredRepoUrl = project.findProperty('de.schuelken.cloudbridge.rCloneRepoUrl')?.toString()?.trim()
+    def configuredRef = project.findProperty('de.schuelken.cloudbridge.rCloneRef')?.toString()?.trim()
+    if (!configuredRepoUrl) {
+        throw new GradleException('Missing required de.schuelken.cloudbridge.rCloneRepoUrl; refusing an unpinned rclone fallback')
+    }
+    if (!configuredRef) {
+        throw new GradleException('Missing required de.schuelken.cloudbridge.rCloneRef; refusing an unpinned rclone fallback')
+    }
+    RCLONE_REPO_URL = configuredRepoUrl
+    RCLONE_REF = configuredRef
 
     PROJECT_DIR = projectDir.absolutePath
     CACHE_PATH = Paths.get(PROJECT_DIR, 'cache').toString()

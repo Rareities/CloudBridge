@@ -99,7 +99,7 @@ Whether you have a question, found a bug, or have an idea for a new feature — 
 
 You should first make sure you have:
 
-- Go 1.25+ installed and in your PATH
+- Go 1.26+ installed and in your PATH
 - Java installed and in your PATH
 - Android SDK command-line tools installed OR the NDK version specified in `gradle.properties`
   installed

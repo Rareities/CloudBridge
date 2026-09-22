@@ -60,13 +60,13 @@
   </p>
   <ul>
     <li>The exact rclone source is pinned in <code>gradle.properties</code> (<code>de.schuelken.cloudbridge.rCloneRepoUrl</code> and <code>rCloneRef</code>). Builds fetch that exact commit into <code>rclone/cache/</code>.</li>
-    <li>CloudBridge uses a project fork (<code>github.com/thies2005/rclone</code>) that adds an Internxt auto-token-renewal fix and other Android-specific patches.</li>
+    <li>CloudBridge uses the pinned Rareities rclone fork (<code>github.com/Rareities/rclone</code>). Backend changes stay in that standalone fork; the app consumes its immutable build ref.</li>
     <li>Upgrading rclone normally means changing one line (<code>rCloneRef</code>) and rebuilding — the whole point of this setup is upgradeability.</li>
     <li>Your rclone configuration (remotes, OAuth tokens, crypt passwords) is a normal rclone config file in the app's private storage. You can export or import it from within the app.</li>
   </ul>
 
   <h2 id="build-system">3. Build system</h2>
-  <p>Prerequisites: JDK 17, Go 1.25+, Android SDK with the NDK version pinned in <code>gradle.properties</code>.</p>
+  <p>Prerequisites: JDK 17, Go 1.26+, Android SDK with the NDK version pinned in <code>gradle.properties</code>.</p>
   <pre><code>./gradlew assembleOssDebug     # debug APK
 ./gradlew assembleOssRelease   # signed release APKs
 ./gradlew bundleOssRelease -PnoAbiSplits   # AAB for Google Play</code></pre>
