@@ -355,7 +355,6 @@ public class Rclone {
         JSONArray results;
         Process process = null;
         try {
-            FLog.d(TAG, "getDirectoryContent[ENV]: %s", Arrays.toString(env));
             process = getRuntimeProcess(command, env);
 
             StringBuilder output = new StringBuilder();
