@@ -447,6 +447,8 @@ fresh test execution; 53/53 is from the last executed full test result.
 
 ## 2026-09-23 — WP06 endpoint identity and durable conflict ownership
 
+**Implementation commit:** `6ba86b6` (`Add durable endpoint conflict claims`).
+
 ### Package record (13-field format)
 
 1. **Objective:** one app-side, durable conflict boundary for native rclone commands, RCD and
