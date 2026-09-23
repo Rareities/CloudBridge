@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.CancellationSignal
 import ca.pkay.rcloneexplorer.Items.RemoteItem
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
+import ca.pkay.rcloneexplorer.Items.FilterEntry
 import ca.pkay.rcloneexplorer.Rclone
 
 fun interface BisyncNativeStateProbe {
@@ -20,7 +21,21 @@ fun interface BisyncNativeStateProbe {
 
 data class BisyncPreflightRunResult(
     val policyResult: BisyncPreflightResult,
-    val checkedAt: Long
+    val checkedAt: Long,
+    /** Transient revalidation evidence used by a worker; it is never persisted. */
+    val input: BisyncPreflightInput? = null,
+    /** Raw endpoints stay in process memory and are rebuilt from the same Task that was probed. */
+    val executionSnapshot: BisyncPreflightExecutionSnapshot? = null
+)
+
+data class BisyncPreflightExecutionSnapshot(
+    val localPath: String,
+    val remoteId: String,
+    val remoteType: Int,
+    val remotePath: String,
+    val filters: List<FilterEntry>,
+    val deleteExcluded: Boolean,
+    val checksumRequested: Boolean
 )
 
 /** Coordinates only read-only probes and persists their sanitized outcome against a profile revision. */
@@ -96,7 +111,7 @@ class BisyncPreflightCoordinator(
             preflights.recordAttempt(
                 profileId, current.revision, current.fingerprint, blockedInput, blocked, now
             )
-            return BisyncPreflightRunResult(blocked, now)
+            return BisyncPreflightRunResult(blocked, now, blockedInput, null)
         }
 
         val selectedFilter = task.filterId?.let(handler::getFilter)
@@ -224,6 +239,15 @@ class BisyncPreflightCoordinator(
             result,
             checkedAt
         )
-        return BisyncPreflightRunResult(result, checkedAt)
+        val executionSnapshot = BisyncPreflightExecutionSnapshot(
+            localPath = task.localPath,
+            remoteId = task.remoteId,
+            remoteType = task.remoteType,
+            remotePath = task.remotePath,
+            filters = parsedFilters.entries.orEmpty().map { FilterEntry(it.filterType, it.filter) },
+            deleteExcluded = task.deleteExcluded,
+            checksumRequested = task.md5sum
+        )
+        return BisyncPreflightRunResult(result, checkedAt, input, executionSnapshot)
     }
 }

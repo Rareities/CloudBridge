@@ -34,7 +34,8 @@ enum class BisyncPreviewUnavailableReason {
     INVALID_SCHEMA,
     ENGINE_UNSUPPORTED,
     REQUEST_REJECTED,
-    SCRATCH_CLEANUP_FAILED
+    SCRATCH_CLEANUP_FAILED,
+    CANCELLED_BEFORE_START
 }
 
 sealed class BisyncPreviewParseResult {

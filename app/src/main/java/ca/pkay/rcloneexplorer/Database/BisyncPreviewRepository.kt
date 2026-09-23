@@ -38,6 +38,24 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COL
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_TABLE_NAME
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_UPDATED_AT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_CHECKED_AT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_COMPARISON
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_ENGINE_REF
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_FILTER
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_FINGERPRINT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_LEFT_ACCOUNT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_LEFT_SCOPE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_READINESS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_REASON
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_RIGHT_ACCOUNT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_RIGHT_SCOPE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_STATE_VERSION
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_TABLE_NAME
 import java.util.UUID
 
 /** Durable, profile-scoped owner and path-free result history for Bisync preview operations. */
@@ -62,6 +80,7 @@ class BisyncPreviewRepository(context: Context) {
             val profile = ProfileStore.getById(db, identity.profileId)
                 ?: throw BisyncPreviewRejectedException("Bisync profile no longer exists")
             validateCurrentProfile(profile, identity)
+            validateFreshPreflight(db, identity)
             if (profile.readiness != ProfileReadiness.READY &&
                 profile.readiness != ProfileReadiness.INITIALIZATION_REQUIRED) {
                 throw BisyncPreviewRejectedException("Bisync profile requires preflight or recovery before preview")
@@ -152,6 +171,50 @@ class BisyncPreviewRepository(context: Context) {
         }
         rejected?.let { throw BisyncPreviewRejectedException(it) }
         return get(previewId) ?: throw BisyncPreviewRejectedException("Claimed preview could not be read back")
+    }
+
+    /** Completes a still-queued owner when dispatch or preflight fails before native launch. */
+    fun finishQueued(
+        previewId: String,
+        ownerToken: String,
+        terminalState: BisyncPreviewOperationState,
+        failureCode: BisyncPreviewFailureCode,
+        completedAt: Long = System.currentTimeMillis()
+    ): Boolean {
+        require(terminalState == BisyncPreviewOperationState.UNAVAILABLE ||
+            terminalState == BisyncPreviewOperationState.CANCELLED ||
+            terminalState == BisyncPreviewOperationState.STALE) {
+            "A queued preview can only finish unavailable, cancelled, or stale"
+        }
+        require(completedAt > 0L)
+        val handler = DatabaseHandler(context)
+        val db = handler.writableDatabase
+        db.beginTransaction()
+        return try {
+            val operation = get(db, previewId) ?: return false
+            if (operation.state != BisyncPreviewOperationState.QUEUED || operation.ownerToken != ownerToken) {
+                return false
+            }
+            val values = ContentValues().apply {
+                put(BISYNC_PREVIEW_COLUMN_STATUS, terminalState.wireValue)
+                put(BISYNC_PREVIEW_COLUMN_FAILURE_CODE, failureCode.wireValue)
+                put(BISYNC_PREVIEW_COLUMN_COMPLETED_AT, completedAt)
+                put(BISYNC_PREVIEW_COLUMN_UPDATED_AT, completedAt)
+                clearSummary(this)
+            }
+            val updated = db.update(
+                BISYNC_PREVIEW_TABLE_NAME,
+                values,
+                "$BISYNC_PREVIEW_COLUMN_ID = ? AND $BISYNC_PREVIEW_COLUMN_OWNER_TOKEN = ? AND $BISYNC_PREVIEW_COLUMN_STATUS = ?",
+                arrayOf(previewId, ownerToken, BisyncPreviewOperationState.QUEUED.wireValue)
+            )
+            db.setTransactionSuccessful()
+            updated == 1
+        } finally {
+            db.endTransaction()
+            db.close()
+            handler.close()
+        }
     }
 
     /**
@@ -326,6 +389,90 @@ class BisyncPreviewRepository(context: Context) {
         return try { cursor.moveToFirst() } finally { cursor.close() }
     }
 
+    /**
+     * A queued preview can later replay the explicit migration confirmation in a worker, so
+     * admission must be backed by a recent successful persisted preflight, not a caller-created
+     * identity alone. Compatible state must match the accepted baseline exactly. For absent
+     * state, the successful preflight row proves initialization is currently required; its
+     * candidate endpoint hashes are intentionally not persisted as an accepted baseline.
+     */
+    private fun validateFreshPreflight(db: SQLiteDatabase, identity: BisyncPreviewIdentity) {
+        val columns = arrayOf(
+            BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION,
+            BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT,
+            BISYNC_PREFLIGHT_COLUMN_ENGINE_REF,
+            BISYNC_PREFLIGHT_COLUMN_STATE_VERSION,
+            BISYNC_PREFLIGHT_COLUMN_LEFT_ACCOUNT,
+            BISYNC_PREFLIGHT_COLUMN_LEFT_SCOPE,
+            BISYNC_PREFLIGHT_COLUMN_RIGHT_ACCOUNT,
+            BISYNC_PREFLIGHT_COLUMN_RIGHT_SCOPE,
+            BISYNC_PREFLIGHT_COLUMN_FILTER,
+            BISYNC_PREFLIGHT_COLUMN_COMPARISON,
+            BISYNC_PREFLIGHT_COLUMN_FINGERPRINT,
+            BISYNC_PREFLIGHT_COLUMN_READINESS,
+            BISYNC_PREFLIGHT_COLUMN_REASON,
+            BISYNC_PREFLIGHT_COLUMN_CHECKED_AT,
+            BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE,
+            BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID
+        )
+        val cursor = db.query(
+            BISYNC_PREFLIGHT_TABLE_NAME,
+            columns,
+            "$BISYNC_PREFLIGHT_COLUMN_PROFILE_ID = ?",
+            arrayOf(identity.profileId),
+            null, null, null, "1"
+        )
+        try {
+            if (!cursor.moveToFirst()) {
+                throw BisyncPreviewRejectedException("A current Bisync preflight is required before preview")
+            }
+            val now = System.currentTimeMillis()
+            val checkedAt = cursor.getLong(13)
+            if (checkedAt <= 0L || checkedAt > now || now - checkedAt >= PREFLIGHT_MAX_AGE_MILLIS) {
+                throw BisyncPreviewRejectedException("Bisync preflight evidence is stale")
+            }
+            val expectedReadiness = when (identity.nativeState) {
+                BisyncNativeState.ABSENT -> ProfileReadiness.INITIALIZATION_REQUIRED.wireValue
+                BisyncNativeState.COMPATIBLE -> ProfileReadiness.READY.wireValue
+                else -> throw BisyncPreviewRejectedException("Bisync native state is not previewable")
+            }
+            val reason = if (cursor.isNull(12)) null else cursor.getString(12)
+            val commonMatches = cursor.getLong(0) == identity.profileRevision &&
+                cursor.getString(1) == identity.profileFingerprint &&
+                cursor.getString(2) == identity.engineRef &&
+                cursor.getInt(3) == identity.stateVersion &&
+                cursor.getString(11) == expectedReadiness &&
+                cursor.getString(14) == identity.nativeState.name &&
+                cursor.getInt(15) == 0 &&
+                (reason == null || (reason == SIZE_ONLY_DISCLOSURE &&
+                    identity.comparisonMode == BisyncComparisonMode.SIZE_ONLY))
+            if (!commonMatches) {
+                throw BisyncPreviewRejectedException("Bisync preflight evidence does not match the preview")
+            }
+
+            if (identity.nativeState == BisyncNativeState.COMPATIBLE) {
+                val acceptedMatches = !cursor.isNull(4) && cursor.getString(4) == identity.leftAccountFingerprint &&
+                    !cursor.isNull(5) && cursor.getString(5) == identity.leftScopeFingerprint &&
+                    !cursor.isNull(6) && cursor.getString(6) == identity.rightAccountFingerprint &&
+                    !cursor.isNull(7) && cursor.getString(7) == identity.rightScopeFingerprint &&
+                    !cursor.isNull(8) && cursor.getString(8) == identity.filterFingerprint &&
+                    !cursor.isNull(9) && cursor.getString(9) == identity.comparisonMode.wireValue &&
+                    !cursor.isNull(10) && cursor.getString(10) == identity.acceptedBaselineFingerprint
+                if (!acceptedMatches) {
+                    throw BisyncPreviewRejectedException("Accepted Bisync baseline does not match the preview")
+                }
+            } else {
+                if (!cursor.isNull(4) || !cursor.isNull(5) || !cursor.isNull(6) ||
+                    !cursor.isNull(7) || !cursor.isNull(8) || !cursor.isNull(9) ||
+                    !cursor.isNull(10)) {
+                    throw BisyncPreviewRejectedException("Absent Bisync state cannot reuse an accepted baseline")
+                }
+            }
+        } finally {
+            cursor.close()
+        }
+    }
+
     private fun validateCurrentProfile(profile: ProfileRecord, identity: BisyncPreviewIdentity) {
         if (profile.mode != ProfileMode.BISYNC || !profileMatches(profile, identity)) {
             throw BisyncPreviewRejectedException("Preview identity does not match the current Bisync profile")
@@ -493,6 +640,9 @@ class BisyncPreviewRepository(context: Context) {
     }
 
     private companion object {
+        const val PREFLIGHT_MAX_AGE_MILLIS = 15L * 60L * 1000L
+        const val SIZE_ONLY_DISCLOSURE = "SIZE_ONLY_CONTENT_CHANGES_UNDETECTED"
+
         val projection = arrayOf(
             BISYNC_PREVIEW_COLUMN_ID,
             BISYNC_PREVIEW_COLUMN_PROFILE_ID,
