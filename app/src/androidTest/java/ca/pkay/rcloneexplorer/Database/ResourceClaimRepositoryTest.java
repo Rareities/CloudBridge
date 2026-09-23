@@ -418,7 +418,7 @@ public class ResourceClaimRepositoryTest {
         DatabaseHandler handler = new DatabaseHandler(testContext);
         SQLiteDatabase upgraded = handler.getWritableDatabase();
         try {
-            assertEquals(13, upgraded.getVersion());
+            assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
             try (android.database.Cursor cursor = upgraded.rawQuery(
                     "SELECT " + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE + ", "
                             + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON + ", "
@@ -438,6 +438,56 @@ public class ResourceClaimRepositoryTest {
                     new String[]{"migration-profile-v12"})) {
                 assertTrue(cursor.moveToFirst());
                 assertEquals(123L, cursor.getLong(0));
+            }
+        } finally {
+            upgraded.close();
+            handler.close();
+        }
+    }
+
+    @Test
+    public void versionThirteenUpgradeAddsPreviewLedgerWithoutLosingProfiles() {
+        SQLiteDatabase versionThirteen = SQLiteDatabase.openOrCreateDatabase(
+                testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
+        versionThirteen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
+
+        ContentValues profile = new ContentValues();
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ID, "migration-profile-v13");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_REVISION, 3);
+        profile.put(DatabaseInfo.PROFILE_COLUMN_TITLE, "Existing Bisync profile");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_MODE, "BISYNC");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ENDPOINT, "endpoint-snapshot");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_SETTINGS, "settings-snapshot");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_FINGERPRINT, "profile-snapshot");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ENGINE, "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_READINESS, "PREFLIGHT_REQUIRED");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_CREATED_AT, 100L);
+        profile.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, 200L);
+        versionThirteen.insertOrThrow(DatabaseInfo.PROFILE_TABLE_NAME, null, profile);
+        versionThirteen.setVersion(13);
+        versionThirteen.close();
+
+        DatabaseHandler handler = new DatabaseHandler(testContext);
+        SQLiteDatabase upgraded = handler.getWritableDatabase();
+        try {
+            assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
+            assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
+                    "SELECT COUNT(*) FROM " + DatabaseInfo.PROFILE_TABLE_NAME, null));
+            assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                    new String[]{DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME}));
+            assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='bisync_preview_one_owner'",
+                    null));
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.PROFILE_COLUMN_REVISION + ", "
+                            + DatabaseInfo.PROFILE_COLUMN_FINGERPRINT + " FROM "
+                            + DatabaseInfo.PROFILE_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.PROFILE_COLUMN_ID + " = ?",
+                    new String[]{"migration-profile-v13"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals(3L, cursor.getLong(0));
+                assertEquals("profile-snapshot", cursor.getString(1));
             }
         } finally {
             upgraded.close();

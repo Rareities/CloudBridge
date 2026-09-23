@@ -935,3 +935,66 @@ CloudBridge intentionally remains pinned to the last published immutable engine 
 **Next:** continue WP08 by mapping app preview identity and owner lifecycle to the existing DB/run
 model; preserve the app's current published pin until the new engine commit is available through a
 verified Rareities branch. Do not enable initialization before the backup/restore/fault gates pass.
+
+## 2026-09-24 - WP08 durable preview identity and owner checkpoint (PARTIAL)
+
+1. **Objective:** durably bind a non-authoritative Bisync preview to the exact profile, endpoint,
+   filter, comparison policy, accepted baseline and immutable engine identity while preventing
+   overlapping preview owners.
+2. **Scope:** app-only identity/freshness model, separate preview-operation repository, SQLite v14
+   preview table and migration, JVM tests, and instrumentation-test source for durable ownership.
+3. **Out of scope:** native worker/CLI integration, actual UUID workdir orchestration, UI/history,
+   preview-to-mutation revalidation, initialization/recovery, same-provider preservation/restore,
+   scheduling integration, external publication and release.
+4. **Preconditions:** app still pins the published native SHA
+   `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; its v1 summary parser and the local-only native
+   isolated-baseline prototype are recorded in earlier WP08 entries. The native prototype remains
+   unpublished and is not invoked by this app change.
+5. **Design:** immutable hash-only identity covers UUID profile/revision/fingerprint, engine/state
+   pin, both account/scope fingerprints, filter/comparison, delete limits, native-state class and
+   accepted-baseline fingerprint. Queue/claim/finish are serialized through a separate durable
+   owner table with owner-token generation, a partial unique active-owner index, strict aggregate
+   summary constraints, stale identity handling and a 15-minute display-only freshness rule.
+6. **Safety invariants:** preview identity contains no raw endpoint paths or credentials; summaries
+   contain only bounded counters and never claim known conflicts. Preview does not mutate profile
+   readiness or authorize any write. Unconfirmed process stop and process death retain a blocking
+   recovery state; stale callbacks cannot finish a newer owner. The existing accepted baseline is
+   never overwritten by this repository.
+7. **Implementation:** new `BisyncPreviewIdentity`, operation/failure/freshness types and
+   `BisyncPreviewRepository`; DB version 14 adds `bisync_preview_table`, active-owner/history
+   indices and v13-to-v14 migration. The v12 migration assertion now follows the current schema
+   version and a v13 profile-preservation fixture was added. Source remains uncommitted at this
+   checkpoint; the user-owned untracked `.android/` directory was not touched or staged.
+8. **Reuse:** existing profile/preflight identities, strict v1 path-free parser, SQLite ownership
+   conventions, unique-index concurrency guard and current JVM/instrumentation test harness.
+9. **Retired:** no normal `RunRepository` rows or legacy task direction are repurposed for preview;
+   no preview status is interpreted as readiness or mutation authorization.
+10. **Failure behavior:** changed profile/preflight becomes STALE; malformed owner/state cannot be
+    claimed; failed/truncated parsing is unavailable; unconfirmed termination becomes
+    RECOVERY_REQUIRED; process restart marks RUNNING as INTERRUPTED and continues to block another
+    preview until a separately proven safe recovery path exists.
+11. **Tests:** final `:app:testOssDebugUnitTest --no-daemon
+    -Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll` PASS: 88 tests reported,
+    0 failures/errors, 1 existing Windows capability skip. `:app:compileOssDebugAndroidTestJavaWithJavac`
+    PASS (test sources compile; not executed). `:app:lintOssDebug -x :rclone:buildAll` task PASS;
+    report says 0 current errors and 94 warnings, with 2 errors/428 warnings suppressed by the
+    existing baseline and 76 stale baseline entries. Two new `UseKtx` suggestions point to the
+    explicit transaction boundaries in the preview repository. Exact table SQL expanded from
+    source and exercised against in-memory SQLite: create/index/integrity PASS, duplicate active
+    owner rejected, valid complete summary accepted, invalid summary/status row rejected. `git
+    diff --check` PASS. No app APK was assembled against these new changes and native build was not
+    rerun in this checkpoint.
+12. **Acceptance:** durable identity/owner schema foundation PARTIAL. Preview has no app-owned
+    worker or command path yet, so no preview can be launched through this feature. Instrumentation
+    execution and Galaxy S26 / One UI 8.5/9 (actual API/firmware), live Proton, mutation-boundary,
+    initialization/recovery, backup/restore, process-kill/reboot, and device-level migration tests
+    are **NOT RUN**. No PR, CI, signing, release or release-readiness claim.
+13. **Rollback:** revert only the pending preview-identity/repository/schema/test files and the
+    v14 migration change as one bounded checkpoint; retain prior v13 accepted-state evidence and
+    protections. Never remove accepted listings, user files or recovery evidence.
+
+**Next:** implement a distinct durable preview worker/coordinator around the exact native CLI
+contract, UUID-owned isolated workdir and owned-process drain/cancel lifecycle. Do not wire or pin
+the local native `--preview-state-from` flag until its source boundary and publication path are
+reviewed; do not enable initialization/recovery before preserved-version, exact-restore and
+fault-boundary evidence passes.

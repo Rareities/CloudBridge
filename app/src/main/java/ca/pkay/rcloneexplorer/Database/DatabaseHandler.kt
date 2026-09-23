@@ -30,6 +30,9 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_B
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_BISYNC_PREVIEWS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
@@ -62,6 +65,9 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE)
         sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON)
         sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_PREVIEWS)
+        sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW)
+        sqLiteDatabase.execSQL(SQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -109,6 +115,11 @@ class DatabaseHandler(context: Context?) :
             sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE)
             sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON)
             sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID)
+        }
+        if (oldVersion < 14) {
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_PREVIEWS)
+            sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW)
+            sqLiteDatabase.execSQL(SQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY)
         }
     }
 
