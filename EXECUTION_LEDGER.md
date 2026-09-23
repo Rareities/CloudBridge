@@ -614,3 +614,78 @@ initialization/recovery actions, and preservation/restore fault boundaries. Keep
 execution disabled until native-state compatibility, both-populated/one-empty/conflict cases,
 exact retained bytes and migration rollback are proven. WP09 provider/backend work still needs
 standalone evidence; device and Proton acceptance stay **NOT RUN**.
+
+## 2026-09-23 — WP08 partial native-state evidence persistence
+
+**CloudBridge implementation commit:** `f920905ffc5a819f404d3e9b564a4f7825050d38`
+(`Persist native Bisync recovery evidence`).
+
+### Package record (13-field format)
+
+1. **Objective:** connect the read-only native Bisync state inspector to fail-closed app
+   preflight and durably retain sanitized native state and recovery-list validation evidence.
+2. **Scope:** app command invocation and response validation; explicit `INTERRUPTED` state;
+   additive v12→v13 SQLite columns; conservative migration defaults; evidence round-trip and
+   policy tests; immutable rclone pin refresh to the published engine commit.
+3. **Out of scope:** preview UI, initialization, recovery execution, run-scoped app backup
+   coordinator, user-facing restore, lock/process-kill fault injection, DB downgrade support,
+   and live provider/device acceptance. `recoveryListingsValid` is diagnostic evidence only.
+4. **Preconditions:** WP07 app commit `76a71b4` and native WP08 state inspector are present.
+   CloudBridge now pins `https://github.com/Rareities/rclone.git` at
+   `d53551e1722305268c6072263f11066f1278a4a0`; remote tree
+   `98c402c28fda112c56b543b3104841435fb8cdf6` equals the locally validated source tree.
+5. **Design:** app invokes `bisync --inspect-state` only for the established profile UUID
+   workdir; absent/unavailable/invalid paths and malformed/unconfirmed process output remain
+   `UNKNOWN`. Status/reason/listing-validity are stored separately from the accepted baseline.
+   Existing v12 rows migrate to `UNKNOWN / STATE_NOT_RECORDED / false`; fresh schema uses the
+   same additive columns. Only `INTERRUPTED` may retain `recoveryListingsValid=true`, and that
+   value never changes readiness or authorizes recovery.
+6. **Safety invariants:** inspection is non-mutating; no legacy listing rename, restore, resync,
+   initialization, or purge occurs. Unrecognized status/reason is sanitized and blocked.
+   Missing profile workdir is not proof of absent state. No existing Bisync execution path is
+   enabled by this slice.
+7. **Implementation:** committed coordinator/native probe wiring, strict response mapping,
+   DB version 13 and v12→v13 `ALTER TABLE` migration, persisted state/reason/validation flag,
+   constructor compatibility, and unit/instrumentation regression coverage. App pin and
+   profile fixtures use the immutable `d53551e…` ref.
+8. **Existing code reused:** WP05 bounded confirmed-exit native runner and cancellation; WP06
+   stable profile UUID; WP07 preflight, immutable baseline policy, SQLite repository and native
+   state CLI; existing SQLite transaction/migration owner.
+9. **Code retired:** the app's previous engine pin `ec863fdcd9e1ce0d13357f791d5528aab10bf0ec`
+   is replaced by the immutable tree-verified `d53551e…` pin. The coordinator's placeholder
+   state probe is replaced by the native read-only probe; its exception path remains fail-closed.
+10. **Failure behaviour:** failed, truncated, oversized, unsupported-version or unconfirmed
+    output returns unknown and blocks preflight. Old rows cannot appear initialized or
+    recoverable merely because columns were added. Invalid diagnostic strings are stored as a
+    constant category, never raw paths/errors.
+11. **Tests:** latest app run on JDK 21 / Gradle 8.13 / Android SDK 35 passed
+    `:app:testOssDebugUnitTest`,
+    `:app:compileOssDebugAndroidTestJavaWithJavac`, and `:app:lintOssDebug` with
+    `-x :rclone:buildAll`; XML reports show 14 suites, 76 tests, 0 failures, 0 errors, 1
+    Windows symlink-capability skip. Android-test Java compilation includes the v12 migration
+    and persistence round-trip cases, but no device/AVD exists to execute them. Lint task passed
+    using the configured baseline: 92 warnings reported, 2 errors and 428 warnings filtered,
+    76 stale baseline entries. `git diff --cached --check` passed. An earlier full integrated
+    run against the same published rclone SHA passed `:rclone:buildAll` for all four ABIs; the
+    post-v13 rerun skipped rebuilding that unchanged engine. Full standalone `./cmd/bisync`
+    tests, `go vet`, and Android/arm64 build for the native inspector passed as recorded in
+    `PATCH_LEDGER.md`. No current-slice APK/R8/release build is claimed.
+12. **Acceptance status:** this is a WP08 partial foundation, not package acceptance. Native
+    state inspection and durable evidence compile/test at source level; preview, initialization,
+    recovery UI/coordinator, durable run-scoped backups, mutation-boundary fault tests, migration
+    rollback and end-to-end data-preservation acceptance remain open. Galaxy S26 / One UI 8.5/9,
+    actual instrumentation, live Proton, and Proton disposable-scope verification are
+    **NOT RUN**. No release readiness is implied.
+13. **Rollback point:** revert only CloudBridge commit `f920905` to remove the app integration
+    and v13 columns from source history; keep the published native inspector unless separately
+    reviewed. Do not downgrade an installed v13 database or remove state/backups. No migration
+    downgrade or old-app rollback has been proven.
+
+### WP08 continuation
+
+Keep WP08 active. Next implement a fresh, time-bounded non-mutating preview with explicit
+known/unknown result fields, then preserved initialization/recovery actions and a durable
+run-scoped backup coordinator; add permission/disk/network/cancellation/process-death tests.
+Maintain fail-closed readiness and do not surface an action as recoverable until native state,
+app ownership, exact backup bytes, and rollback boundaries are tested. The supplementary WP14
+migration requirements remain cross-cutting; the workspace master numbering is unchanged.
