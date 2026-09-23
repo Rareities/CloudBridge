@@ -73,6 +73,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
 
     private var existingTask: Task? = null
+    private var hasUnsupportedDirectionPlaceholder = false
     private var remotePathHolder = ""
     private var remotePathHolder2 = ""
     // Tracks which remote field the RemoteFolderPickerFragment is choosing a path for.
@@ -257,7 +258,19 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskToPopulate.title = findViewById<EditText>(R.id.task_title_textfield).text.toString()
         val remotename = remoteDropdown.selectedItem.toString()
         taskToPopulate.remoteId = remotename
-        val direction = SyncDirectionObject.directionForSpinnerPosition(syncDirection.selectedItemPosition)
+        val direction = SyncDirectionObject.directionForSaving(
+            syncDirection.selectedItemPosition,
+            hasUnsupportedDirectionPlaceholder,
+            existingTask?.direction
+        ) ?: run {
+            Toasty.error(
+                this,
+                getString(R.string.task_data_validation_error_unsupported_direction),
+                Toast.LENGTH_LONG,
+                true
+            ).show()
+            return null
+        }
         for (ri in rcloneInstance.remotes) {
             if (ri.name == taskToPopulate.remoteId) {
                 taskToPopulate.remoteType = ri.type
@@ -579,7 +592,13 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     private fun prepareSyncDirectionDropdown() {
-        val options = SyncDirectionObject.getOptionsArray(this)
+        val initialDirection = existingTask?.direction ?: SyncDirectionObject.SYNC_LOCAL_TO_REMOTE
+        hasUnsupportedDirectionPlaceholder =
+            existingTask != null && SyncDirectionObject.spinnerPositionForDirection(initialDirection) < 0
+        val options = SyncDirectionObject.getOptionsArray(this).toMutableList()
+        if (hasUnsupportedDirectionPlaceholder) {
+            options.add(0, getString(R.string.task_direction_unsupported_saved_value, initialDirection))
+        }
         val directionAdapter =
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
         syncDirection.adapter = directionAdapter
@@ -590,15 +609,22 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 position: Int,
                 id: Long
             ) {
-                val direction = SyncDirectionObject.directionForSpinnerPosition(position)
+                val direction = SyncDirectionObject.directionForSpinnerPosition(
+                    position,
+                    hasUnsupportedDirectionPlaceholder
+                )
                 updateSpinnerDescription(direction)
-                updateRemoteFieldVisibility(direction)
+                updateRemoteFieldVisibility(direction ?: initialDirection)
             }
 
             override fun onNothingSelected(adapterView: AdapterView<*>?) {}
         }
-        val initialDirection = existingTask?.direction ?: SyncDirectionObject.SYNC_LOCAL_TO_REMOTE
-        syncDirection.setSelection(SyncDirectionObject.spinnerPositionForDirection(initialDirection))
+        syncDirection.setSelection(
+            SyncDirectionObject.spinnerPositionForDirection(
+                initialDirection,
+                hasUnsupportedDirectionPlaceholder
+            ).coerceAtLeast(0)
+        )
         updateRemoteFieldVisibility(initialDirection)
     }
 
@@ -616,7 +642,14 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         transfersDropdown.setSelection(selection)
     }
 
-    private fun updateSpinnerDescription(value: Int) {
+    private fun updateSpinnerDescription(value: Int?) {
+        if (value == null) {
+            syncDescription.text = getString(
+                R.string.task_direction_unsupported_description,
+                existingTask?.direction ?: 0
+            )
+            return
+        }
         var text = getString(R.string.description_sync_direction_sync_toremote)
         when (value) {
             SyncDirectionObject.SYNC_LOCAL_TO_REMOTE -> text =

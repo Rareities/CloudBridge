@@ -502,6 +502,9 @@
     <string name="task_data_validation_error_no_local_path">You have not selected a local path yet</string>
     <string name="task_data_validation_error_no_remote_path">You have not selected a remote path yet</string>
     <string name="task_data_validation_error_same_remote">Source and destination remote paths cannot be identical</string>
+    <string name="task_data_validation_error_unsupported_direction">Choose a supported transfer mode before saving</string>
+    <string name="task_direction_unsupported_saved_value">Unsupported saved transfer mode (%1$d) — choose a replacement to save</string>
+    <string name="task_direction_unsupported_description">Saved transfer mode %1$d is legacy or unknown to this editor. Saving with this placeholder preserves it; choosing a supported mode explicitly replaces it.</string>
     <string name="bisync">Bidirectional</string>
     <string name="description_sync_direction">This determines the source and destination for the data transfer.</string>
     <string name="description_sync_direction_sync_tolocal">Synchronize files from remote storage to local storage. It can also delete files from the local storage if they don\'t exist on the remote storage. Only the local storage is updated with changes.</string>
