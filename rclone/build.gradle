@@ -42,6 +42,14 @@ ext {
     RCLONE_REPO_URL = configuredRepoUrl
     RCLONE_REF = configuredRef
 
+    def configuredGo = project.findProperty('de.schuelken.cloudbridge.goExecutable')?.toString()?.trim()
+    def goRoot = System.getenv('GOROOT')?.trim()
+    def goBinary = System.properties['os.name'].startsWith('Windows') ? 'go.exe' : 'go'
+    def goFromRoot = goRoot ? Paths.get(goRoot, 'bin', goBinary).toAbsolutePath() : null
+    GO_EXECUTABLE = configuredGo
+        ? project.file(configuredGo).absolutePath
+        : (goFromRoot != null && goFromRoot.toFile().isFile() ? goFromRoot.toString() : 'go')
+
     PROJECT_DIR = projectDir.absolutePath
     CACHE_PATH = Paths.get(PROJECT_DIR, 'cache').toString()
     GOPATH = Paths.get(CACHE_PATH, 'gopath').toString()
@@ -181,7 +189,7 @@ def buildRclone(abi) {
                 workingDir Paths.get(CACHE_PATH, 'rclone-src').toString()
                 def ldflags = "-s -w -X github.com/rclone/rclone/fs.Version=${getSourceVersion()}"
                 commandLine (
-                    'go',
+                    GO_EXECUTABLE,
                     'build',
                     '-tags',
                     'noselfupdate',
@@ -204,7 +212,7 @@ task createRcloneModule {
         exec {
             workingDir CACHE_PATH
             environment 'GOPATH', GOPATH
-            commandLine 'go', 'mod', 'init', 'rclone'
+            commandLine GO_EXECUTABLE, 'mod', 'init', 'rclone'
         }
     }
 }
@@ -213,7 +221,7 @@ task checkoutRclone(dependsOn: createRcloneModule) {
     doLast {
         def goVersionOutput = new ByteArrayOutputStream()
         exec {
-            commandLine 'go', 'version'
+            commandLine GO_EXECUTABLE, 'version'
             standardOutput = goVersionOutput
         }
 
@@ -292,7 +300,7 @@ task clean {
     doLast {
         exec {
             environment 'GOPATH', GOPATH
-            commandLine 'go', 'clean', '-cache', '-testcache', '-modcache', '-fuzzcache'
+            commandLine GO_EXECUTABLE, 'clean', '-cache', '-testcache', '-modcache', '-fuzzcache'
         }
         delete CACHE_PATH
         delete fileTree(OUTPUT_BASE_PATH).matching {

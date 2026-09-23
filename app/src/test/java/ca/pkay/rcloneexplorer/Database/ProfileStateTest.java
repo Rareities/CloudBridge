@@ -54,7 +54,7 @@ public class ProfileStateTest {
     public void filterContentAndImmutableEngineRefAreSemanticFingerprintInputs() {
         Task task = new Task(11L);
         task.setFilterId(3L);
-        String engine = "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0";
+        String engine = "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0";
         ProfileSpec first = LegacyProfileMapper.INSTANCE.fromTask(task, engine, "+ /private/**\n", false);
         ProfileSpec changedFilter = LegacyProfileMapper.INSTANCE.fromTask(task, engine, "+ /shared/**\n", false);
         ProfileSpec changedEngine = LegacyProfileMapper.INSTANCE.fromTask(
@@ -74,7 +74,7 @@ public class ProfileStateTest {
         Task task = new Task(12L);
         task.setFilterId(8L);
 
-        ProfileSpec spec = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0", null, true);
+        ProfileSpec spec = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0", null, true);
 
         assertEquals(ProfileReadiness.BLOCKED, spec.getReadiness());
         assertNotNull(spec.getReason());
@@ -83,9 +83,9 @@ public class ProfileStateTest {
     @Test
     public void titleOnlyEditDoesNotChangeSemanticFingerprint() {
         Task task = new Task(13L);
-        ProfileSpec first = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0");
+        ProfileSpec first = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
         task.setTitle("Renamed profile");
-        ProfileSpec renamed = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0");
+        ProfileSpec renamed = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
 
         assertEquals(first.getFingerprint(), renamed.getFingerprint());
     }

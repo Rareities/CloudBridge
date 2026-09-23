@@ -396,7 +396,7 @@ public class ResourceClaimRepositoryTest {
         profile.put(DatabaseInfo.PROFILE_COLUMN_ENDPOINT, "endpoint-fingerprint");
         profile.put(DatabaseInfo.PROFILE_COLUMN_SETTINGS, "settings-fingerprint");
         profile.put(DatabaseInfo.PROFILE_COLUMN_FINGERPRINT, "profile-fingerprint");
-        profile.put(DatabaseInfo.PROFILE_COLUMN_ENGINE, "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ENGINE, "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
         profile.put(DatabaseInfo.PROFILE_COLUMN_READINESS, "BLOCKED");
         profile.put(DatabaseInfo.PROFILE_COLUMN_CREATED_AT, 1);
         profile.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, 1);
@@ -406,7 +406,7 @@ public class ResourceClaimRepositoryTest {
         preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID, "migration-profile-v12");
         preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION, 1);
         preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT, "profile-fingerprint");
-        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_ENGINE_REF, "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0");
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_ENGINE_REF, "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
         preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_STATE_VERSION, 1);
         preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_READINESS, "BLOCKED");
         preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_REASON, "NATIVE_STATE_UNKNOWN");
