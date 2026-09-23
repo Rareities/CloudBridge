@@ -508,4 +508,84 @@ public class ResourceClaimRepositoryTest {
         assertEquals("NATIVE_RUN_ACTIVE", status.getNativeStateReason());
         assertEquals(false, status.getRecoveryListingsValid());
     }
+
+    @Test
+    public void confirmedReinitializationRetainsAcceptedBaselineForRollbackReview() {
+        DatabaseHandler handler = new DatabaseHandler(testContext);
+        Task task = new Task(0);
+        task.setTitle("reinitialization preserves old baseline");
+        task.setDirection(SyncDirectionObject.SYNC_BIDIRECTIONAL);
+        task.setRemoteId("reinit-preservation-remote");
+        task.setRemotePath("root");
+        task.setLocalPath("/storage/emulated/0/reinit-preservation");
+        Task stored = handler.createTask(task, false);
+        handler.close();
+
+        ProfileRecord profile = new ProfileRepository(testContext).getForLegacyTask(stored.getId());
+        assertTrue(profile != null);
+        String leftAccount = repeat('a', 64);
+        String rightAccount = repeat('b', 64);
+        String engineRef = "rclone:" + ca.pkay.rcloneexplorer.BuildConfig.RCLONE_ENGINE_VERSION + "@"
+                + ca.pkay.rcloneexplorer.BuildConfig.RCLONE_ENGINE_REF;
+        String filterFingerprint = LegacyProfileMapper.INSTANCE.fingerprintNoFilter();
+        BisyncEndpointEvidence left = new BisyncEndpointEvidence(
+                leftAccount, BisyncEndpointScope.Companion.from(leftAccount, "left"), true);
+        BisyncEndpointEvidence right = new BisyncEndpointEvidence(
+                rightAccount, BisyncEndpointScope.Companion.from(rightAccount, "right"), true);
+        BisyncListingEvidence completeEmptyListing = new BisyncListingEvidence(true, true, 0, null);
+
+        BisyncPreflightInput absent = new BisyncPreflightInput(
+                profile.getRevision(), profile.getFingerprint(), engineRef,
+                BisyncPreflightPolicy.CURRENT_STATE_VERSION, left, right,
+                completeEmptyListing, completeEmptyListing, filterFingerprint, true,
+                BisyncComparisonMode.SIZE_AND_MODTIME, BisyncNativeState.ABSENT, null,
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_PERCENT,
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_COUNT);
+        BisyncPreflightResult initialization = BisyncPreflightPolicy.INSTANCE.evaluate(absent);
+        assertEquals(ProfileReadiness.INITIALIZATION_REQUIRED, initialization.getReadiness());
+        assertTrue(initialization.getCandidateBaseline() != null);
+
+        BisyncPreflightInput compatible = new BisyncPreflightInput(
+                profile.getRevision(), profile.getFingerprint(), engineRef,
+                BisyncPreflightPolicy.CURRENT_STATE_VERSION, left, right,
+                completeEmptyListing, completeEmptyListing, filterFingerprint, true,
+                BisyncComparisonMode.SIZE_AND_MODTIME, BisyncNativeState.COMPATIBLE,
+                initialization.getCandidateBaseline(),
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_PERCENT,
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_COUNT);
+        BisyncPreflightResult ready = BisyncPreflightPolicy.INSTANCE.evaluate(compatible);
+        assertEquals(ProfileReadiness.READY, ready.getReadiness());
+
+        BisyncPreflightRepository repository = new BisyncPreflightRepository(testContext);
+        repository.recordAttempt(profile.getProfileId(), profile.getRevision(), profile.getFingerprint(),
+                compatible, ready, 126L);
+        String acceptedFingerprint = repository.get(profile.getProfileId())
+                .getAcceptedBaseline().getPreflightFingerprint();
+
+        try {
+            repository.resetForConfirmedReinitialization(
+                    profile.getProfileId(), profile.getRevision(), profile.getFingerprint(), false);
+            fail("reinitialization must require explicit confirmation");
+        } catch (SecurityException expected) {
+            // Expected: no state may be changed without explicit confirmation.
+        }
+        assertEquals(acceptedFingerprint, repository.get(profile.getProfileId())
+                .getAcceptedBaseline().getPreflightFingerprint());
+
+        repository.resetForConfirmedReinitialization(
+                profile.getProfileId(), profile.getRevision(), profile.getFingerprint(), true);
+
+        BisyncPreflightStatus afterRequest = repository.get(profile.getProfileId());
+        assertTrue(afterRequest != null);
+        assertEquals(ProfileReadiness.INITIALIZATION_REQUIRED, afterRequest.getReadiness());
+        assertEquals("EXPLICIT_REINITIALIZATION_REQUIRES_PRESERVATION", afterRequest.getReasonCode());
+        assertTrue(afterRequest.getAcceptedBaseline() != null);
+        assertEquals(acceptedFingerprint, afterRequest.getAcceptedBaseline().getPreflightFingerprint());
+    }
+
+    private static String repeat(char value, int count) {
+        char[] values = new char[count];
+        java.util.Arrays.fill(values, value);
+        return new String(values);
+    }
 }

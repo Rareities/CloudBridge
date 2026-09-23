@@ -178,7 +178,11 @@ class BisyncPreflightRepository(context: Context) {
         }
     }
 
-    /** The only path that drops an accepted identity is an explicit, confirmed reinitialization. */
+    /**
+     * Records a confirmed reinitialization request without discarding the last accepted identity.
+     * The caller must not invoke this as a substitute for preservation or native execution. A
+     * failed/abandoned reinitialization must leave the previous baseline available for review.
+     */
     fun resetForConfirmedReinitialization(
         profileId: String,
         expectedRevision: Long,
@@ -196,15 +200,22 @@ class BisyncPreflightRepository(context: Context) {
                 current.fingerprint != expectedProfileFingerprint) {
                 throw StaleBisyncPreflightException("Profile changed before reinitialization was confirmed")
             }
-            db.delete(
+            val checkedAt = System.currentTimeMillis()
+            val preflightValues = ContentValues().apply {
+                put(BISYNC_PREFLIGHT_COLUMN_READINESS, ProfileReadiness.INITIALIZATION_REQUIRED.wireValue)
+                put(BISYNC_PREFLIGHT_COLUMN_REASON, "EXPLICIT_REINITIALIZATION_REQUIRES_PRESERVATION")
+                put(BISYNC_PREFLIGHT_COLUMN_CHECKED_AT, checkedAt)
+            }
+            db.update(
                 BISYNC_PREFLIGHT_TABLE_NAME,
+                preflightValues,
                 "$BISYNC_PREFLIGHT_COLUMN_PROFILE_ID = ?",
                 arrayOf(profileId)
             )
             val values = ContentValues().apply {
                 put(PROFILE_COLUMN_READINESS, ProfileReadiness.INITIALIZATION_REQUIRED.wireValue)
                 put(PROFILE_COLUMN_REASON, "EXPLICIT_REINITIALIZATION_REQUIRES_PRESERVATION")
-                put(PROFILE_COLUMN_UPDATED_AT, System.currentTimeMillis())
+                put(PROFILE_COLUMN_UPDATED_AT, checkedAt)
             }
             val updated = db.update(
                 PROFILE_TABLE_NAME,
