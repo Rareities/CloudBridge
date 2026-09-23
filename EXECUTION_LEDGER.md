@@ -878,3 +878,60 @@ unsuitable. Current upstream `rclone/rclone:master` is `90e67915c88d4adf244f1d52
 comparing `Rareities:codex/luna-engine` to it reports 6 commits ahead, 1 behind, and 26 changed
 files. This is a candidate upstream PR boundary, not approval to publish: review/rebase and split
 scope remain pending. No PR was created during this refresh.
+
+## 2026-09-24 — WP08 native isolated-preview baseline primitive (PARTIAL)
+
+Rareities/rclone local source commit `81ac481705944ac125e2f8eeab823d78f6b1cfdb` (tree
+`ada7e7df6b8c196957afd0da77142dfe64227327`), parent `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`.
+The separate native patch-ledger commit is `4cb77955699445ea16ea44aac6041169cb895192`.
+These commits are local to `work/rclone-preview-state`; they are not yet published to GitHub and
+CloudBridge intentionally remains pinned to the last published immutable engine SHA `fe775a8…`.
+
+1. **Objective:** provide a native-safe way for an app-owned preview to use compatible accepted
+   Bisync state in a fresh isolated workdir without updating the live profile listings.
+2. **Scope:** rclone `CopyCompatibleState`, source-guarded byte-exact clone, CLI-only
+   `--preview-state-from`, strict validation/docs/tests. The change is prepared independently from
+   the archival `work/rclone-history` and its unrelated generated files.
+3. **Out of scope:** CloudBridge worker/UI/persistence, initialization or mutation authorization,
+   durable backups/restore/recovery, Proton/Samsung acceptance, GitHub PR publication, and release.
+4. **Preconditions:** native state inspector and versioned path-free dry-run summary were reviewed;
+   source parent is the currently published Rareities commit above.
+5. **Design:** require a compatible source workdir and absent explicit destination. Hold the native
+   source guard through inspection, bounded read and copy; validate the exact source byte streams,
+   compare both listings using native comparison rules, reject overlaps (lexical and filesystem
+   identity) and symlinked components, securely publish no-overwrite files, and verify destination
+   bytes. Copy only the two accepted listing files, never lock/recovery/scratch artifacts.
+6. **Safety invariants:** no endpoint writes, no change to accepted listing or lock-metadata bytes,
+   no overwrite of existing destination, fail closed on unknown/interrupted/absent/incompatible or
+   unsafe input. The source inspector may create/retain its persistent guard file. A process crash
+   may leave an incomplete isolated UUID folder; it must never be reused. Preview remains
+   non-authoritative and does not enable initialization.
+7. **Implementation:** native source commit adds helper/API/CLI flag, strict parser reuse, rollback
+   of only invocation-owned partial destination files, tests and user/developer documentation.
+   The follow-up patch ledger records source commit and acceptance boundaries.
+8. **Reuse:** existing native inspector, parser, comparison semantics and Bisync dry-run; no new
+   dependency, app-side file comparison, or change to the existing CloudBridge engine pin.
+9. **Retired:** no prior behavior removed; CLI preview options are not exposed as RC parameters.
+10. **Failure behavior:** missing, busy, unsafe, incompatible or non-overlapping state failures
+    happen before creating the isolated target; ordinary mid-copy failure removes only files/empty
+    directory created by that invocation. App orchestration must never retry a partial UUID path.
+11. **Tests:** Windows Go 1.26.8, short workspace-contained temp root: full `go test
+    -mod=readonly ./cmd/bisync -count=1` PASS (37.268 s); focused clone/dry-run/flag tests PASS;
+    `go vet -mod=readonly ./cmd/bisync` PASS; full `go build -buildvcs=false -mod=readonly ./...`
+    PASS; `GOOS=android GOARCH=arm64 go build -mod=readonly ./cmd/bisync` PASS. Fresh CLI binary
+    build/help/fail-closed option smoke PASS. Symlink fixture **SKIPPED** because Windows denied
+    link creation due missing privilege. No dependency changed; only disposable local endpoints;
+    no Proton network or Samsung hardware used.
+12. **Acceptance:** native isolation primitive PARTIAL only; it is not yet in the published fork or
+    an app APK. Remaining app work includes UUID run-owned workdirs, summary/mode/endpoint/policy
+    presentation, persisted fingerprint/engine/compatibility/time, 15-minute freshness, cancellation
+    and process-death handling, and fresh mutation-boundary revalidation. Initialization remains
+    blocked pending run-scoped preservation, rollback and fault-injection evidence. Proton and
+    Galaxy S26 / One UI 8.5/9 actual API/firmware are **NOT RUN**. No PR, release or readiness claim.
+13. **Rollback:** revert only native source commit `81ac4817…`; retain prior inspector, preview
+    summary, existing Bisync protections and live state. Do not alter current CloudBridge pin until
+    the source ref is safely published and app integration has independently passed.
+
+**Next:** continue WP08 by mapping app preview identity and owner lifecycle to the existing DB/run
+model; preserve the app's current published pin until the new engine commit is available through a
+verified Rareities branch. Do not enable initialization before the backup/restore/fault gates pass.
