@@ -20,6 +20,8 @@ data class BisyncPreviewIdentity(
     val rightScopeFingerprint: String,
     val filterFingerprint: String,
     val comparisonMode: BisyncComparisonMode,
+    /** Null for a compatible accepted baseline; required before queueing an absent-state preview. */
+    val initializationMode: BisyncPreviewResyncMode? = null,
     val maxDeletePercent: Int,
     val maxDeleteCount: Int,
     val nativeState: BisyncNativeState,
@@ -40,6 +42,9 @@ data class BisyncPreviewIdentity(
             "Invalid right endpoint fingerprint"
         }
         require(isDigest(filterFingerprint)) { "Invalid filter fingerprint" }
+        require(initializationMode == null || nativeState == BisyncNativeState.ABSENT) {
+            "An initialization preference applies only to absent native state"
+        }
         require(maxDeletePercent in 1..100) { "Delete percentage must be between 1 and 100" }
         require(maxDeleteCount > 0) { "Absolute delete limit must be positive" }
         require(nativeState == BisyncNativeState.ABSENT || nativeState == BisyncNativeState.COMPATIBLE) {
@@ -55,7 +60,7 @@ data class BisyncPreviewIdentity(
     /** Stable digest over semantic settings only; no raw paths, remote names, or credentials. */
     val fingerprint: String
         get() = sha256(canonical(listOf(
-            "bisync-preview-identity-v1",
+            if (initializationMode == null) "bisync-preview-identity-v1" else "bisync-preview-identity-v2",
             profileId,
             profileRevision.toString(),
             profileFingerprint,
@@ -71,6 +76,9 @@ data class BisyncPreviewIdentity(
             maxDeleteCount.toString(),
             nativeState.name,
             acceptedBaselineFingerprint ?: "none"
+        ) + if (initializationMode == null) emptyList() else listOf(
+            "initialization-mode",
+            initializationMode.wireValue
         )))
 
     companion object {
@@ -82,7 +90,8 @@ data class BisyncPreviewIdentity(
         fun fromPreflight(
             profile: ProfileRecord,
             input: BisyncPreflightInput,
-            result: BisyncPreflightResult
+            result: BisyncPreflightResult,
+            initializationMode: BisyncPreviewResyncMode? = null
         ): BisyncPreviewIdentity {
             require(profile.mode == ProfileMode.BISYNC) { "Preview requires a Bisync profile" }
             require(input.profileRevision == profile.revision && input.profileFingerprint == profile.fingerprint) {
@@ -115,9 +124,15 @@ data class BisyncPreviewIdentity(
                     require(profile.readiness == ProfileReadiness.INITIALIZATION_REQUIRED) {
                         "Profile readiness does not match absent native state"
                     }
+                    require(initializationMode != null) {
+                        "An explicit initialization preference is required for an absent-state preview"
+                    }
                     null
                 }
                 BisyncNativeState.COMPATIBLE -> {
+                    require(initializationMode == null) {
+                        "An initialization preference cannot be applied to a compatible baseline"
+                    }
                     require(result.readiness == ProfileReadiness.READY && profile.readiness == ProfileReadiness.READY) {
                         "Compatible native state requires a ready profile and baseline"
                     }
@@ -140,6 +155,7 @@ data class BisyncPreviewIdentity(
                 rightScopeFingerprint = requireNotNull(input.right.scope.fingerprint()),
                 filterFingerprint = requireNotNull(input.filterFingerprint),
                 comparisonMode = input.comparisonMode,
+                initializationMode = initializationMode,
                 maxDeletePercent = input.maxDeletePercent,
                 maxDeleteCount = input.maxDeleteCount,
                 nativeState = input.nativeState,
@@ -182,6 +198,21 @@ enum class BisyncPreviewOperationState(val wireValue: String, val terminal: Bool
     }
 }
 
+/** Explicit conflict preference used only for a first/reinitialization preview candidate. */
+enum class BisyncPreviewResyncMode(val wireValue: String) {
+    PATH1("path1"),
+    PATH2("path2"),
+    NEWER("newer"),
+    OLDER("older"),
+    LARGER("larger"),
+    SMALLER("smaller");
+
+    companion object {
+        fun fromWireValue(value: String?): BisyncPreviewResyncMode? =
+            values().firstOrNull { it.wireValue == value }
+    }
+}
+
 /** Allowlisted, path-free terminal reason codes. Raw native output is never persisted here. */
 enum class BisyncPreviewFailureCode(val wireValue: String) {
     PROCESS_FAILED("PROCESS_FAILED"),
@@ -195,7 +226,8 @@ enum class BisyncPreviewFailureCode(val wireValue: String) {
     IDENTITY_CHANGED("IDENTITY_CHANGED"),
     CANCELLED_UNCONFIRMED("CANCELLED_UNCONFIRMED"),
     OWNER_LOST("OWNER_LOST"),
-    NATIVE_STATE_UNRESOLVED("NATIVE_STATE_UNRESOLVED");
+    NATIVE_STATE_UNRESOLVED("NATIVE_STATE_UNRESOLVED"),
+    INITIALIZATION_POLICY_MISSING("INITIALIZATION_POLICY_MISSING");
 
     companion object {
         fun fromWireValue(value: String?): BisyncPreviewFailureCode? =

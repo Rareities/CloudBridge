@@ -17,8 +17,12 @@ class BisyncPreviewFreshnessTest {
         assertNotEquals(identity.fingerprint, identity.copy(rightScopeFingerprint = digest('f')).fingerprint)
         assertNotEquals(identity.fingerprint, identity.copy(engineRef = "rclone:1.76.0@${"e".repeat(40)}").fingerprint)
         assertNotEquals(identity.fingerprint, identity.copy(maxDeleteCount = 26).fingerprint)
+        val initIdentity = identity(nativeState = BisyncNativeState.ABSENT,
+            acceptedBaselineFingerprint = null, initializationMode = BisyncPreviewResyncMode.PATH1)
+        assertNotEquals(initIdentity.fingerprint,
+            initIdentity.copy(initializationMode = BisyncPreviewResyncMode.PATH2).fingerprint)
         assertNotEquals(identity.fingerprint, identity.copy(nativeState = BisyncNativeState.ABSENT,
-            acceptedBaselineFingerprint = null).fingerprint)
+            acceptedBaselineFingerprint = null, initializationMode = BisyncPreviewResyncMode.PATH1).fingerprint)
     }
 
     @Test
@@ -31,6 +35,10 @@ class BisyncPreviewFreshnessTest {
         assertThrows(IllegalArgumentException::class.java) { identity(nativeState = BisyncNativeState.UNKNOWN) }
         assertThrows(IllegalArgumentException::class.java) {
             identity(nativeState = BisyncNativeState.ABSENT, acceptedBaselineFingerprint = digest('e'))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            identity(nativeState = BisyncNativeState.COMPATIBLE,
+                initializationMode = BisyncPreviewResyncMode.PATH1)
         }
     }
 
@@ -70,9 +78,15 @@ class BisyncPreviewFreshnessTest {
         )
         val initialization = BisyncPreflightPolicy.evaluate(input)
         assertEquals(ProfileReadiness.INITIALIZATION_REQUIRED, initialization.readiness)
-        val absentIdentity = BisyncPreviewIdentity.fromPreflight(profile, input, initialization)
+        assertThrows(IllegalArgumentException::class.java) {
+            BisyncPreviewIdentity.fromPreflight(profile, input, initialization)
+        }
+        val absentIdentity = BisyncPreviewIdentity.fromPreflight(
+            profile, input, initialization, BisyncPreviewResyncMode.PATH1
+        )
         assertEquals(BisyncNativeState.ABSENT, absentIdentity.nativeState)
         assertEquals(null, absentIdentity.acceptedBaselineFingerprint)
+        assertEquals(BisyncPreviewResyncMode.PATH1, absentIdentity.initializationMode)
 
         val compatibleInput = input.copy(
             nativeState = BisyncNativeState.COMPATIBLE,
@@ -144,6 +158,8 @@ class BisyncPreviewFreshnessTest {
         maxDeleteCount: Int = 25,
         nativeState: BisyncNativeState = BisyncNativeState.COMPATIBLE,
         acceptedBaselineFingerprint: String? = digest('d'),
+        initializationMode: BisyncPreviewResyncMode? = if (nativeState == BisyncNativeState.ABSENT)
+            BisyncPreviewResyncMode.PATH1 else null,
         profileRevision: Long = 1
     ) = BisyncPreviewIdentity(
         profileId = profileId,
@@ -157,6 +173,7 @@ class BisyncPreviewFreshnessTest {
         rightScopeFingerprint = rightScopeFingerprint,
         filterFingerprint = digest('4'),
         comparisonMode = BisyncComparisonMode.SIZE_AND_MODTIME,
+        initializationMode = initializationMode,
         maxDeletePercent = maxDeletePercent,
         maxDeleteCount = maxDeleteCount,
         nativeState = nativeState,

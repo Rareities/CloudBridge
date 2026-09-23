@@ -33,6 +33,7 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_BISYNC_PREVIEWS
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREVIEW_ADD_INITIALIZATION_MODE
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
@@ -120,6 +121,43 @@ class DatabaseHandler(context: Context?) :
             sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_PREVIEWS)
             sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW)
             sqLiteDatabase.execSQL(SQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY)
+        }
+        if (oldVersion == 14) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREVIEW_ADD_INITIALIZATION_MODE)
+            // A v14 absent-state preview did not bind an explicit conflict preference. Never
+            // invent path1 or keep such a result runnable. Running owners remain held and their
+            // generation is invalidated so a late completion cannot clear the recovery gate.
+            sqLiteDatabase.execSQL(
+                "UPDATE ${DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME} SET " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS} = 'RECOVERY_REQUIRED', " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE} = 'INITIALIZATION_POLICY_MISSING', " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION} = " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION} + 1, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT} = NULL " +
+                    "WHERE ${DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE} = 'ABSENT' AND " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS} IN ('RUNNING','INTERRUPTED','RECOVERY_REQUIRED')"
+            )
+            sqLiteDatabase.execSQL(
+                "UPDATE ${DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME} SET " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS} = 'STALE', " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE} = 'INITIALIZATION_POLICY_MISSING', " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT} = COALESCE(" +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT},${DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT}), " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES} = NULL, " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT} = NULL " +
+                    "WHERE ${DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE} = 'ABSENT' AND " +
+                    "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS} NOT IN ('RUNNING','INTERRUPTED','RECOVERY_REQUIRED')"
+            )
         }
     }
 

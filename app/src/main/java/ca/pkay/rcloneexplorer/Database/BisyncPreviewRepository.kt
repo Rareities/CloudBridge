@@ -14,6 +14,7 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COL
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_FILTER
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_ID
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_IDENTITY_FINGERPRINT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_INITIALIZATION_MODE
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_LEFT_ACCOUNT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_LEFT_SCOPE
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREVIEW_COLUMN_MAX_DELETE_COUNT
@@ -49,6 +50,9 @@ class BisyncPreviewRepository(context: Context) {
      */
     fun queue(identity: BisyncPreviewIdentity, requestedAt: Long = System.currentTimeMillis()): BisyncPreviewOperation {
         require(requestedAt > 0L) { "Preview request time must be positive" }
+        require(hasExplicitPreviewPolicy(identity)) {
+            "An absent-state preview must bind an explicit initialization preference"
+        }
         val handler = DatabaseHandler(context)
         val db = handler.writableDatabase
         val previewId = UUID.randomUUID().toString()
@@ -119,6 +123,7 @@ class BisyncPreviewRepository(context: Context) {
             }
             val profile = ProfileStore.getById(db, operation.identity.profileId)
             val mismatch = profile == null || !profileMatches(profile, operation.identity) ||
+                !hasExplicitPreviewPolicy(operation.identity) ||
                 operation.identity != currentIdentity
             if (mismatch) {
                 writeTerminal(db, operation, BisyncPreviewOperationState.STALE,
@@ -354,6 +359,8 @@ class BisyncPreviewRepository(context: Context) {
         put(BISYNC_PREVIEW_COLUMN_MAX_DELETE_PERCENT, identity.maxDeletePercent)
         put(BISYNC_PREVIEW_COLUMN_MAX_DELETE_COUNT, identity.maxDeleteCount)
         put(BISYNC_PREVIEW_COLUMN_NATIVE_STATE, identity.nativeState.name)
+        if (identity.initializationMode == null) putNull(BISYNC_PREVIEW_COLUMN_INITIALIZATION_MODE)
+        else put(BISYNC_PREVIEW_COLUMN_INITIALIZATION_MODE, identity.initializationMode.wireValue)
         if (identity.acceptedBaselineFingerprint == null) putNull(BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE)
         else put(BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE, identity.acceptedBaselineFingerprint)
         put(BISYNC_PREVIEW_COLUMN_IDENTITY_FINGERPRINT, identity.fingerprint)
@@ -432,7 +439,10 @@ class BisyncPreviewRepository(context: Context) {
             maxDeleteCount = cursor.getInt(13),
             nativeState = BisyncNativeState.values().firstOrNull { it.name == cursor.getString(14) }
                 ?: throw IllegalStateException("Stored preview native state is invalid"),
-            acceptedBaselineFingerprint = if (cursor.isNull(15)) null else cursor.getString(15)
+            acceptedBaselineFingerprint = if (cursor.isNull(15)) null else cursor.getString(15),
+            initializationMode = if (cursor.isNull(32)) null else
+                BisyncPreviewResyncMode.fromWireValue(cursor.getString(32))
+                    ?: throw IllegalStateException("Stored preview initialization preference is invalid")
         )
         if (identity.fingerprint != cursor.getString(16)) {
             throw IllegalStateException("Stored preview identity digest does not match its fields")
@@ -475,6 +485,13 @@ class BisyncPreviewRepository(context: Context) {
         )
     }
 
+    private fun hasExplicitPreviewPolicy(identity: BisyncPreviewIdentity): Boolean = when (identity.nativeState) {
+        BisyncNativeState.ABSENT -> identity.initializationMode != null && identity.acceptedBaselineFingerprint == null
+        BisyncNativeState.COMPATIBLE -> identity.initializationMode == null &&
+            BisyncPreviewIdentity.isDigest(identity.acceptedBaselineFingerprint)
+        else -> false
+    }
+
     private companion object {
         val projection = arrayOf(
             BISYNC_PREVIEW_COLUMN_ID,
@@ -508,7 +525,8 @@ class BisyncPreviewRepository(context: Context) {
             BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES,
             BISYNC_PREVIEW_COLUMN_ERROR_COUNT,
             BISYNC_PREVIEW_COLUMN_CONFLICTS_KNOWN,
-            BISYNC_PREVIEW_COLUMN_UPDATED_AT
+            BISYNC_PREVIEW_COLUMN_UPDATED_AT,
+            BISYNC_PREVIEW_COLUMN_INITIALIZATION_MODE
         )
     }
 }

@@ -496,6 +496,111 @@ public class ResourceClaimRepositoryTest {
     }
 
     @Test
+    public void versionFourteenUpgradeDoesNotInventInitializationPreferenceOrReleaseActiveOwner() {
+        SQLiteDatabase versionFourteen = SQLiteDatabase.openOrCreateDatabase(
+                testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
+        versionFourteen.execSQL("CREATE TABLE " + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + " ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + " TEXT PRIMARY KEY NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE + " TEXT,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + " INTEGER NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT + " INTEGER NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE + " TEXT,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS + " TEXT,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT + " INTEGER NOT NULL)");
+        versionFourteen.execSQL("CREATE UNIQUE INDEX bisync_preview_one_owner ON "
+                + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + "("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + ") WHERE "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS
+                + " IN ('QUEUED','RUNNING','INTERRUPTED','RECOVERY_REQUIRED')");
+        ContentValues runningPreview = new ContentValues();
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID, "legacy-absent-preview");
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID, "legacy-profile");
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE, "ABSENT");
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE);
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS, "RUNNING");
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION, 1L);
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT, 100L);
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT, 101L);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES);
+        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT);
+        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT, 102L);
+        versionFourteen.insertOrThrow(DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME, null, runningPreview);
+        versionFourteen.execSQL("INSERT INTO " + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + " ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + ","
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + ","
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + ","
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE + ","
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + ","
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + ","
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT + ","
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT + ") VALUES ("
+                + "'legacy-absent-queued-preview','legacy-queued-profile','ABSENT',NULL,"
+                + "'QUEUED',1,200,201)");
+        versionFourteen.setVersion(14);
+        versionFourteen.close();
+
+        DatabaseHandler handler = new DatabaseHandler(testContext);
+        SQLiteDatabase upgraded = handler.getWritableDatabase();
+        try {
+            assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_INITIALIZATION_MODE + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " FROM "
+                            + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + " = ?",
+                    new String[]{"legacy-absent-preview"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals("RECOVERY_REQUIRED", cursor.getString(0));
+                assertEquals(2L, cursor.getLong(1));
+                assertEquals("INITIALIZATION_POLICY_MISSING", cursor.getString(2));
+                assertNull(cursor.getString(3));
+                assertTrue(cursor.isNull(4));
+            }
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_INITIALIZATION_MODE + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " FROM "
+                            + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + " = ?",
+                    new String[]{"legacy-absent-queued-preview"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals("STALE", cursor.getString(0));
+                assertEquals(1L, cursor.getLong(1));
+                assertEquals("INITIALIZATION_POLICY_MISSING", cursor.getString(2));
+                assertNull(cursor.getString(3));
+                assertEquals(201L, cursor.getLong(4));
+            }
+            assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='bisync_preview_one_owner'",
+                    null));
+        } finally {
+            upgraded.close();
+            handler.close();
+        }
+    }
+
+    @Test
     public void nativeRecoveryEvidenceRoundTripsButCannotAuthorizeOtherStates() {
         DatabaseHandler handler = new DatabaseHandler(testContext);
         Task task = new Task(0);
