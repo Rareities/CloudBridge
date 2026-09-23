@@ -5,6 +5,10 @@
         android:icon="@drawable/ic_cloud_download_black_24dp"
         android:title="@string/start_task" />
     <item
+        android:id="@+id/action_preview_bisync"
+        android:title="@string/bisync_preview_menu_action"
+        android:visible="false" />
+    <item
         android:id="@+id/action_edit_task"
         android:icon="@drawable/ic_edit_black"
         android:title="@string/edit" />

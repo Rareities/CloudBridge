@@ -32,6 +32,21 @@ object BisyncPreviewCommandBuilder {
     private data class Capabilities(val summary: Boolean, val stateClone: Boolean)
     private data class FilterRule(val type: Int, val pattern: String)
 
+    /** Capability check for admission UX; false never falls through to a weaker mode. */
+    @JvmStatic
+    fun supportsPreview(engineRef: String, nativeState: BisyncNativeState): Boolean {
+        val capabilities = try {
+            capabilitiesFor(engineRef)
+        } catch (_: IllegalArgumentException) {
+            return false
+        }
+        return capabilities.summary && when (nativeState) {
+            BisyncNativeState.ABSENT -> true
+            BisyncNativeState.COMPATIBLE -> capabilities.stateClone
+            else -> false
+        }
+    }
+
     @JvmStatic
     fun build(request: BisyncPreviewCommandRequest): List<String> {
         require(!request.checksumRequested) {

@@ -29,6 +29,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
 
+import ca.pkay.rcloneexplorer.Activities.BisyncPreviewActivity;
 import ca.pkay.rcloneexplorer.Activities.ShortcutServiceActivity;
 import ca.pkay.rcloneexplorer.Activities.TaskActivity;
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
@@ -185,10 +186,19 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
     private void showFileMenu(View view, final Task task) {
         PopupMenu popupMenu = new PopupMenu(context, view);
         popupMenu.getMenuInflater().inflate(R.menu.task_item_menu, popupMenu.getMenu());
+        boolean isBisync = task.getDirection() == SyncDirectionObject.SYNC_BIDIRECTIONAL_INITIAL
+                || task.getDirection() == SyncDirectionObject.SYNC_BIDIRECTIONAL;
+        popupMenu.getMenu().findItem(R.id.action_start_task).setVisible(!isBisync);
+        popupMenu.getMenu().findItem(R.id.action_preview_bisync).setVisible(isBisync);
         popupMenu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case R.id.action_start_task:
                     startTask(task);
+                    break;
+                case R.id.action_preview_bisync:
+                    Intent preview = new Intent(context, BisyncPreviewActivity.class);
+                    preview.putExtra(BisyncPreviewActivity.ID_EXTRA, task.getId());
+                    context.startActivity(preview);
                     break;
                 case R.id.action_edit_task:
                     editTask(task);

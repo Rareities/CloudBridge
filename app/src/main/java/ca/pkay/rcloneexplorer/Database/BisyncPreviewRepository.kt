@@ -379,6 +379,67 @@ class BisyncPreviewRepository(context: Context) {
         }
     }
 
+    /** Returns the current owner, including interrupted holds that must continue blocking retries. */
+    fun active(profileId: String): BisyncPreviewOperation? {
+        val handler = DatabaseHandler(context)
+        val db = handler.readableDatabase
+        return try {
+            val cursor = db.query(
+                BISYNC_PREVIEW_TABLE_NAME,
+                projection,
+                "$BISYNC_PREVIEW_COLUMN_PROFILE_ID = ? AND $BISYNC_PREVIEW_COLUMN_STATUS IN (?, ?, ?, ?)",
+                arrayOf(
+                    profileId,
+                    BisyncPreviewOperationState.QUEUED.wireValue,
+                    BisyncPreviewOperationState.RUNNING.wireValue,
+                    BisyncPreviewOperationState.INTERRUPTED.wireValue,
+                    BisyncPreviewOperationState.RECOVERY_REQUIRED.wireValue
+                ),
+                null,
+                null,
+                "$BISYNC_PREVIEW_COLUMN_REQUESTED_AT DESC",
+                "1"
+            )
+            try {
+                if (cursor.moveToFirst()) fromCursor(cursor) else null
+            } finally {
+                cursor.close()
+            }
+        } finally {
+            db.close()
+            handler.close()
+        }
+    }
+
+    /** Path-free preview history for review; active and interrupted owners are included. */
+    fun history(profileId: String, limit: Int = 20): List<BisyncPreviewOperation> {
+        require(limit in 1..100) { "Preview history limit must be between 1 and 100" }
+        val handler = DatabaseHandler(context)
+        val db = handler.readableDatabase
+        return try {
+            val cursor = db.query(
+                BISYNC_PREVIEW_TABLE_NAME,
+                projection,
+                "$BISYNC_PREVIEW_COLUMN_PROFILE_ID = ?",
+                arrayOf(profileId),
+                null,
+                null,
+                "$BISYNC_PREVIEW_COLUMN_REQUESTED_AT DESC",
+                limit.toString()
+            )
+            try {
+                buildList {
+                    while (cursor.moveToNext()) add(fromCursor(cursor))
+                }
+            } finally {
+                cursor.close()
+            }
+        } finally {
+            db.close()
+            handler.close()
+        }
+    }
+
     private fun activePreviewExists(db: SQLiteDatabase, profileId: String): Boolean {
         val cursor = db.query(
             BISYNC_PREVIEW_TABLE_NAME,

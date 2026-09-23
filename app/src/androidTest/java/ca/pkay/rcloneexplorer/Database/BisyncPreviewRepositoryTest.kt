@@ -63,6 +63,27 @@ class BisyncPreviewRepositoryTest {
     }
 
     @Test
+    fun activeAndHistoryQueriesRetainTerminalRowsAndKeepInterruptedOwnersVisible() {
+        val identity = createReadyIdentity()
+        val repository = BisyncPreviewRepository(context)
+        val queued = repository.queue(identity, 15_000L)
+
+        assertEquals(queued.previewId, repository.active(identity.profileId)!!.previewId)
+        assertEquals(listOf(queued.previewId), repository.history(identity.profileId).map { it.previewId })
+        assertTrue(repository.finishQueued(
+            queued.previewId,
+            queued.ownerToken,
+            BisyncPreviewOperationState.CANCELLED,
+            BisyncPreviewFailureCode.CANCELLED_BEFORE_START,
+            15_100L
+        ))
+        assertEquals(null, repository.active(identity.profileId))
+        assertEquals(BisyncPreviewOperationState.CANCELLED,
+            repository.history(identity.profileId).single().state)
+        assertThrows(IllegalArgumentException::class.java) { repository.history(identity.profileId, 0) }
+    }
+
+    @Test
     fun changedProfileMakesQueuedPreviewStaleAndNeverLaunchable() {
         val identity = createReadyIdentity()
         val repository = BisyncPreviewRepository(context)

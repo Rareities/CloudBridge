@@ -229,6 +229,11 @@
             android:label="@string/title_activity_task"
             android:theme="@style/AppTheme.NoActionBar" />
         <activity
+            android:name=".Activities.BisyncPreviewActivity"
+            android:exported="false"
+            android:label="@string/bisync_preview_title"
+            android:theme="@style/AppTheme.NoActionBar" />
+        <activity
             android:name=".Activities.TriggerActivity"
             android:label="@string/title_activity_trigger"
             android:theme="@style/AppTheme.NoActionBar" />

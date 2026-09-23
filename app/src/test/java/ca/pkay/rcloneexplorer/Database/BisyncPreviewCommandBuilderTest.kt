@@ -10,6 +10,18 @@ import org.junit.Test
 
 class BisyncPreviewCommandBuilderTest {
     @Test
+    fun admissionCapabilitiesFailClosedForCompatibleStateOnThePublishedPin() {
+        val publishedEngine = "rclone:1.76.0@${BisyncPreviewCommandBuilder.PUBLISHED_PREVIEW_ENGINE}"
+        val cloneEngine = "rclone:1.76.0@${BisyncPreviewCommandBuilder.LOCAL_STATE_CLONE_ENGINE}"
+
+        assertTrue(BisyncPreviewCommandBuilder.supportsPreview(publishedEngine, BisyncNativeState.ABSENT))
+        assertFalse(BisyncPreviewCommandBuilder.supportsPreview(publishedEngine, BisyncNativeState.COMPATIBLE))
+        assertTrue(BisyncPreviewCommandBuilder.supportsPreview(cloneEngine, BisyncNativeState.COMPATIBLE))
+        assertFalse(BisyncPreviewCommandBuilder.supportsPreview("rclone:master", BisyncNativeState.ABSENT))
+        assertFalse(BisyncPreviewCommandBuilder.supportsPreview(publishedEngine, BisyncNativeState.UNKNOWN))
+    }
+
+    @Test
     fun absentStateBindsExplicitPolicyAndEverySafetyOption() {
         val command = BisyncPreviewCommandBuilder.build(request(
             identity = identity(BisyncNativeState.ABSENT, BisyncPreviewResyncMode.NEWER),

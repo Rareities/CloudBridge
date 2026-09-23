@@ -14,13 +14,25 @@ import ca.pkay.rcloneexplorer.Database.BisyncPreviewOperationState
 import ca.pkay.rcloneexplorer.Database.BisyncPreviewRepository
 import java.util.concurrent.Executor
 
-/** Queues a durable preview owner before handing it to WorkManager. */
+/** Queues or resumes a durable preview owner before handing it to WorkManager. */
 class BisyncPreviewWorkScheduler(context: Context) {
     private val appContext = context.applicationContext
     private val previews = BisyncPreviewRepository(appContext)
 
     fun enqueue(identity: BisyncPreviewIdentity): BisyncPreviewOperation {
-        val queued = previews.queue(identity)
+        val active = previews.active(identity.profileId)
+        val queued = when {
+            active == null -> previews.queue(identity)
+            active.identity != identity -> throw IllegalStateException("A different preview owns this profile")
+            active.state == BisyncPreviewOperationState.QUEUED -> active
+            active.state == BisyncPreviewOperationState.RUNNING -> return active
+            else -> throw IllegalStateException("Preview requires review before another request")
+        }
+        dispatch(queued)
+        return queued
+    }
+
+    private fun dispatch(queued: BisyncPreviewOperation) {
         val request = OneTimeWorkRequestBuilder<BisyncPreviewWorker>()
             .setInputData(Data.Builder()
                 .putString(BisyncPreviewWorker.PREVIEW_ID, queued.previewId)
@@ -28,8 +40,9 @@ class BisyncPreviewWorkScheduler(context: Context) {
                 .build())
             .setConstraints(Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
-                .build())
+            .build())
             .addTag(TAG)
+            .addTag(profileTag(queued.identity.profileId))
             .addTag(workName(queued.previewId))
             .build()
 
@@ -47,7 +60,6 @@ class BisyncPreviewWorkScheduler(context: Context) {
         } catch (_: RuntimeException) {
             completeDispatchFailure(queued)
         }
-        return queued
     }
 
     /** A queued cancellation is terminal immediately; a running worker owns native cancellation. */
@@ -77,8 +89,13 @@ class BisyncPreviewWorkScheduler(context: Context) {
 
     private fun workName(previewId: String) = "bisync-preview-$previewId"
 
-    private companion object {
+    companion object {
         const val TAG = "bisync-preview"
+        private const val PROFILE_TAG_PREFIX = "bisync-preview-profile-"
+
+        @JvmStatic
+        fun profileTag(profileId: String) = "$PROFILE_TAG_PREFIX$profileId"
+
         val DIRECT_EXECUTOR = Executor { command -> command.run() }
     }
 }
