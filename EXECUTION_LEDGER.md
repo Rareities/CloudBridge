@@ -1235,7 +1235,7 @@ until the compatible-state native feature has an independently reviewed/publicat
 11. **Tests:** Windows JDK 21.0.8 / Gradle 8.13 / installed Android SDK run passed
     `:app:testOssDebugUnitTest` (95 tests: 94 passed, 1 existing platform-capability skip),
     `:app:compileOssDebugAndroidTestJavaWithJavac`, `:app:lintOssDebug`, and `git diff --check`.
-    Lint reports 97 non-baseline warnings, including 2 new MissingTranslation warnings for the
+    Lint reports 97 non-baseline warnings, including 3 new MissingTranslation warnings for the
     English strings to be submitted through Weblate/Crowdin; 2 errors and 428 warnings are filtered
     by the existing baseline, with 76 stale baseline entries. Android instrumentation was compiled
     but not executed; Galaxy S26 and Proton access remain **NOT RUN**.
