@@ -9,7 +9,7 @@ class DatabaseInfo {
     companion object {
 
         // If you change the database schema, you must increment the database version.
-        const val DATABASE_VERSION = 12
+        const val DATABASE_VERSION = 13
         const val DATABASE_NAME = "rcloneExplorer.db"
 
         const val PROFILE_TABLE_NAME = "profile_table"
@@ -74,6 +74,9 @@ class DatabaseInfo {
         const val BISYNC_PREFLIGHT_COLUMN_READINESS = "bisync_preflight_readiness"
         const val BISYNC_PREFLIGHT_COLUMN_REASON = "bisync_preflight_reason_code"
         const val BISYNC_PREFLIGHT_COLUMN_CHECKED_AT = "bisync_preflight_checked_at"
+        const val BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE = "bisync_preflight_native_state"
+        const val BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON = "bisync_preflight_native_state_reason"
+        const val BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID = "bisync_preflight_recovery_listings_valid"
 
 
         val SQL_CREATE_TABLES_TASKS = "CREATE TABLE " + Task.TABLE_NAME + " (" +
@@ -177,6 +180,13 @@ class DatabaseInfo {
                 "$BISYNC_PREFLIGHT_COLUMN_READINESS TEXT NOT NULL," +
                 "$BISYNC_PREFLIGHT_COLUMN_REASON TEXT," +
                 "$BISYNC_PREFLIGHT_COLUMN_CHECKED_AT INTEGER NOT NULL)"
+
+        val SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE =
+            "ALTER TABLE $BISYNC_PREFLIGHT_TABLE_NAME ADD COLUMN $BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE TEXT NOT NULL DEFAULT 'UNKNOWN'"
+        val SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON =
+            "ALTER TABLE $BISYNC_PREFLIGHT_TABLE_NAME ADD COLUMN $BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON TEXT NOT NULL DEFAULT 'STATE_NOT_RECORDED'"
+        val SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID =
+            "ALTER TABLE $BISYNC_PREFLIGHT_TABLE_NAME ADD COLUMN $BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID INTEGER NOT NULL DEFAULT 0"
 
     }
 }

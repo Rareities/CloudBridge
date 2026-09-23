@@ -7,7 +7,15 @@ import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.Rclone
 
 fun interface BisyncNativeStateProbe {
-    fun inspect(profileId: String, profileFingerprint: String): BisyncNativeState
+    fun inspect(
+        profileId: String,
+        profileFingerprint: String,
+        localPath: String?,
+        remote: RemoteItem,
+        remotePath: String?,
+        comparisonMode: BisyncComparisonMode,
+        cancellationSignal: CancellationSignal?
+    ): BisyncNativeStateEvidence
 }
 
 data class BisyncPreflightRunResult(
@@ -19,7 +27,13 @@ data class BisyncPreflightRunResult(
 class BisyncPreflightCoordinator(
     context: Context,
     private val rclone: Rclone,
-    private val stateProbe: BisyncNativeStateProbe = BisyncNativeStateProbe { _, _ -> BisyncNativeState.UNKNOWN }
+    private val stateProbe: BisyncNativeStateProbe = BisyncNativeStateProbe {
+            profileId, fingerprint, localPath, remote, remotePath, comparisonMode, cancellationSignal ->
+        rclone.inspectBisyncNativeState(
+            profileId, fingerprint, localPath, remote, remotePath,
+            comparisonMode.nativeCompareOptions, cancellationSignal
+        )
+    }
 ) {
     private val appContext = context.applicationContext
     private val profiles = ProfileRepository(appContext)
@@ -95,21 +109,26 @@ class BisyncPreflightCoordinator(
             else -> null
         }
         val filterResolved = !selectedFilterMissing && parsedFilters.valid && filterFingerprint != null
-        val state = try {
-            stateProbe.inspect(profileId, current.fingerprint)
-        } catch (_: Exception) {
-            // Probe failures are unknown native state, never evidence of an empty baseline.
-            BisyncNativeState.UNKNOWN
-        }
         val previous = preflights.get(profileId)?.acceptedBaseline
         val configBefore = rclone.getBisyncConfigSnapshotFingerprint()
         val localPath: String? = task.localPath
         val remotePath: String? = task.remotePath
         val remote = RemoteItem(task.remoteId, task.remoteType, "")
+        val stateEvidence = try {
+            stateProbe.inspect(
+                profileId, current.fingerprint, localPath, remote, remotePath,
+                comparisonMode, cancellationSignal
+            )
+        } catch (_: Exception) {
+            // Probe failures are unknown native state, never evidence of an empty baseline.
+            BisyncNativeStateEvidence(BisyncNativeState.UNKNOWN, "PROBE_FAILED", false)
+        }
+        val state = stateEvidence.state
         val leftIdentity = identities.local(localPath)
         var rightIdentity = identities.remote(remote, remotePath, cancellationSignal, inspectCapabilities = false)
         val stateFailure = when {
             state == BisyncNativeState.UNKNOWN -> BisyncPreflightReason.NATIVE_STATE_UNKNOWN
+            state == BisyncNativeState.INTERRUPTED -> BisyncPreflightReason.NATIVE_STATE_INTERRUPTED
             state == BisyncNativeState.INCOMPATIBLE -> BisyncPreflightReason.NATIVE_STATE_INCOMPATIBLE
             state == BisyncNativeState.COMPATIBLE && previous == null -> BisyncPreflightReason.NATIVE_STATE_UNVERIFIED
             state == BisyncNativeState.ABSENT && previous != null -> BisyncPreflightReason.NATIVE_STATE_UNKNOWN
@@ -189,6 +208,8 @@ class BisyncPreflightCoordinator(
             filterResolved = filterResolved,
             comparisonMode = comparisonMode,
             nativeState = state,
+            nativeStateReason = stateEvidence.reason,
+            nativeRecoveryListingsValid = stateEvidence.recoveryListingsValid,
             previous = previous,
             maxDeletePercent = maxDeletePercent,
             maxDeleteCount = maxDeleteCount

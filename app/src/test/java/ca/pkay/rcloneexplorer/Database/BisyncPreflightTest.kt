@@ -93,6 +93,26 @@ class BisyncPreflightTest {
     }
 
     @Test
+    fun interruptedNativeStateIsDistinctAndUnrecognizedWireStatusFailsClosed() {
+        val interrupted = BisyncNativeStateEvidence.fromWire(
+            "INTERRUPTED", "CURRENT_LISTINGS_PARTIAL", recoveryListingsValid = true
+        )
+        assertEquals(BisyncNativeState.INTERRUPTED, interrupted.state)
+        assertTrue(interrupted.recoveryListingsValid)
+        assertEquals(
+            BisyncPreflightReason.NATIVE_STATE_INTERRUPTED,
+            BisyncPreflightPolicy.evaluate(input(nativeState = interrupted.state)).reason
+        )
+
+        val unknown = BisyncNativeStateEvidence.fromWire(
+            "FUTURE_STATUS", "raw path or error", recoveryListingsValid = true
+        )
+        assertEquals(BisyncNativeState.UNKNOWN, unknown.state)
+        assertEquals("INVALID_NATIVE_RESULT", unknown.reason)
+        assertFalse(unknown.recoveryListingsValid)
+    }
+
+    @Test
     fun compatibleStateNeedsAnAcceptedBaseline() {
         val unverified = BisyncPreflightPolicy.evaluate(input(nativeState = BisyncNativeState.COMPATIBLE))
         assertEquals(ProfileReadiness.BLOCKED, unverified.readiness)

@@ -27,6 +27,9 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_R
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_ACTIVE_RUN
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_RESOURCE_CLAIMS
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_BISYNC_PREFLIGHT
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
@@ -56,6 +59,9 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_RUN)
         sqLiteDatabase.execSQL(SQL_CREATE_TABLE_RESOURCE_CLAIMS)
         sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_PREFLIGHT)
+        sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE)
+        sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON)
+        sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -98,6 +104,11 @@ class DatabaseHandler(context: Context?) :
         }
         if (oldVersion < 12) {
             sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_PREFLIGHT)
+        }
+        if (oldVersion < 13) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE)
+            sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON)
+            sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID)
         }
     }
 

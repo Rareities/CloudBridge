@@ -48,6 +48,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.net.InetAddress;
@@ -61,6 +62,8 @@ import ca.pkay.rcloneexplorer.Database.json.SharedPreferencesBackup;
 import ca.pkay.rcloneexplorer.Database.ResourceClaimLease;
 import ca.pkay.rcloneexplorer.Database.BisyncListingEvidence;
 import ca.pkay.rcloneexplorer.Database.BisyncListingValidator;
+import ca.pkay.rcloneexplorer.Database.BisyncNativeState;
+import ca.pkay.rcloneexplorer.Database.BisyncNativeStateEvidence;
 import ca.pkay.rcloneexplorer.Database.BisyncPreflightReason;
 import ca.pkay.rcloneexplorer.Database.BisyncRootScanResult;
 import ca.pkay.rcloneexplorer.Items.FileItem;
@@ -572,6 +575,89 @@ public class Rclone {
     private static BisyncRootScanResult cancelledBisyncScan(boolean statProbeSucceeded) {
         return new BisyncRootScanResult(new BisyncListingEvidence(
                 false, false, 0, BisyncPreflightReason.PROBE_CANCELLED), statProbeSucceeded);
+    }
+
+    /**
+     * Inspects the profile's established native Bisync work directory without creating it,
+     * migrating listings, or recovering an interrupted run.
+     */
+    @NonNull
+    public BisyncNativeStateEvidence inspectBisyncNativeState(
+            @NonNull String profileId,
+            @NonNull String profileFingerprint,
+            @Nullable String localPath,
+            @NonNull RemoteItem remote,
+            @Nullable String remotePath,
+            @NonNull String compareOptions,
+            @Nullable CancellationSignal cancellationSignal) {
+        if (!profileFingerprint.matches("[0-9a-fA-F]{64}") || localPath == null
+                || localPath.indexOf('\u0000') >= 0 || !new File(localPath).isAbsolute()
+                || !isSafeAbsoluteBisyncPath(localPath)
+                || !("size".equals(compareOptions) || "size,modtime".equals(compareOptions))) {
+            return unknownBisyncNativeState("INSPECTION_INPUT_INVALID");
+        }
+
+        final File workDir;
+        try {
+            UUID profileUuid = UUID.fromString(profileId);
+            if (!profileUuid.toString().equalsIgnoreCase(profileId)) {
+                return unknownBisyncNativeState("PROFILE_ID_INVALID");
+            }
+            File profileRoot = new File(new File(context.getFilesDir(), "bisync"), "profiles").getCanonicalFile();
+            File expectedWorkDir = new File(profileRoot, profileUuid.toString());
+            workDir = expectedWorkDir.getCanonicalFile();
+            if (!workDir.equals(expectedWorkDir.getAbsoluteFile()) || !workDir.isDirectory()) {
+                // A missing work directory is not proof that no state exists in a legacy/default location.
+                return unknownBisyncNativeState("PROFILE_WORKDIR_NOT_ESTABLISHED");
+            }
+        } catch (IOException | IllegalArgumentException | SecurityException e) {
+            return unknownBisyncNativeState("PROFILE_WORKDIR_UNAVAILABLE");
+        }
+
+        if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+            return unknownBisyncNativeState("PROBE_CANCELLED");
+        }
+        final String remoteSection;
+        try {
+            if (remotePath == null || remotePath.indexOf('\u0000') >= 0
+                    || !isSafeBisyncRelativePath(remote, remotePath)) {
+                return unknownBisyncNativeState("REMOTE_PATH_UNRESOLVED");
+            }
+            remoteSection = buildReadOnlyBisyncSection(remote, remotePath);
+            if (remoteSection == null) return unknownBisyncNativeState("REMOTE_PATH_UNRESOLVED");
+        } catch (RuntimeException e) {
+            return unknownBisyncNativeState("REMOTE_PATH_UNRESOLVED");
+        }
+
+        ArrayList<String> arguments = new ArrayList<>(Arrays.asList(
+                "bisync", localPath, remoteSection, "--inspect-state", "--workdir",
+                workDir.getAbsolutePath(), "--compare", compareOptions));
+        try {
+            CapturedText result = runBoundedTextCommandCancellable(
+                    createCommandWithOptions(arguments), getRcloneEnv(), "bisync-state-inspection",
+                    64 * 1024, METADATA_COMMAND_TIMEOUT_MILLIS, cancellationSignal);
+            if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+                return unknownBisyncNativeState("PROBE_CANCELLED");
+            }
+            if (!result.outcome.isSuccess() || !result.outcome.isConfirmed() || result.exceededLimit
+                    || result.outcome.isOutputTruncated()) {
+                return unknownBisyncNativeState("INSPECTION_PROCESS_FAILED");
+            }
+            JSONObject response = new JSONObject(result.text);
+            if (response.optInt("version", -1) != 1) {
+                return unknownBisyncNativeState("INSPECTION_VERSION_UNSUPPORTED");
+            }
+            return BisyncNativeStateEvidence.fromWire(
+                    response.optString("status", null), response.optString("reason", null),
+                    response.optBoolean("recoveryListingsValid", false));
+        } catch (IOException | JSONException | SecurityException e) {
+            return unknownBisyncNativeState("INSPECTION_OUTPUT_INVALID");
+        }
+    }
+
+    @NonNull
+    private static BisyncNativeStateEvidence unknownBisyncNativeState(@NonNull String reason) {
+        return new BisyncNativeStateEvidence(BisyncNativeState.UNKNOWN, reason, false);
     }
 
     /** Returns a hash-only identity for providers with a known stable, non-token account locator. */

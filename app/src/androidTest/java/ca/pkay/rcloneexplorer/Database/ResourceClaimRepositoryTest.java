@@ -380,4 +380,132 @@ public class ResourceClaimRepositoryTest {
         assertEquals(reason.getWireValue(), status.getReasonCode());
         assertNull(status.getAcceptedBaseline());
     }
+
+    @Test
+    public void versionTwelvePreflightRowsGainConservativeNativeStateColumns() {
+        SQLiteDatabase versionTwelve = SQLiteDatabase.openOrCreateDatabase(
+                testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
+        versionTwelve.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
+        versionTwelve.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_BISYNC_PREFLIGHT());
+
+        ContentValues profile = new ContentValues();
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ID, "migration-profile-v12");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_REVISION, 1);
+        profile.put(DatabaseInfo.PROFILE_COLUMN_TITLE, "Migration profile");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_MODE, "BISYNC");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ENDPOINT, "endpoint-fingerprint");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_SETTINGS, "settings-fingerprint");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_FINGERPRINT, "profile-fingerprint");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ENGINE, "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_READINESS, "BLOCKED");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_CREATED_AT, 1);
+        profile.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, 1);
+        versionTwelve.insertOrThrow(DatabaseInfo.PROFILE_TABLE_NAME, null, profile);
+
+        ContentValues preflight = new ContentValues();
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID, "migration-profile-v12");
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION, 1);
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT, "profile-fingerprint");
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_ENGINE_REF, "rclone:1.76.0@d53551e1722305268c6072263f11066f1278a4a0");
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_STATE_VERSION, 1);
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_READINESS, "BLOCKED");
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_REASON, "NATIVE_STATE_UNKNOWN");
+        preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_CHECKED_AT, 123L);
+        versionTwelve.insertOrThrow(DatabaseInfo.BISYNC_PREFLIGHT_TABLE_NAME, null, preflight);
+        versionTwelve.setVersion(12);
+        versionTwelve.close();
+
+        DatabaseHandler handler = new DatabaseHandler(testContext);
+        SQLiteDatabase upgraded = handler.getWritableDatabase();
+        try {
+            assertEquals(13, upgraded.getVersion());
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE + ", "
+                            + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON + ", "
+                            + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID + " FROM "
+                            + DatabaseInfo.BISYNC_PREFLIGHT_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID + " = ?",
+                    new String[]{"migration-profile-v12"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals("UNKNOWN", cursor.getString(0));
+                assertEquals("STATE_NOT_RECORDED", cursor.getString(1));
+                assertEquals(0, cursor.getInt(2));
+            }
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_CHECKED_AT + " FROM "
+                            + DatabaseInfo.BISYNC_PREFLIGHT_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID + " = ?",
+                    new String[]{"migration-profile-v12"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals(123L, cursor.getLong(0));
+            }
+        } finally {
+            upgraded.close();
+            handler.close();
+        }
+    }
+
+    @Test
+    public void nativeRecoveryEvidenceRoundTripsButCannotAuthorizeOtherStates() {
+        DatabaseHandler handler = new DatabaseHandler(testContext);
+        Task task = new Task(0);
+        task.setTitle("native recovery evidence persistence");
+        task.setDirection(SyncDirectionObject.SYNC_BIDIRECTIONAL_INITIAL);
+        task.setRemoteId("recovery-evidence-remote");
+        task.setRemotePath("root");
+        task.setLocalPath("/storage/emulated/0/recovery-evidence");
+        Task stored = handler.createTask(task, false);
+        handler.close();
+
+        ProfileRecord profile = new ProfileRepository(testContext).getForLegacyTask(stored.getId());
+        assertTrue(profile != null);
+        String engineRef = "rclone:" + ca.pkay.rcloneexplorer.BuildConfig.RCLONE_ENGINE_VERSION + "@"
+                + ca.pkay.rcloneexplorer.BuildConfig.RCLONE_ENGINE_REF;
+        BisyncPreflightRepository preflights = new BisyncPreflightRepository(testContext);
+        BisyncPreflightInput interrupted = new BisyncPreflightInput(
+                profile.getRevision(), profile.getFingerprint(), engineRef,
+                BisyncPreflightPolicy.CURRENT_STATE_VERSION,
+                new BisyncEndpointEvidence(null, BisyncEndpointScope.Companion.unknown(), null),
+                new BisyncEndpointEvidence(null, BisyncEndpointScope.Companion.unknown(), null),
+                new BisyncListingEvidence(false, false, 0, null),
+                new BisyncListingEvidence(false, false, 0, null),
+                null, false, BisyncComparisonMode.SIZE_AND_MODTIME,
+                BisyncNativeState.INTERRUPTED, null,
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_PERCENT,
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_COUNT,
+                "CURRENT_LISTINGS_PARTIAL", true);
+        BisyncPreflightResult interruptedResult = new BisyncPreflightResult(
+                ProfileReadiness.BLOCKED, BisyncPreflightReason.NATIVE_STATE_INTERRUPTED, null, null, null);
+        preflights.recordAttempt(profile.getProfileId(), profile.getRevision(), profile.getFingerprint(),
+                interrupted, interruptedResult, 124L);
+
+        BisyncPreflightStatus status = preflights.get(profile.getProfileId());
+        assertTrue(status != null);
+        assertEquals(BisyncNativeState.INTERRUPTED, status.getNativeState());
+        assertEquals("CURRENT_LISTINGS_PARTIAL", status.getNativeStateReason());
+        assertTrue(status.getRecoveryListingsValid());
+
+        BisyncPreflightInput nonInterrupted = new BisyncPreflightInput(
+                profile.getRevision(), profile.getFingerprint(), engineRef,
+                BisyncPreflightPolicy.CURRENT_STATE_VERSION,
+                new BisyncEndpointEvidence(null, BisyncEndpointScope.Companion.unknown(), null),
+                new BisyncEndpointEvidence(null, BisyncEndpointScope.Companion.unknown(), null),
+                new BisyncListingEvidence(false, false, 0, null),
+                new BisyncListingEvidence(false, false, 0, null),
+                null, false, BisyncComparisonMode.SIZE_AND_MODTIME,
+                BisyncNativeState.UNKNOWN, null,
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_PERCENT,
+                BisyncPreflightPolicy.DEFAULT_MAX_DELETE_COUNT,
+                "NATIVE_RUN_ACTIVE", true);
+        BisyncPreflightResult unknownResult = new BisyncPreflightResult(
+                ProfileReadiness.BLOCKED, BisyncPreflightReason.NATIVE_STATE_UNKNOWN, null, null, null);
+        preflights.recordAttempt(profile.getProfileId(), profile.getRevision(), profile.getFingerprint(),
+                nonInterrupted, unknownResult, 125L);
+
+        status = preflights.get(profile.getProfileId());
+        assertTrue(status != null);
+        assertEquals(BisyncNativeState.UNKNOWN, status.getNativeState());
+        assertEquals("NATIVE_RUN_ACTIVE", status.getNativeStateReason());
+        assertEquals(false, status.getRecoveryListingsValid());
+    }
 }

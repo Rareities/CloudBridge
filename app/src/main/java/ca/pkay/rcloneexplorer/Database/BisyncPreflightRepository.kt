@@ -11,10 +11,13 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_C
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_FINGERPRINT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_LEFT_ACCOUNT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_LEFT_SCOPE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_READINESS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_REASON
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_RIGHT_ACCOUNT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_RIGHT_SCOPE
@@ -32,7 +35,10 @@ data class BisyncPreflightStatus(
     val acceptedBaseline: BisyncPreflightBaseline?,
     val readiness: ProfileReadiness,
     val reasonCode: String?,
-    val checkedAt: Long
+    val checkedAt: Long,
+    val nativeState: BisyncNativeState,
+    val nativeStateReason: String,
+    val recoveryListingsValid: Boolean
 )
 
 class StaleBisyncPreflightException(message: String) : IllegalStateException(message)
@@ -55,7 +61,10 @@ class BisyncPreflightRepository(context: Context) {
         BISYNC_PREFLIGHT_COLUMN_FINGERPRINT,
         BISYNC_PREFLIGHT_COLUMN_READINESS,
         BISYNC_PREFLIGHT_COLUMN_REASON,
-        BISYNC_PREFLIGHT_COLUMN_CHECKED_AT
+        BISYNC_PREFLIGHT_COLUMN_CHECKED_AT,
+        BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE,
+        BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON,
+        BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID
     )
 
     fun get(profileId: String): BisyncPreflightStatus? {
@@ -231,11 +240,15 @@ class BisyncPreflightRepository(context: Context) {
 
     private fun statusFromCursor(cursor: Cursor): BisyncPreflightStatus {
         val baseline = baselineFromCursor(cursor)
+        val nativeState = BisyncNativeState.fromStoredValue(cursor.getString(15))
         return BisyncPreflightStatus(
             baseline,
             ProfileReadiness.fromWireValue(cursor.getString(12)),
             if (cursor.isNull(13)) null else cursor.getString(13),
-            cursor.getLong(14)
+            cursor.getLong(14),
+            nativeState,
+            safeNativeStateReason(if (cursor.isNull(16)) null else cursor.getString(16)),
+            cursor.getInt(17) != 0 && nativeState == BisyncNativeState.INTERRUPTED
         )
     }
 
@@ -295,6 +308,15 @@ class BisyncPreflightRepository(context: Context) {
             }
             if (reason == null) putNull(BISYNC_PREFLIGHT_COLUMN_REASON) else put(BISYNC_PREFLIGHT_COLUMN_REASON, reason)
             put(BISYNC_PREFLIGHT_COLUMN_CHECKED_AT, checkedAt)
+            put(BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE, input.nativeState.name)
+            put(BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON, safeNativeStateReason(input.nativeStateReason))
+            put(
+                BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID,
+                input.nativeState == BisyncNativeState.INTERRUPTED && input.nativeRecoveryListingsValid
+            )
         }
     }
+
+    private fun safeNativeStateReason(reason: String?): String =
+        reason?.takeIf { Regex("^[A-Z0-9_]{1,64}$").matches(it) } ?: "INVALID_NATIVE_RESULT"
 }

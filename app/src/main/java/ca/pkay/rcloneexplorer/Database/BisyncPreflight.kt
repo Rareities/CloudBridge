@@ -9,16 +9,43 @@ import java.security.MessageDigest
 import java.util.Locale
 
 /** Comparison supported by the native Bisync implementation, not reimplemented in Kotlin. */
-enum class BisyncComparisonMode(val wireValue: String) {
-    SIZE_AND_MODTIME("SIZE_AND_MODTIME"),
-    SIZE_ONLY("SIZE_ONLY")
+enum class BisyncComparisonMode(val wireValue: String, val nativeCompareOptions: String) {
+    SIZE_AND_MODTIME("SIZE_AND_MODTIME", "size,modtime"),
+    SIZE_ONLY("SIZE_ONLY", "size")
 }
 
 enum class BisyncNativeState {
     ABSENT,
     COMPATIBLE,
     INCOMPATIBLE,
-    UNKNOWN
+    INTERRUPTED,
+    UNKNOWN;
+
+    companion object {
+        fun fromStoredValue(value: String?): BisyncNativeState =
+            values().firstOrNull { it.name == value } ?: UNKNOWN
+    }
+}
+
+data class BisyncNativeStateEvidence(
+    val state: BisyncNativeState,
+    val reason: String,
+    val recoveryListingsValid: Boolean
+) {
+    companion object {
+        @JvmStatic
+        fun fromWire(status: String?, reason: String?, recoveryListingsValid: Boolean): BisyncNativeStateEvidence {
+            val state = when (status) {
+                "ABSENT" -> BisyncNativeState.ABSENT
+                "COMPATIBLE" -> BisyncNativeState.COMPATIBLE
+                "INCOMPATIBLE" -> BisyncNativeState.INCOMPATIBLE
+                "INTERRUPTED" -> BisyncNativeState.INTERRUPTED
+                else -> BisyncNativeState.UNKNOWN
+            }
+            val safeReason = reason?.takeIf { Regex("^[A-Z0-9_]{1,64}$").matches(it) } ?: "INVALID_NATIVE_RESULT"
+            return BisyncNativeStateEvidence(state, safeReason, recoveryListingsValid && state == BisyncNativeState.INTERRUPTED)
+        }
+    }
 }
 
 enum class BisyncPreflightReason(val wireValue: String) {
@@ -40,6 +67,7 @@ enum class BisyncPreflightReason(val wireValue: String) {
     COMPARISON_UNSUPPORTED("COMPARISON_UNSUPPORTED"),
     DELETE_LIMIT_INVALID("DELETE_LIMIT_INVALID"),
     NATIVE_STATE_UNKNOWN("NATIVE_STATE_UNKNOWN"),
+    NATIVE_STATE_INTERRUPTED("NATIVE_STATE_INTERRUPTED"),
     NATIVE_STATE_INCOMPATIBLE("NATIVE_STATE_INCOMPATIBLE"),
     NATIVE_STATE_UNVERIFIED("NATIVE_STATE_UNVERIFIED")
 }
@@ -123,7 +151,7 @@ data class BisyncPreflightBaseline(
     val preflightFingerprint: String
 )
 
-data class BisyncPreflightInput(
+data class BisyncPreflightInput @JvmOverloads constructor(
     val profileRevision: Long,
     val profileFingerprint: String,
     val engineRef: String,
@@ -138,7 +166,10 @@ data class BisyncPreflightInput(
     val nativeState: BisyncNativeState,
     val previous: BisyncPreflightBaseline? = null,
     val maxDeletePercent: Int = BisyncPreflightPolicy.DEFAULT_MAX_DELETE_PERCENT,
-    val maxDeleteCount: Int = BisyncPreflightPolicy.DEFAULT_MAX_DELETE_COUNT
+    val maxDeleteCount: Int = BisyncPreflightPolicy.DEFAULT_MAX_DELETE_COUNT,
+    val nativeStateReason: String = "STATE_NOT_RECORDED",
+    /** Evidence that retained -old listings passed format/consistency checks; not recovery authorization. */
+    val nativeRecoveryListingsValid: Boolean = false
 )
 
 data class BisyncPreflightResult(
@@ -244,6 +275,7 @@ object BisyncPreflightPolicy {
                 ProfileReadiness.INITIALIZATION_REQUIRED
             }
             BisyncNativeState.COMPATIBLE -> ProfileReadiness.READY
+            BisyncNativeState.INTERRUPTED -> return blocked(BisyncPreflightReason.NATIVE_STATE_INTERRUPTED)
             BisyncNativeState.INCOMPATIBLE -> return blocked(BisyncPreflightReason.NATIVE_STATE_INCOMPATIBLE)
             BisyncNativeState.UNKNOWN -> return blocked(BisyncPreflightReason.NATIVE_STATE_UNKNOWN)
         }
