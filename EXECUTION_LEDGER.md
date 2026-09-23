@@ -543,3 +543,74 @@ Proton test area.
     acceptance. WP07 app implementation remains next.
 13. **Rollback point:** revert only the pin/evidence commit to restore the old engine commit;
     keep the validated engine branch and do not rewrite either default branch.
+
+## 2026-09-23 — WP07 fail-closed Bisync preflight milestone
+
+**Implementation commit:** `76a71b4` (`Add fail-closed Bisync preflight gates`).
+
+### Package record (13-field format)
+
+1. **Objective:** establish an immutable-profile-bound, read-only Bisync preflight and durable
+   fail-closed result before any preview, initialization, recovery or execution surface exists.
+2. **Scope:** strict bounded local/remote listing probes, endpoint/account/root identity,
+   selected-filter validation/fingerprinting, comparison capability, config-race detection,
+   persistent readiness/reason, engine identity, and additive database v11→v12 migration.
+3. **Out of scope:** native state inspection implementation (the probe seam defaults to
+   `UNKNOWN`), preview/init/recovery/UI, enabling legacy modes 5/6, and live provider/device
+   acceptance. Unsupported provider identities deliberately remain blocked.
+4. **Preconditions:** WP01–WP06 implementation commits are present; CloudBridge pins
+   `https://github.com/Rareities/rclone.git` at immutable commit
+   `ec863fdcd9e1ce0d13357f791d5528aab10bf0ec`, whose tree matches the independently tested local
+   engine tree. No moving branch or upstream fallback is used.
+5. **Design:** Kotlin validates immutable profile semantics and privacy-safe identities;
+   rclone performs the actual bounded, cancellable `lsjson` probes and owns native Bisync
+   comparison/deletion behavior. Empty remote path means provider root; SQL NULL endpoint is
+   preserved as invalid. Only a compatible native state plus an exact accepted baseline can
+   become ready.
+6. **Safety invariants:** no mutation in preflight; failed/truncated JSON never becomes an empty
+   tree; no exit-code-6 exception or `--ignore-errors`; no overlapping/unknown scope, force,
+   auto-resync or silent legacy migration. A missing formerly accepted native state is recovery,
+   not fresh initialization. Absolute 25-item aggregate guard and 10% per-path native guard stay
+   enforced before mutation; absolute guard cannot be bypassed with `--force`.
+7. **Implementation:** database version 12 adds hash-only `bisync_preflight_table`; title-only
+   edits do not revise profile semantics, filter content changes do, and filter update/delete
+   refresh linked profiles transactionally. `EngineIdentity` includes full pinned SHA. Scans
+   reject traversal, duplicate/malformed paths, partial/truncated output and inaccessible roots;
+   cancellation reaches the owned process. Legacy migration without explicit confirmation is
+   durably blocked. Ready-baseline writes are checked against the exact current profile,
+   endpoint, filter, comparison and engine snapshot. NULL endpoint rows remain invalid rather
+   than becoming root paths.
+8. **Existing code reused:** WP05 `NativeExecutionHandle`, WP06 endpoint claims/config snapshot,
+   profile/run repositories, strict process output drain, and the pinned engine's native guard.
+9. **Code retired:** profile/run engine version-only identities were replaced with the immutable
+   repo+SHA identity; preflight does not reuse browser listing's partial-result/exit-6 behavior.
+10. **Failure behaviour:** persist a typed reason and block; unknown native state, ambiguous
+    volume/account, unlisted provider identity, missing filter, config race, unsupported
+    comparison and path traversal cannot proceed. No fallback initialization or data cleanup.
+11. **Tests:** forced full CloudBridge validation on JDK 21/Go 1.26.8/SDK build-tools 35:
+    `:app:testOssDebugUnitTest :app:compileOssDebugAndroidTestJavaWithJavac :app:lintOssDebug`
+    PASS; 14 suites, 75 tests, 0 failures/errors, 1 Windows symlink skip. Instrumentation source
+    compilation PASS, but no instrumentation execution. Lint task PASS with configured
+    baseline; report has 92 warnings and 2 hints, existing baseline suppresses 428 warnings and
+    2 errors, and 76 baseline entries are stale. `git diff --check` PASS. Standalone pinned
+    engine targeted `cmd/bisync` tests PASS, including the integration test proving the aggregate
+    cap stops opposite-side deletion propagation even with `--force`; four other boundary/default/
+    RC input tests also PASS. Full `go test ./cmd/bisync` was stopped after >100 CPU-seconds with
+    no result and is recorded **INCOMPLETE**, not passed. No current-WP07 APK is claimed.
+12. **Acceptance status:** implementation milestone is committed and safe to proceed to WP08,
+    but full WP07 acceptance remains open: instrumented database migration/durable-state tests,
+    the native state inspector, Galaxy S26/One UI and live Proton are **NOT RUN**. Because the
+    inspector defaults to `UNKNOWN`, Bisync stays unavailable; no release readiness is implied.
+    Account-identity mapping currently supports only explicitly known stable locators, so other
+    providers fail closed pending the provider-capability matrix.
+13. **Rollback point:** keep the migration additive and do not drop accepted baselines or
+    downgrade the database. DB v12 downgrade/old-app rollback is unsupported and must be tested
+    with the migration/rollback package before any release; preserve a known-good DB/artifact.
+
+### Next package
+
+Proceed to WP08 with isolated native Bisync state inspection, non-mutating preview, explicit
+initialization/recovery actions, and preservation/restore fault boundaries. Keep automatic
+execution disabled until native-state compatibility, both-populated/one-empty/conflict cases,
+exact retained bytes and migration rollback are proven. WP09 provider/backend work still needs
+standalone evidence; device and Proton acceptance stay **NOT RUN**.
