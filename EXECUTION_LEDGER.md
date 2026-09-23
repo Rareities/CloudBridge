@@ -445,10 +445,52 @@ WP05 implementation is sufficiently migrated to proceed to WP06, while lifecycle
 and real-device acceptance remain explicit open gates. Do not treat Gradle `UP-TO-DATE` as a
 fresh test execution; 53/53 is from the last executed full test result.
 
+## 2026-09-23 — WP06 endpoint identity and durable conflict ownership
+
+### Package record (13-field format)
+
+1. **Objective:** one app-side, durable conflict boundary for native rclone commands, RCD and
+   config transactions.
+2. **Scope:** app process/RC launch paths, backup import, SQLite claims and endpoint identity.
+3. **Out of scope:** backend protocol/cache changes, device acceptance, Bisync UI, auto-recovery.
+4. **Preconditions:** WP04 repositories and WP05 `NativeExecutionHandle` are in place;
+   CloudBridge still pins immutable Rareities/rclone base `1583cce…`.
+5. **Design:** segment-aware SHA-256 path identity, canonical local path, conservative global
+   fallback, SQLite transaction claims, exact config-content fingerprint plus post-claim
+   revalidation before operation start.
+6. **Safety invariants:** no plaintext path persistence; ambiguous roots serialize globally;
+   durable claims do not auto-expire; uncertain process/RCD completion never releases ownership;
+   config import holds ownership through rollback.
+7. **Implementation:** database version 10→11 adds `resource_claims`; Rclone and RcloneRcd
+   acquire before process/request, async RCD jobs hold to finished status, transport/5xx/unknown
+   failures retain claims, unclaimed native launch is globally quarantined.
+8. **Existing code reused:** WP05 native owner, RCD job handlers and config snapshot/restore.
+9. **Code retired:** no feature-local lock substitutes; process creation remains behind the
+   native owner integration.
+10. **Failure behaviour:** unknown/conflicting scope fails closed; config snapshot race aborts
+    before operation; failed release leaves the claim row for recovery.
+11. **Tests:** `:app:testOssDebugUnitTest :app:lintOssDebug
+    :app:compileOssDebugAndroidTestJavaWithJavac --no-daemon
+    '-Pkotlin.compiler.execution.strategy=in-process' -x :rclone:buildAll` PASS on 2026-09-23.
+    13 JVM suites/62 tests, 0 failures/errors, 1 Windows symlink skip; lint PASS with existing
+    baseline (99 warnings; baseline filtered 2 errors/438 warnings/1 hint; 65 stale entries).
+    Instrumentation compile was UP-TO-DATE; no device execution. `git diff --check` PASS.
+12. **Acceptance status:** implementation milestone complete; full concurrency, v10→11 migration,
+    process-death recovery, removable-storage and Galaxy S26 tests remain NOT RUN. Native task
+    `:rclone:buildAll` was excluded; no current-WP06 APK/native provenance is claimed.
+13. **Rollback point:** bounded package rollback only; do not delete persisted claims; DB v11
+    downgrade is unsupported.
+
+The 2026-09-23 GitHub refresh still reports CloudBridge master `c4928762`, rclone master
+`1583cce1`, no open PRs, and zero recent master workflow runs (not a CI pass). Upstream
+`rclone/rclone` master moved to `cfb90e3` on 2026-09-22; it is 174 commits ahead of the fork
+base. Review and decide that immutable candidate before native WP07 work; no blind fast-forward.
+
 ## Next work
 
-Begin WP06 using the WP05 owner boundary. Revisit WP05 lifecycle/RCD recovery gaps during the
-later fault/device packages. Keep the CloudBridge -> Rareities/rclone immutable pin and do
-not infer that the remote URL or a successful JVM build proves the final integrated engine.
-Only disposable data may be used for live Proton testing; verify the target scope or create a
-unique disposable subdirectory.
+Begin WP07: independently review current Bisync listing completion, lock ownership and stats
+aggregation; specify/test the positive absolute and percentage deletion guards before any app
+surface. Reconcile the refreshed upstream candidate first. Revisit WP05 lifecycle and WP06
+schema/concurrency/RCD-recovery gates later; Galaxy S26, instrumentation and live Proton remain
+NOT RUN. Keep the immutable Rareities/rclone pin and use only a verified unique disposable
+Proton test area.

@@ -9,7 +9,7 @@ class DatabaseInfo {
     companion object {
 
         // If you change the database schema, you must increment the database version.
-        const val DATABASE_VERSION = 10
+        const val DATABASE_VERSION = 11
         const val DATABASE_NAME = "rcloneExplorer.db"
 
         const val PROFILE_TABLE_NAME = "profile_table"
@@ -51,6 +51,12 @@ class DatabaseInfo {
         const val RUN_COLUMN_UNKNOWN_ITEMS = "run_unknown_items"
         const val RUN_COLUMN_CREATED_AT = "run_created_at"
         const val RUN_COLUMN_UPDATED_AT = "run_updated_at"
+
+        const val CLAIM_TABLE_NAME = "resource_claim_table"
+        const val CLAIM_COLUMN_ID = "claim_id"
+        const val CLAIM_COLUMN_OPERATION = "claim_operation"
+        const val CLAIM_COLUMN_RESOURCES = "claim_resources"
+        const val CLAIM_COLUMN_CREATED_AT = "claim_created_at"
 
 
         val SQL_CREATE_TABLES_TASKS = "CREATE TABLE " + Task.TABLE_NAME + " (" +
@@ -131,6 +137,12 @@ class DatabaseInfo {
         val SQL_CREATE_INDEX_ACTIVE_RUN = "CREATE UNIQUE INDEX IF NOT EXISTS run_one_active_profile " +
                 "ON $RUN_TABLE_NAME($RUN_COLUMN_PROFILE_ID) " +
                 "WHERE $RUN_COLUMN_STATE IN ('QUEUED','PREFLIGHT','RUNNING')"
+
+        val SQL_CREATE_TABLE_RESOURCE_CLAIMS = "CREATE TABLE IF NOT EXISTS $CLAIM_TABLE_NAME (" +
+                "$CLAIM_COLUMN_ID TEXT PRIMARY KEY NOT NULL," +
+                "$CLAIM_COLUMN_OPERATION TEXT NOT NULL," +
+                "$CLAIM_COLUMN_RESOURCES TEXT NOT NULL," +
+                "$CLAIM_COLUMN_CREATED_AT INTEGER NOT NULL)"
 
     }
 }

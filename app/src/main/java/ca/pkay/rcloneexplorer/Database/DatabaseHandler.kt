@@ -26,6 +26,7 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_PROFILES
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_RUNS
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_ACTIVE_RUN
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_RESOURCE_CLAIMS
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
@@ -53,6 +54,7 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_CREATE_TABLE_PROFILES)
         sqLiteDatabase.execSQL(SQL_CREATE_TABLE_RUNS)
         sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_RUN)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_RESOURCE_CLAIMS)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -89,6 +91,9 @@ class DatabaseHandler(context: Context?) :
         if (oldVersion < 10) {
             sqLiteDatabase.execSQL(SQL_CREATE_TABLE_RUNS)
             sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_RUN)
+        }
+        if (oldVersion < 11) {
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_RESOURCE_CLAIMS)
         }
     }
 

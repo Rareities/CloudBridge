@@ -16,6 +16,9 @@ import androidx.preference.PreferenceManager;
 import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
+import ca.pkay.rcloneexplorer.util.EndpointConflictCoordinator;
+import ca.pkay.rcloneexplorer.util.EndpointResource;
+import ca.pkay.rcloneexplorer.Database.ResourceClaimLease;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -35,6 +38,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.io.File;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.net.InetAddress;
@@ -80,6 +84,8 @@ public class RcloneRcd {
     //private final Log2File log2File;
     private final ObjectMapper mapper;
     private final ConfigSecretStore configSecretStore;
+    private final EndpointConflictCoordinator endpointConflictCoordinator;
+    private volatile ConfigIdentitySnapshot configIdentityCache;
     private volatile String configPassword;
 
     private final String configPath;
@@ -112,6 +118,7 @@ public class RcloneRcd {
         this.jobsUpdateHandler = handler;
         configPath = context.getFilesDir().getPath() + "/rclone.conf";
         rclone = context.getApplicationInfo().nativeLibraryDir + "/librclone.so";
+        endpointConflictCoordinator = new EndpointConflictCoordinator(context);
         configSecretStore = new ConfigSecretStore(context);
         try {
             configPassword = configSecretStore.load();
@@ -444,6 +451,9 @@ public class RcloneRcd {
             try {
                 if (isErrorCode(response.code())) {
                     ErrorResponse error = mapper.readValue(response.body().byteStream(), ErrorResponse.class);
+                    // The transport status is authoritative when deciding whether a mutation
+                    // request was rejected or may have started without a job handle.
+                    error.status = response.code();
                     throw new RcdOpException(error);
                 } else {
                     if (typeReference != null) {
@@ -587,6 +597,208 @@ public class RcloneRcd {
         }
     }
 
+    private RcdOpException resourceConflict() {
+        ErrorResponse response = new ErrorResponse();
+        response.error = "An overlapping app operation is active or requires recovery";
+        response.operation = "resource-claim";
+        response.status = 409;
+        return new RcdOpException(response);
+    }
+
+    private ResourceClaimLease acquireGlobalClaim(String operation) {
+        try {
+            return endpointConflictCoordinator.acquireGlobal(operation);
+        } catch (IOException conflict) {
+            throw resourceConflict();
+        }
+    }
+
+    private ConfigIdentitySnapshot configSnapshotForClaims() {
+        File configFile = new File(configPath);
+        long mtime = configFile.lastModified();
+        long length = configFile.length();
+        String digest = EndpointConflictCoordinator.fingerprintFile(configFile);
+        if (digest == null) return null;
+        ConfigIdentitySnapshot cached = configIdentityCache;
+        if (cached != null && cached.mtime == mtime && cached.length == length
+                && digest.equals(cached.digest)) {
+            return cached;
+        }
+
+        ResourceClaimLease claim;
+        try {
+            claim = endpointConflictCoordinator.acquireGlobal("rcd-config-identity");
+        } catch (IOException conflict) {
+            return null;
+        }
+        try {
+            Map<String, ConfigDumpRemote> remotes = performRcCall(
+                    "config/dump", new NoParamRcOpParam(),
+                    new TypeReference<Map<String, ConfigDumpRemote>>() { });
+            String currentDigest = EndpointConflictCoordinator.fingerprintFile(configFile);
+            if (remotes == null || currentDigest == null || !digest.equals(currentDigest)
+                    || configFile.lastModified() != mtime || configFile.length() != length) {
+                return null;
+            }
+            ConfigIdentitySnapshot snapshot = new ConfigIdentitySnapshot(remotes, mtime, length, digest);
+            configIdentityCache = snapshot;
+            return snapshot;
+        } catch (RuntimeException failedConfigRead) {
+            return null;
+        } finally {
+            claim.close();
+        }
+    }
+
+    private static final class ConfigIdentitySnapshot {
+        final Map<String, ConfigDumpRemote> remotes;
+        final long mtime;
+        final long length;
+        final String digest;
+
+        ConfigIdentitySnapshot(Map<String, ConfigDumpRemote> remotes, long mtime, long length, String digest) {
+            this.remotes = remotes;
+            this.mtime = mtime;
+            this.length = length;
+            this.digest = digest;
+        }
+
+        boolean stillMatches(File configFile) {
+            return configFile.lastModified() == mtime && configFile.length() == length
+                    && digest.equals(EndpointConflictCoordinator.fingerprintFile(configFile));
+        }
+    }
+
+    private EndpointResource resourceForRemote(
+            Map<String, ConfigDumpRemote> remotes, String remoteName, String path) {
+        if (remotes == null) return EndpointResource.global();
+        ConfigDumpRemote config = remotes.get(remoteName);
+        if (config == null || config.type == null || config.type.trim().isEmpty()) {
+            return EndpointResource.global();
+        }
+        boolean wrapped = config.remote != null && !config.remote.trim().isEmpty()
+                || config.type.equals("alias") || config.type.equals("crypt")
+                || config.type.equals("cache") || config.type.equals("union")
+                || config.type.equals("chunker") || config.type.equals("combine")
+                || config.type.equals("filter") || config.type.equals("hasher");
+        return endpointConflictCoordinator.resourceForRemote(
+                config.type, path, wrapped, config.root);
+    }
+
+    private ResourceClaimLease acquireRemoteClaim(String operation, String remoteName, String path) {
+        ConfigIdentitySnapshot snapshot = configSnapshotForClaims();
+        Map<String, ConfigDumpRemote> remotes = snapshot == null ? null : snapshot.remotes;
+        String normalizedPath = path != null && path.equals("//" + remoteName) ? "" : path;
+        EndpointResource resource = resourceForRemote(remotes, remoteName, normalizedPath);
+        try {
+            ResourceClaimLease claim = endpointConflictCoordinator.acquireResources(
+                    operation, java.util.Collections.singletonList(resource));
+            if (snapshot != null && !snapshot.stillMatches(new File(configPath))) {
+                claim.close();
+                throw resourceConflict();
+            }
+            return claim;
+        } catch (IOException conflict) {
+            throw resourceConflict();
+        }
+    }
+
+    private ResourceClaimLease acquireRemotePairClaim(
+            String operation, String sourceRemote, String sourcePath,
+            String destinationRemote, String destinationPath) {
+        ConfigIdentitySnapshot snapshot = configSnapshotForClaims();
+        Map<String, ConfigDumpRemote> remotes = snapshot == null ? null : snapshot.remotes;
+        List<EndpointResource> resources = new ArrayList<>(2);
+        String normalizedSource = sourcePath != null && sourcePath.equals("//" + sourceRemote) ? "" : sourcePath;
+        String normalizedDestination = destinationPath != null && destinationPath.equals("//" + destinationRemote) ? "" : destinationPath;
+        resources.add(resourceForRemote(remotes, sourceRemote, normalizedSource));
+        resources.add(resourceForRemote(remotes, destinationRemote, normalizedDestination));
+        try {
+            ResourceClaimLease claim = endpointConflictCoordinator.acquireResources(operation, resources);
+            if (snapshot != null && !snapshot.stillMatches(new File(configPath))) {
+                claim.close();
+                throw resourceConflict();
+            }
+            return claim;
+        } catch (IOException conflict) {
+            throw resourceConflict();
+        }
+    }
+
+    private static final class FsEndpoint {
+        final String remoteName;
+        final String path;
+        FsEndpoint(String remoteName, String path) {
+            this.remoteName = remoteName;
+            this.path = path;
+        }
+    }
+
+    private FsEndpoint parseFs(String fs) {
+        if (fs == null) return null;
+        int colon = fs.indexOf(':');
+        if (colon <= 0) return null;
+        return new FsEndpoint(fs.substring(0, colon), fs.substring(colon + 1));
+    }
+
+    private ResourceClaimLease acquireFsClaim(String operation, String fs) {
+        FsEndpoint endpoint = parseFs(fs);
+        return endpoint == null
+                ? acquireGlobalClaim(operation)
+                : acquireRemoteClaim(operation, endpoint.remoteName, endpoint.path);
+    }
+
+    private ResourceClaimLease acquireFsPairClaim(String operation, String sourceFs, String destinationFs) {
+        FsEndpoint source = parseFs(sourceFs);
+        FsEndpoint destination = parseFs(destinationFs);
+        return source == null || destination == null
+                ? acquireGlobalClaim(operation)
+                : acquireRemotePairClaim(operation, source.remoteName, source.path,
+                        destination.remoteName, destination.path);
+    }
+
+    private JobStatusHandler releaseClaimOnCompletion(ResourceClaimLease claim, JobStatusHandler handler) {
+        return response -> {
+            if (response != null && response.finished) {
+                claim.close();
+                synchronized (jobsHandlers) {
+                    jobsHandlers.remove(response.id);
+                }
+            }
+            if (handler != null) handler.handleJobStatus(response);
+        };
+    }
+
+    private void registerClaimedJob(int jobId, JobStatusHandler handler, ResourceClaimLease claim) {
+        registerJobHandler(jobId, releaseClaimOnCompletion(claim, handler));
+        pendingJobs.add(jobId);
+    }
+
+    private <T> T performClaimedCall(ResourceClaimLease claim, ClaimedRcCall<T> operation) {
+        try {
+            T result = operation.execute();
+            claim.close();
+            return result;
+        } catch (RuntimeException failure) {
+            if (!RcdClaimFailurePolicy.mayHaveStarted(failure)) claim.close();
+            throw failure;
+        }
+    }
+
+    /** Starts an async job; uncertain responses leave the durable claim for verified recovery. */
+    private void startClaimedJob(ResourceClaimLease claim, Runnable operation) {
+        try {
+            operation.run();
+        } catch (RuntimeException failure) {
+            if (!RcdClaimFailurePolicy.mayHaveStarted(failure)) claim.close();
+            throw failure;
+        }
+    }
+
+    private interface ClaimedRcCall<T> {
+        T execute();
+    }
+
     public interface JobsUpdateHandler {
         void onRcdJobsUpdate(SparseArray<JobStatusResponse> status);
     }
@@ -596,63 +808,115 @@ public class RcloneRcd {
     //
 
     public void cacheExpire(String directoryPath, boolean deleteData) {
-        performRcCall("cache/expire", new CacheExpireRcOpParam(directoryPath, deleteData), EmptyOkResponse.class);
-    }
-
-    public void cacheFetch(String file, String chunks) {
-        performRcCall("cache/fetch", new CacheFetchRcOpParam(chunks, file), EmptyOkResponse.class);
-    }
-
-    public void createConfig(String name, String type, HashMap<String, String> keyValue) {
-        performRcCall("config/create", new ConfigCreateRcOpParam(name, type, keyValue), EmptyOkResponse.class);
-    }
-
-    public ListRemotesResponse configListremotes() {
-        return performRcCall("config/listremotes", new NoParamRcOpParam(), ListRemotesResponse.class);
-    }
-
-    public Map<String, ConfigDumpRemote> configDump() {
-        return performRcCall("config/dump", new NoParamRcOpParam(), new TypeReference<Map<String, ConfigDumpRemote>>() {
+        ResourceClaimLease claim = acquireGlobalClaim("rcd-cache-expire");
+        performClaimedCall(claim, () -> {
+            performRcCall("cache/expire", new CacheExpireRcOpParam(directoryPath, deleteData), EmptyOkResponse.class);
+            return null;
         });
     }
 
+    public void cacheFetch(String file, String chunks) {
+        ResourceClaimLease claim = acquireGlobalClaim("rcd-cache-fetch");
+        performClaimedCall(claim, () -> {
+            performRcCall("cache/fetch", new CacheFetchRcOpParam(chunks, file), EmptyOkResponse.class);
+            return null;
+        });
+    }
+
+    public void createConfig(String name, String type, HashMap<String, String> keyValue) {
+        ResourceClaimLease claim = acquireGlobalClaim("rcd-config-create");
+        performClaimedCall(claim, () -> {
+            performRcCall("config/create", new ConfigCreateRcOpParam(name, type, keyValue), EmptyOkResponse.class);
+            configIdentityCache = null;
+            return null;
+        });
+    }
+
+    public ListRemotesResponse configListremotes() {
+        ResourceClaimLease claim = acquireGlobalClaim("rcd-config-list");
+        try {
+            return performRcCall("config/listremotes", new NoParamRcOpParam(), ListRemotesResponse.class);
+        } finally {
+            claim.close();
+        }
+    }
+
+    public Map<String, ConfigDumpRemote> configDump() {
+        ResourceClaimLease claim = acquireGlobalClaim("rcd-config-dump");
+        File configFile = new File(configPath);
+        long mtime = configFile.lastModified();
+        long length = configFile.length();
+        String digest = EndpointConflictCoordinator.fingerprintFile(configFile);
+        try {
+            Map<String, ConfigDumpRemote> remotes = performRcCall(
+                    "config/dump", new NoParamRcOpParam(),
+                    new TypeReference<Map<String, ConfigDumpRemote>>() { });
+            String currentDigest = EndpointConflictCoordinator.fingerprintFile(configFile);
+            if (remotes != null && digest != null && digest.equals(currentDigest)
+                    && configFile.lastModified() == mtime && configFile.length() == length) {
+                configIdentityCache = new ConfigIdentitySnapshot(remotes, mtime, length, digest);
+            } else {
+                configIdentityCache = null;
+            }
+            return remotes;
+        } finally {
+            claim.close();
+        }
+    }
+
     public void isOnline() throws RcdIOException {
-        performRcCall("rc/noopauth", new NoParamRcOpParam(), EmptyOkResponse.class);
+        ResourceClaimLease claim = acquireGlobalClaim("rcd-health");
+        performClaimedCall(claim, () -> {
+            performRcCall("rc/noopauth", new NoParamRcOpParam(), EmptyOkResponse.class);
+            return null;
+        });
     }
 
     public void sync(String srcFs, String dstFs, JobStatusHandler handler) {
-        JobIdResponse response = performRcCall("sync/sync", new SyncRcOpParam(srcFs, dstFs), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        ResourceClaimLease claim = acquireFsPairClaim("rcd-sync", srcFs, dstFs);
+        startClaimedJob(claim, () -> {
+            JobIdResponse response = performRcCall("sync/sync", new SyncRcOpParam(srcFs, dstFs), JobIdResponse.class);
+            registerClaimedJob(response.jobid, handler, claim);
+        });
     }
 
     public void copy(String srcFs, String dstFs, JobStatusHandler handler) {
-        JobIdResponse response = performRcCall("sync/copy", new CopyRcOpParam(srcFs, dstFs), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        ResourceClaimLease claim = acquireFsPairClaim("rcd-copy", srcFs, dstFs);
+        startClaimedJob(claim, () -> {
+            JobIdResponse response = performRcCall("sync/copy", new CopyRcOpParam(srcFs, dstFs), JobIdResponse.class);
+            registerClaimedJob(response.jobid, handler, claim);
+        });
     }
 
     public void copyFile(String srcRemoteName, String srcPath, String dstRemoteName, String dstPath, JobStatusHandler handler) {
         String srcFs = remoteNameAsFs(srcRemoteName);
         String dstFs = remoteNameAsFs(dstRemoteName);
-        srcPath = pathAsPath(srcRemoteName, srcPath);
-        dstPath = pathAsPath(dstRemoteName, dstPath);
-        JobIdResponse response = performRcCall("operations/copyfile", new CopyFileRcOpParam(srcPath, srcFs, dstPath, dstFs), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        String normalizedSrcPath = pathAsPath(srcRemoteName, srcPath);
+        String normalizedDstPath = pathAsPath(dstRemoteName, dstPath);
+        ResourceClaimLease claim = acquireRemotePairClaim(
+                "rcd-copy-file", srcRemoteName, srcPath, dstRemoteName, dstPath);
+        startClaimedJob(claim, () -> {
+            JobIdResponse response = performRcCall("operations/copyfile",
+                    new CopyFileRcOpParam(normalizedSrcPath, srcFs, normalizedDstPath, dstFs),
+                    JobIdResponse.class);
+            registerClaimedJob(response.jobid, handler, claim);
+        });
     }
 
     public void move(String srcFs, String dstFs, JobStatusHandler handler) {
-        JobIdResponse response = performRcCall("sync/move", new MoveRcOpParam(srcFs, dstFs, false), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        ResourceClaimLease claim = acquireFsPairClaim("rcd-move", srcFs, dstFs);
+        startClaimedJob(claim, () -> {
+            JobIdResponse response = performRcCall("sync/move", new MoveRcOpParam(srcFs, dstFs, false), JobIdResponse.class);
+            registerClaimedJob(response.jobid, handler, claim);
+        });
     }
 
     public ListItem[] list(String remoteName, String path) {
         String fs = remoteNameAsFs(remoteName);
-        path = pathAsPath(remoteName, path);
-        ListRcOpResponse response = performRcCall("operations/list", new ListRcOpParam(fs, path), ListRcOpResponse.class);
-        return response.list;
+        String normalizedPath = pathAsPath(remoteName, path);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-list", remoteName, path);
+        return performClaimedCall(claim, () -> performRcCall(
+                "operations/list", new ListRcOpParam(fs, normalizedPath), ListRcOpResponse.class).list);
     }
 
     public JobStatusResponse getJobStatus(int jobId) {
@@ -664,39 +928,57 @@ public class RcloneRcd {
     }
 
     public AboutResponse getStorageUsage(String remoteName) {
-        return performRcCall("operations/about", new AboutRcOpParam(remoteNameAsFs(remoteName)), AboutResponse.class);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-about", remoteName, "");
+        return performClaimedCall(claim, () -> performRcCall(
+                "operations/about", new AboutRcOpParam(remoteNameAsFs(remoteName)), AboutResponse.class));
     }
 
     // TODO: figure out how this works - docu unclear!
     public void delete(String fs) {
-        performRcCall("operations/delete", new DeleteRcOpParam(fs), EmptyOkResponse.class);
+        ResourceClaimLease claim = acquireFsClaim("rcd-delete", fs);
+        performClaimedCall(claim, () -> {
+            performRcCall("operations/delete", new DeleteRcOpParam(fs), EmptyOkResponse.class);
+            return null;
+        });
     }
 
     public void deleteFile(String remoteName, String path, JobStatusHandler handler) {
         String fs = remoteNameAsFs(remoteName);
-        path = pathAsPath(remoteName, path);
-        JobIdResponse response = performRcCall("operations/deletefile", new DeleteFileRcOpParam(fs, path), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        String normalizedPath = pathAsPath(remoteName, path);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-delete-file", remoteName, path);
+        startClaimedJob(claim, () -> {
+            JobIdResponse response = performRcCall("operations/deletefile",
+                    new DeleteFileRcOpParam(fs, normalizedPath), JobIdResponse.class);
+            registerClaimedJob(response.jobid, handler, claim);
+        });
     }
 
     public void purge(String remoteName, String path, JobStatusHandler handler) {
         String fs = remoteNameAsFs(remoteName);
-        path = pathAsPath(remoteName, path);
-        JobIdResponse response = performRcCall("operations/purge", new PurgeRcOpParam(fs, path), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        String normalizedPath = pathAsPath(remoteName, path);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-purge", remoteName, path);
+        startClaimedJob(claim, () -> {
+            JobIdResponse response = performRcCall("operations/purge",
+                    new PurgeRcOpParam(fs, normalizedPath), JobIdResponse.class);
+            registerClaimedJob(response.jobid, handler, claim);
+        });
     }
 
     public FsInfoRcOpResponse getFsInfo(String remoteName) {
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-fsinfo", remoteName, "");
         String fs = remoteNameAsFs(remoteName);
-        return performRcCall("operations/fsinfo", new FsInfoRcOpParam(fs), FsInfoRcOpResponse.class);
+        return performClaimedCall(claim, () -> performRcCall(
+                "operations/fsinfo", new FsInfoRcOpParam(fs), FsInfoRcOpResponse.class));
     }
 
     public void mkDir(String remoteName, String path) {
         String fs = remoteNameAsFs(remoteName);
-        path = pathAsPath(remoteName, path);
-        performRcCall("operations/mkdir", new MkDirRcOpParam(fs, path), EmptyOkResponse.class);
+        String normalizedPath = pathAsPath(remoteName, path);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-mkdir", remoteName, path);
+        performClaimedCall(claim, () -> {
+            performRcCall("operations/mkdir", new MkDirRcOpParam(fs, normalizedPath), EmptyOkResponse.class);
+            return null;
+        });
     }
 
     public void moveFile(String srcRemoteName, String srcPath, String dstRemoteName, String dstPath, JobStatusHandler handler) {
@@ -704,28 +986,41 @@ public class RcloneRcd {
         String srcRemote = pathAsPath(srcRemoteName, srcPath);
         String dstFs = remoteNameAsFs(dstRemoteName);
         String dstRemote = pathAsPath(dstRemoteName, dstPath);
-        JobIdResponse response = performRcCall("operations/movefile", new MoveFileRcOpParam(srcFs, srcRemote, dstFs, dstRemote), JobIdResponse.class);
-        pendingJobs.add(response.jobid);
-        registerJobHandler(response.jobid, handler);
+        ResourceClaimLease claim = acquireRemotePairClaim(
+                "rcd-move-file", srcRemoteName, srcPath, dstRemoteName, dstPath);
+        startClaimedJob(claim, () -> {
+            JobIdResponse response = performRcCall("operations/movefile",
+                    new MoveFileRcOpParam(srcFs, srcRemote, dstFs, dstRemote), JobIdResponse.class);
+            registerClaimedJob(response.jobid, handler, claim);
+        });
     }
 
     public String getPublicLink(String remoteName, String path) {
         String fs = remoteNameAsFs(remoteName);
-        path = pathAsPath(remoteName, path);
-        PublicLinkRcOpResponse response = performRcCall("operations/publiclink", new PublicLinkRcOpParam(fs, path), PublicLinkRcOpResponse.class);
-        return response.url;
+        String normalizedPath = pathAsPath(remoteName, path);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-public-link", remoteName, path);
+        return performClaimedCall(claim, () -> performRcCall(
+                "operations/publiclink", new PublicLinkRcOpParam(fs, normalizedPath), PublicLinkRcOpResponse.class).url);
     }
 
     public void rmDir(String remoteName, String path) {
         String fs = remoteNameAsFs(remoteName);
-        path = pathAsPath(remoteName, path);
-        performRcCall("operations/rmdir", new RmDirRcOpParam(fs, path), EmptyOkResponse.class);
+        String normalizedPath = pathAsPath(remoteName, path);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-rmdir", remoteName, path);
+        performClaimedCall(claim, () -> {
+            performRcCall("operations/rmdir", new RmDirRcOpParam(fs, normalizedPath), EmptyOkResponse.class);
+            return null;
+        });
     }
 
     public void rmDirs(String remoteName, String path) {
         String fs = remoteNameAsFs(remoteName);
-        path = pathAsPath(remoteName, path);
-        performRcCall("operations/rmdirs", new RmDirsRcOpParam(fs, path), EmptyOkResponse.class);
+        String normalizedPath = pathAsPath(remoteName, path);
+        ResourceClaimLease claim = acquireRemoteClaim("rcd-rmdirs", remoteName, path);
+        performClaimedCall(claim, () -> {
+            performRcCall("operations/rmdirs", new RmDirsRcOpParam(fs, normalizedPath), EmptyOkResponse.class);
+            return null;
+        });
     }
 
     ///
@@ -1020,6 +1315,10 @@ public class RcloneRcd {
         public String getError() {
             return error.getError();
         }
+
+        int getStatus() {
+            return error == null ? -1 : error.getStatus();
+        }
     }
 
     public static class RcdIOException extends RcdOpException {
@@ -1078,6 +1377,8 @@ public class RcloneRcd {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ConfigDumpRemote {
         String type;
+        String remote;
+        String root;
     }
 
     private static class AboutResponse implements RcOpResponse {

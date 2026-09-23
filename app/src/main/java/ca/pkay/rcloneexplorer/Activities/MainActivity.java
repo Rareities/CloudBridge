@@ -752,66 +752,72 @@ public class MainActivity extends AppCompatActivity
                 String previousPreferences = null;
                 File stagedConfig = null;
                 File previousConfig = null;
+                Rclone.ConfigTransaction configTransaction = null;
                 boolean storesChanged = false;
                 try {
-                    // Read and validate every part before touching the current configuration.
-                    importedDatabase = rclone.readDatabaseJson(uris[0]);
-                    importedPreferences = rclone.readSharedPrefs(uris[0]);
-                    Importer.validate(importedDatabase);
-                    SharedPreferencesBackup.validate(importedPreferences);
+                    try {
+                        // Read and validate every part before touching the current configuration.
+                        importedDatabase = rclone.readDatabaseJson(uris[0]);
+                        importedPreferences = rclone.readSharedPrefs(uris[0]);
+                        Importer.validate(importedDatabase);
+                        SharedPreferencesBackup.validate(importedPreferences);
 
-                    stagedConfig = rclone.stageConfigFileFromZip(uris[0]);
-                    if(stagedConfig == null) {
-                        statusCode = FAILURE_ZIP_INVALID_CONF;
-                        return false;
+                        stagedConfig = rclone.stageConfigFileFromZip(uris[0]);
+                        if(stagedConfig == null) {
+                            statusCode = FAILURE_ZIP_INVALID_CONF;
+                            return false;
+                        }
+
+                        // Serialize the whole multi-store change against every rclone operation;
+                        // retain the claim through rollback if a later store fails.
+                        configTransaction = rclone.beginConfigTransaction("backup-import");
+                        previousDatabase = Exporter.create(context);
+                        previousPreferences = SharedPreferencesBackup.export(context);
+                        previousConfig = configTransaction.snapshotConfigFile();
+
+                        storesChanged = true;
+                        Importer.importJson(importedDatabase, context);
+                        SharedPreferencesBackup.importJson(importedPreferences, context);
+                        configTransaction.commitStagedConfigFile(stagedConfig);
+                        stagedConfig = null;
+                        statusCode = SUCCESS_IMPORT;
+                        return true;
+                    } catch (JSONException e) {
+                        statusCode = FAILURE_ZIP_INVALID_JSON;
+                    } catch (Exception e) {
+                        statusCode = FAILURE_ZIP_NO_JSON;
+                        FLog.e(TAG, "Backup import failed; attempting rollback", e);
                     }
 
-                    // Keep a recoverable snapshot for the cross-store commit below.
-                    previousDatabase = Exporter.create(context);
-                    previousPreferences = SharedPreferencesBackup.export(context);
-                    previousConfig = rclone.snapshotConfigFile();
-
-                    storesChanged = true;
-                    Importer.importJson(importedDatabase, context);
-                    SharedPreferencesBackup.importJson(importedPreferences, context);
-                    rclone.commitStagedConfigFile(stagedConfig);
-                    stagedConfig = null;
-                    if (previousConfig != null) {
-                        previousConfig.delete();
-                        previousConfig = null;
+                    // If any later part failed, restore every store that may have changed.
+                    try {
+                        if (previousDatabase != null) {
+                            Importer.importJson(previousDatabase, context);
+                        }
+                        if (previousPreferences != null) {
+                            SharedPreferencesBackup.importJson(previousPreferences, context);
+                        }
+                        if (storesChanged && configTransaction != null) {
+                            configTransaction.restoreConfigSnapshot(previousConfig);
+                        }
+                    } catch (Exception rollbackError) {
+                        FLog.e(TAG, "Backup rollback failed; configuration may require recovery", rollbackError);
+                        statusCode = FAILURE_UNSPECIFIED;
                     }
-                    statusCode = SUCCESS_IMPORT;
-                    return true;
-                } catch (JSONException e) {
-                    statusCode = FAILURE_ZIP_INVALID_JSON;
-                } catch (Exception e) {
-                    statusCode = FAILURE_ZIP_NO_JSON;
-                    FLog.e(TAG, "Backup import failed; attempting rollback", e);
-                }
-
-                // If any later part failed, restore every store that may have changed.
-                try {
-                    if (previousDatabase != null) {
-                        Importer.importJson(previousDatabase, context);
-                    }
-                    if (previousPreferences != null) {
-                        SharedPreferencesBackup.importJson(previousPreferences, context);
-                    }
-                    if (storesChanged) {
-                        rclone.restoreConfigSnapshot(previousConfig);
-                    }
-                } catch (Exception rollbackError) {
-                    FLog.e(TAG, "Backup rollback failed; configuration may require recovery", rollbackError);
-                    statusCode = FAILURE_UNSPECIFIED;
+                    return false;
                 } finally {
-                    if (previousConfig != null) {
-                        previousConfig.delete();
+                    if (stagedConfig != null && stagedConfig.exists()) {
+                        if (!stagedConfig.delete()) {
+                            FLog.w(TAG, "Unable to remove staged backup config after import");
+                        }
+                    }
+                    if (previousConfig != null && previousConfig.exists() && !previousConfig.delete()) {
+                        FLog.w(TAG, "Unable to remove temporary pre-import config snapshot");
+                    }
+                    if (configTransaction != null) {
+                        configTransaction.close();
                     }
                 }
-                if (stagedConfig != null && stagedConfig.exists()) {
-                    stagedConfig.delete();
-                }
-                return false;
             }
 
             try {

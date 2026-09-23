@@ -40,9 +40,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -55,12 +57,14 @@ import java.util.zip.ZipOutputStream;
 import ca.pkay.rcloneexplorer.Database.json.Exporter;
 import ca.pkay.rcloneexplorer.Database.json.Importer;
 import ca.pkay.rcloneexplorer.Database.json.SharedPreferencesBackup;
+import ca.pkay.rcloneexplorer.Database.ResourceClaimLease;
 import ca.pkay.rcloneexplorer.Items.FileItem;
 import ca.pkay.rcloneexplorer.Items.FilterEntry;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject;
 import ca.pkay.rcloneexplorer.rclone.Provider;
 import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
+import ca.pkay.rcloneexplorer.util.EndpointConflictCoordinator;
 import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.LogRedactor;
 import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
@@ -94,6 +98,9 @@ public class Rclone {
     private String rcloneConf;
     private Log2File log2File;
     private final ConfigSecretStore configSecretStore;
+    private final EndpointConflictCoordinator endpointConflictCoordinator;
+    private final Map<Process, ResourceClaimLease> pendingExecutionClaims =
+            Collections.synchronizedMap(new IdentityHashMap<Process, ResourceClaimLease>());
     private volatile String configPassword;
     // RC-38: cache of the parsed `rclone config dump` JSON. Validated against the rclone.conf
     // file's mtime/length on every read so per-instance caches self-invalidate when another
@@ -101,6 +108,7 @@ public class Rclone {
     private volatile JSONObject cachedRemotesConfig;
     private volatile long cachedConfMtime;
     private volatile long cachedConfLength;
+    private volatile String cachedConfDigest;
 
     public Rclone(Context context) {
         this.context = context;
@@ -108,6 +116,7 @@ public class Rclone {
         this.rcloneConf = context.getFilesDir().getPath() + "/rclone.conf";
         log2File = new Log2File(context);
         configSecretStore = new ConfigSecretStore(context);
+        endpointConflictCoordinator = new EndpointConflictCoordinator(context);
         try {
             configPassword = configSecretStore.load();
         } catch (Exception e) {
@@ -466,8 +475,11 @@ public class Rclone {
         File confFile = new File(rcloneConf);
         long mtime = confFile.lastModified();
         long length = confFile.length();
+        String digest = EndpointConflictCoordinator.fingerprintFile(confFile);
+        if (digest == null) return null;
         synchronized (this) {
-            if (cachedRemotesConfig != null && cachedConfMtime == mtime && cachedConfLength == length) {
+            if (cachedRemotesConfig != null && cachedConfMtime == mtime
+                    && cachedConfLength == length && digest.equals(cachedConfDigest)) {
                 return cachedRemotesConfig;
             }
         }
@@ -481,10 +493,16 @@ public class Rclone {
                 return null;
             }
             JSONObject parsed = new JSONObject(result.text);
+            String currentDigest = EndpointConflictCoordinator.fingerprintFile(confFile);
+            if (currentDigest == null || !digest.equals(currentDigest)
+                    || confFile.lastModified() != mtime || confFile.length() != length) {
+                return null;
+            }
             synchronized (this) {
                 cachedRemotesConfig = parsed;
                 cachedConfMtime = mtime;
                 cachedConfLength = length;
+                cachedConfDigest = digest;
             }
             return parsed;
         } catch (IOException | JSONException e) {
@@ -496,6 +514,43 @@ public class Rclone {
     /** Drop the cached config dump so the next getRemotes() re-reads it from rclone. */
     public void invalidateRemotesCache() {
         cachedRemotesConfig = null;
+        cachedConfDigest = null;
+    }
+
+    /** Only use a config dump whose exact file contents still match the cached snapshot. */
+    @Nullable
+    private RemotesClaimSnapshot currentRemotesConfigForClaims() {
+        File confFile = new File(rcloneConf);
+        long mtime = confFile.lastModified();
+        long length = confFile.length();
+        String digest = EndpointConflictCoordinator.fingerprintFile(confFile);
+        if (digest == null || confFile.lastModified() != mtime || confFile.length() != length) {
+            return null;
+        }
+        synchronized (this) {
+            return cachedRemotesConfig != null && cachedConfMtime == mtime
+                    && cachedConfLength == length && digest.equals(cachedConfDigest)
+                    ? new RemotesClaimSnapshot(cachedRemotesConfig, mtime, length, digest) : null;
+        }
+    }
+
+    private static final class RemotesClaimSnapshot {
+        final JSONObject remotes;
+        final long mtime;
+        final long length;
+        final String digest;
+
+        RemotesClaimSnapshot(JSONObject remotes, long mtime, long length, String digest) {
+            this.remotes = remotes;
+            this.mtime = mtime;
+            this.length = length;
+            this.digest = digest;
+        }
+
+        boolean stillMatches(File configFile) {
+            return configFile.lastModified() == mtime && configFile.length() == length
+                    && digest.equals(EndpointConflictCoordinator.fingerprintFile(configFile));
+        }
     }
 
     public RemoteItem getRemoteItemFromName(String remoteName) {
@@ -514,7 +569,124 @@ public class Rclone {
     }
 
     private Process getRuntimeProcess(String[] command, String[] env) throws IOException {
-        return Runtime.getRuntime().exec(command, env);
+        RemotesClaimSnapshot configSnapshot = currentRemotesConfigForClaims();
+        ResourceClaimLease claim = endpointConflictCoordinator.acquireForCommand(
+                command, configSnapshot == null ? null : configSnapshot.remotes, "native-process");
+        if (configSnapshot != null && !configSnapshot.stillMatches(new File(rcloneConf))) {
+            closeResourceClaim(claim);
+            throw new IOException("Rclone config changed during endpoint validation; retry the operation");
+        }
+        try {
+            Process process = Runtime.getRuntime().exec(command, env);
+            pendingExecutionClaims.put(process, claim);
+            return process;
+        } catch (IOException | RuntimeException failure) {
+            closeResourceClaim(claim);
+            throw failure;
+        }
+    }
+
+    /** Starts a direct native handle with its durable endpoint claim acquired before launch. */
+    private NativeExecutionHandle launchClaimed(String[] command, String[] env, String label)
+            throws IOException {
+        RemotesClaimSnapshot configSnapshot = currentRemotesConfigForClaims();
+        ResourceClaimLease claim = endpointConflictCoordinator.acquireForCommand(
+                command, configSnapshot == null ? null : configSnapshot.remotes, label);
+        if (configSnapshot != null && !configSnapshot.stillMatches(new File(rcloneConf))) {
+            closeResourceClaim(claim);
+            throw new IOException("Rclone config changed during endpoint validation; retry the operation");
+        }
+        final NativeExecutionHandle execution;
+        try {
+            execution = NativeExecutionHandle.launch(command, env, label);
+        } catch (IOException | RuntimeException failure) {
+            closeResourceClaim(claim);
+            throw failure;
+        }
+        if (!execution.attachResource(claim)) {
+            execution.cancel();
+            // Keep the durable row on this exceptional path: without an attached owner, only
+            // confirmed process reconciliation may safely release it.
+            throw new IOException("Unable to attach native endpoint ownership");
+        }
+        return execution;
+    }
+
+    /** Adopts a legacy private launcher and transfers its pre-launch durable claim to the handle. */
+    @Nullable
+    private NativeExecutionHandle adoptClaimed(@Nullable Process process, String label) {
+        if (process == null) return null;
+        ResourceClaimLease claim = pendingExecutionClaims.remove(process);
+        if (claim == null) {
+            NativeExecutionHandle unclaimed = NativeExecutionHandle.adopt(process, label);
+            ResourceClaimLease quarantine = endpointConflictCoordinator
+                    .quarantineUnclaimedProcess("unclaimed-" + label);
+            boolean attached = unclaimed.attachResource(quarantine);
+            NativeExecutionHandle.Outcome stopped = unclaimed.cancelAndAwait(null, null);
+            if (!attached && stopped.isConfirmed()) {
+                closeResourceClaim(quarantine);
+            } else if (!stopped.isConfirmed()) {
+                FLog.e(TAG, "Unclaimed native process could not be confirmed stopped; global quarantine remains active");
+            }
+            throw new IllegalStateException("Native process was launched without an endpoint claim");
+        }
+        NativeExecutionHandle execution = NativeExecutionHandle.adopt(process, label);
+        if (execution == null) {
+            closeResourceClaim(claim);
+            return null;
+        }
+        if (!execution.attachResource(claim)) {
+            execution.cancel();
+            throw new IllegalStateException("Unable to attach native endpoint ownership");
+        }
+        return execution;
+    }
+
+    private void closeResourceClaim(@Nullable ResourceClaimLease claim) {
+        if (claim == null) return;
+        try {
+            claim.close();
+        } catch (RuntimeException failure) {
+            FLog.e(TAG, "Unable to release a confirmed native endpoint claim", failure);
+        }
+    }
+
+    /** Holds the global configuration claim across a multi-store backup import or rollback. */
+    public ConfigTransaction beginConfigTransaction(String operation) throws IOException {
+        return new ConfigTransaction(endpointConflictCoordinator.acquireGlobal(operation));
+    }
+
+    public final class ConfigTransaction implements AutoCloseable {
+        private final ResourceClaimLease claim;
+        private final AtomicBoolean closed = new AtomicBoolean(false);
+
+        private ConfigTransaction(ResourceClaimLease claim) {
+            this.claim = claim;
+        }
+
+        public File snapshotConfigFile() throws IOException {
+            ensureOpen();
+            return snapshotConfigFileInternal();
+        }
+
+        public boolean commitStagedConfigFile(File stagedFile) throws IOException {
+            ensureOpen();
+            return commitStagedConfigFileInternal(stagedFile);
+        }
+
+        public void restoreConfigSnapshot(@Nullable File snapshot) throws IOException {
+            ensureOpen();
+            restoreConfigSnapshotInternal(snapshot);
+        }
+
+        private void ensureOpen() {
+            if (closed.get()) throw new IllegalStateException("Config transaction is closed");
+        }
+
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true)) claim.close();
+        }
     }
 
     @Nullable
@@ -658,7 +830,7 @@ public class Rclone {
     public NativeExecutionHandle configInteractiveOwned() throws IOException {
         String[] command = createCommand("config");
         String[] environment = getRcloneEnv();
-        return NativeExecutionHandle.launch(command, environment, "config-interactive");
+        return launchClaimed(command, environment, "config-interactive");
     }
 
     public void deleteRemote(String remoteName) {
@@ -775,7 +947,7 @@ public class Rclone {
                                             @Nullable String user, @Nullable String password,
                                             @NonNull RemoteItem remote, @Nullable String servePath,
                                             @Nullable String baseUrl) {
-        return NativeExecutionHandle.adopt(
+        return adoptClaimed(
                 serve(protocol, port, allowRemoteAccess, user, password, remote, servePath, baseUrl),
                 "serve");
     }
@@ -906,7 +1078,7 @@ public class Rclone {
                                            int syncDirection, boolean useMD5Sum,
                                            ArrayList<FilterEntry> filters, boolean deleteExcluded,
                                            String transfersOverride) {
-        return NativeExecutionHandle.adopt(
+        return adoptClaimed(
                 sync(remoteItem, localPath, remotePath, syncDirection, useMD5Sum, filters,
                         deleteExcluded, transfersOverride),
                 "sync");
@@ -919,7 +1091,7 @@ public class Rclone {
                                            int syncDirection, boolean useMD5Sum,
                                            ArrayList<FilterEntry> filters, boolean deleteExcluded,
                                            String transfersOverride) {
-        return NativeExecutionHandle.adopt(
+        return adoptClaimed(
                 sync(remoteItem, remotePath, remoteItem2, remotePath2, syncDirection, useMD5Sum,
                         filters, deleteExcluded, transfersOverride),
                 "cloud-sync");
@@ -991,13 +1163,13 @@ public class Rclone {
     /** WP05 compatibility adapter for the ephemeral transfer worker. */
     @Nullable
     public NativeExecutionHandle downloadFileOwned(RemoteItem remote, FileItem downloadItem, String downloadPath) {
-        return NativeExecutionHandle.adopt(downloadFile(remote, downloadItem, downloadPath), "download");
+        return adoptClaimed(downloadFile(remote, downloadItem, downloadPath), "download");
     }
 
     /** WP05 compatibility adapter for the ephemeral transfer worker. */
     @Nullable
     public NativeExecutionHandle uploadFileOwned(RemoteItem remote, String uploadPath, String uploadFile) {
-        return NativeExecutionHandle.adopt(uploadFile(remote, uploadPath, uploadFile), "upload");
+        return adoptClaimed(uploadFile(remote, uploadPath, uploadFile), "upload");
     }
 
     // Can't pass \u0000 as cmd arg - encode like rclone with U+2400
@@ -1092,13 +1264,13 @@ public class Rclone {
     /** WP05 compatibility adapter for the ephemeral transfer worker. */
     @Nullable
     public NativeExecutionHandle moveToOwned(RemoteItem remote, FileItem moveItem, String newLocation) {
-        return NativeExecutionHandle.adopt(moveTo(remote, moveItem, newLocation), "move");
+        return adoptClaimed(moveTo(remote, moveItem, newLocation), "move");
     }
 
     /** WP05 compatibility adapter for the ephemeral transfer worker. */
     @Nullable
     public NativeExecutionHandle deleteItemsOwned(RemoteItem remote, FileItem deleteItem) {
-        return NativeExecutionHandle.adopt(deleteItems(remote, deleteItem), "delete");
+        return adoptClaimed(deleteItems(remote, deleteItem), "delete");
     }
 
     public Boolean moveTo(RemoteItem remote, String oldFile, String newFile) {
@@ -1126,7 +1298,7 @@ public class Rclone {
             throw new IOException("Transfer cancelled before native launch");
         }
         String[] command = createCommandWithOptions("cat", rclonePath);
-        NativeExecutionHandle execution = NativeExecutionHandle.launch(command, getRcloneEnv(), "download-to-pipe");
+        NativeExecutionHandle execution = launchClaimed(command, getRcloneEnv(), "download-to-pipe");
         registerPipeCancellation(execution, cancellationSignal);
         DiagnosticCapture diagnostics = new DiagnosticCapture();
         InputStream output;
@@ -1150,7 +1322,7 @@ public class Rclone {
             throw new IOException("Transfer cancelled before native launch");
         }
         String[] command = createCommandWithOptions("rcat", rclonePath, "--streaming-upload-cutoff", "500K");
-        NativeExecutionHandle execution = NativeExecutionHandle.launch(command, getRcloneEnv(), "upload-from-pipe");
+        NativeExecutionHandle execution = launchClaimed(command, getRcloneEnv(), "upload-from-pipe");
         registerPipeCancellation(execution, cancellationSignal);
         DiagnosticCapture diagnostics = new DiagnosticCapture();
         OutputStream input;
@@ -1263,22 +1435,22 @@ public class Rclone {
     /** WP05 owned entry point for config commands, including their output drains and reap. */
     @Nullable
     public NativeExecutionHandle configOwned(String task, List<String> options) {
-        return NativeExecutionHandle.adopt(config(task, new ArrayList<>(options)), "config-" + task);
+        return adoptClaimed(config(task, new ArrayList<>(options)), "config-" + task);
     }
 
     @Nullable
     public NativeExecutionHandle configCreateOwned(List<String> options) {
-        return NativeExecutionHandle.adopt(configCreate(new ArrayList<>(options)), "config-create");
+        return adoptClaimed(configCreate(new ArrayList<>(options)), "config-create");
     }
 
     @Nullable
     public NativeExecutionHandle configCreateNoInteractOwned(List<String> options) {
-        return NativeExecutionHandle.adopt(configCreateNoInteract(new ArrayList<>(options)), "config-create-noninteractive");
+        return adoptClaimed(configCreateNoInteract(new ArrayList<>(options)), "config-create-noninteractive");
     }
 
     @Nullable
     public NativeExecutionHandle configUpdateOwned(List<String> options) {
-        return NativeExecutionHandle.adopt(configUpdate(new ArrayList<>(options)), "config-update");
+        return adoptClaimed(configUpdate(new ArrayList<>(options)), "config-update");
     }
 
     /** Drain both pipes while retaining at most maxChars of stdout, including line separators. */
@@ -1292,7 +1464,7 @@ public class Rclone {
                                                @Nullable NativeExecutionHandle.LineSink stderrSink) throws IOException {
         StringBuilder output = new StringBuilder(Math.min(maxChars, 4096));
         AtomicBoolean exceededLimit = new AtomicBoolean(false);
-        NativeExecutionHandle handle = NativeExecutionHandle.launch(command, env, label);
+        NativeExecutionHandle handle = launchClaimed(command, env, label);
         NativeExecutionHandle.Outcome outcome = handle.await(timeoutMillis, line -> {
             if (exceededLimit.get()) {
                 return;
@@ -1311,7 +1483,7 @@ public class Rclone {
 
     private boolean runCommandSuccessfully(String[] command, String[] env, String label, long timeoutMillis) {
         try {
-            NativeExecutionHandle handle = NativeExecutionHandle.launch(command, env, label);
+            NativeExecutionHandle handle = launchClaimed(command, env, label);
             DiagnosticCapture diagnostics = new DiagnosticCapture();
             NativeExecutionHandle.Outcome outcome = handle.await(timeoutMillis, null, diagnostics);
             if (!outcome.isSuccess()) {
@@ -1330,7 +1502,7 @@ public class Rclone {
     private String runFirstMetadataLine(String[] command, String[] env, String label) {
         try {
             AtomicReference<String> firstLine = new AtomicReference<>();
-            NativeExecutionHandle handle = NativeExecutionHandle.launch(command, env, label);
+            NativeExecutionHandle handle = launchClaimed(command, env, label);
             NativeExecutionHandle.Outcome outcome = handle.await(
                     METADATA_COMMAND_TIMEOUT_MILLIS,
                     line -> firstLine.compareAndSet(null, line), null);
@@ -1371,7 +1543,7 @@ public class Rclone {
     /** WP05 owned entry point for OAuth reconnect, whose prompts are handled by InteractiveRunner. */
     @Nullable
     public NativeExecutionHandle reconnectRemoteOwned(RemoteItem remoteItem) {
-        return NativeExecutionHandle.adopt(reconnectRemote(remoteItem), "config-reconnect");
+        return adoptClaimed(reconnectRemote(remoteItem), "config-reconnect");
     }
 
     public AboutResult aboutRemote(RemoteItem remoteItem) {
@@ -1432,7 +1604,7 @@ public class Rclone {
         String[] command = createCommand("lsd", "--max-depth", String.valueOf(maxDepth), remoteName + ":");
         try {
             AtomicBoolean networkError = new AtomicBoolean(false);
-            NativeExecutionHandle handle = NativeExecutionHandle.launch(command, getRcloneEnv(), "lsd");
+            NativeExecutionHandle handle = launchClaimed(command, getRcloneEnv(), "lsd");
             NativeExecutionHandle.Outcome outcome = handle.await(METADATA_COMMAND_TIMEOUT_MILLIS,
                     null, line -> {
                         if (DirectoryProbeResult.looksLikeNetworkError(line)) {
@@ -1564,7 +1736,7 @@ public class Rclone {
         String[] command = createCommand("--ask-password=false", "config", "show");
         NativeExecutionHandle handle;
         try {
-            handle = NativeExecutionHandle.launch(command,
+            handle = launchClaimed(command,
                     getRcloneEnv("RCLONE_CONFIG_PASS=" + password), "decrypt-config");
         } catch (IOException e) {
             FLog.e(TAG, "decryptConfig: error running rclone", e);
@@ -1720,6 +1892,12 @@ public class Rclone {
 
     /** Atomically replaces the app config within its private files directory. */
     public boolean commitStagedConfigFile(File stagedFile) throws IOException {
+        try (ResourceClaimLease ignored = endpointConflictCoordinator.acquireGlobal("config-import")) {
+            return commitStagedConfigFileInternal(stagedFile);
+        }
+    }
+
+    private boolean commitStagedConfigFileInternal(File stagedFile) throws IOException {
         if (stagedFile == null || !stagedFile.isFile()) {
             throw new IOException("Staged config is missing");
         }
@@ -1741,6 +1919,13 @@ public class Rclone {
     /** Snapshot the current config so a multi-part backup import can roll back safely. */
     @Nullable
     public File snapshotConfigFile() throws IOException {
+        try (ResourceClaimLease ignored = endpointConflictCoordinator.acquireGlobal("config-snapshot")) {
+            return snapshotConfigFileInternal();
+        }
+    }
+
+    @Nullable
+    private File snapshotConfigFileInternal() throws IOException {
         File configFile = new File(rcloneConf);
         if (!configFile.isFile()) {
             return null;
@@ -1757,6 +1942,12 @@ public class Rclone {
 
     /** Restore a snapshot created by {@link #snapshotConfigFile()}. */
     public void restoreConfigSnapshot(@Nullable File snapshot) throws IOException {
+        try (ResourceClaimLease ignored = endpointConflictCoordinator.acquireGlobal("config-restore")) {
+            restoreConfigSnapshotInternal(snapshot);
+        }
+    }
+
+    private void restoreConfigSnapshotInternal(@Nullable File snapshot) throws IOException {
         File configFile = new File(rcloneConf);
         if (snapshot == null) {
             if (configFile.exists() && !configFile.delete()) {
@@ -1863,44 +2054,49 @@ public class Rclone {
     }
 
     public void exportConfigFile(Uri uri) throws IOException {
-        File configFile = new File(rcloneConf);
-        Uri config = Uri.fromFile(configFile);
-        InputStream inputStream = context.getContentResolver().openInputStream(config);
-        OutputStream outputStream = context.getContentResolver().openOutputStream(uri);
-
-        if (inputStream == null || outputStream == null) {
-            return;
-        }
-        char[] buffer = new char[4096];
-        StringBuilder out = new StringBuilder();
-        Reader in = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-        for (int numRead; (numRead = in.read(buffer, 0, buffer.length)) > 0; ) {
-            out.append(buffer, 0, numRead);
-        }
-
-        ZipOutputStream zos = new ZipOutputStream(outputStream);
-        try {
-            ZipEntry zipEntry = new ZipEntry("rcx.json");
-            zos.putNextEntry(zipEntry);
-            zos.write(Exporter.create(this.context).getBytes());
-            zos.closeEntry();
-            zipEntry = new ZipEntry("rcx.prefs");
-            zos.putNextEntry(zipEntry);
-            zos.write(SharedPreferencesBackup.export(context).getBytes());
-            zos.closeEntry();
-            zipEntry = new ZipEntry("rclone.conf");
-            zos.putNextEntry(zipEntry);
-            zos.write(out.toString().getBytes());
-            zos.closeEntry();
-        }
-        catch (Exception e) {
-            // unable to write zip
-        }
-        finally {
-            zos.close();
-            inputStream.close();
-            outputStream.flush();
-            outputStream.close();
+        try (ResourceClaimLease ignored = endpointConflictCoordinator.acquireGlobal("config-export")) {
+            File configFile = new File(rcloneConf);
+            if (!configFile.isFile() || configFile.length() > MAX_BACKUP_ENTRY_BYTES) {
+                throw new IOException("Config is missing or exceeds the export size limit");
+            }
+            Uri config = Uri.fromFile(configFile);
+            InputStream inputStream = context.getContentResolver().openInputStream(config);
+            OutputStream outputStream = context.getContentResolver().openOutputStream(uri);
+            if (inputStream == null || outputStream == null) {
+                if (inputStream != null) inputStream.close();
+                if (outputStream != null) outputStream.close();
+                throw new IOException("Unable to open configuration export streams");
+            }
+            try (InputStream input = inputStream; ZipOutputStream zos = new ZipOutputStream(outputStream)) {
+                final byte[] databaseBackup;
+                final byte[] preferencesBackup;
+                try {
+                    databaseBackup = Exporter.create(this.context).getBytes(StandardCharsets.UTF_8);
+                    preferencesBackup = SharedPreferencesBackup.export(context).getBytes(StandardCharsets.UTF_8);
+                } catch (JSONException serializationFailure) {
+                    throw new IOException("Unable to serialize configuration backup", serializationFailure);
+                }
+                ZipEntry zipEntry = new ZipEntry("rcx.json");
+                zos.putNextEntry(zipEntry);
+                zos.write(databaseBackup);
+                zos.closeEntry();
+                zipEntry = new ZipEntry("rcx.prefs");
+                zos.putNextEntry(zipEntry);
+                zos.write(preferencesBackup);
+                zos.closeEntry();
+                zipEntry = new ZipEntry("rclone.conf");
+                zos.putNextEntry(zipEntry);
+                byte[] buffer = new byte[8192];
+                long total = 0L;
+                for (int count; (count = input.read(buffer)) != -1; ) {
+                    total += count;
+                    if (total > MAX_BACKUP_ENTRY_BYTES) {
+                        throw new IOException("Config exceeds the export size limit");
+                    }
+                    zos.write(buffer, 0, count);
+                }
+                zos.closeEntry();
+            }
         }
     }
 
