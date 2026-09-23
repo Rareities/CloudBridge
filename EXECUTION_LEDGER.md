@@ -496,3 +496,50 @@ surface. Reconcile the refreshed upstream candidate first. Revisit WP05 lifecycl
 schema/concurrency/RCD-recovery gates later; Galaxy S26, instrumentation and live Proton remain
 NOT RUN. Keep the immutable Rareities/rclone pin and use only a verified unique disposable
 Proton test area.
+
+## 2026-09-23 — WP01 app-pin adoption and native debug verification
+
+**Implementation commit:** pending; app ref update and evidence are committed together.
+
+### Package record (13-field format)
+
+1. **Objective:** adopt the independently validated Rareities/rclone WP01 result in CloudBridge
+   and verify the Android-native integration before app WP07 work.
+2. **Scope:** immutable Gradle rclone ref, Go toolchain compatibility, all native ABIs, OSS
+   debug APK, JVM unit tests and lint.
+3. **Out of scope:** release signing/publication, device or emulator acceptance, live Proton.
+4. **Preconditions:** engine branch `codex/luna-engine` published at
+   `ec863fdcd9e1ce0d13357f791d5528aab10bf0ec`; GitHub API tree
+   `42870c91fd19fd6a7eb2d2ac199a5414bb7b5dc6` equals tested local `ccd9f64` tree exactly.
+5. **Design:** retain `https://github.com/Rareities/rclone.git`, pin the immutable published
+   commit, and make no floating-branch or unpinned fallback available.
+6. **Safety invariants:** source identity is commit-pinned; the local build mirror is accepted
+   only after exact tree equality; generated binaries stay out of source commits; debug signing
+   is not release provenance.
+7. **Implementation:** `gradle.properties` now pins
+   `ec863fdcd9e1ce0d13357f791d5528aab10bf0ec`. The validation build used a local source mirror
+   at `ccd9f64`, whose tree exactly matches the published remote commit. Temporary build-only
+   `go`/`git` executable-path overrides are not in tracked production build files.
+8. **Existing code reused:** the app's existing immutable rclone dependency properties and
+   four-ABI Gradle native build tasks.
+9. **Code retired:** CloudBridge's prior engine ref `1583cce1e28340e5d064ed955179f5f2b31e7757`.
+10. **Failure behaviour:** a missing/mismatched immutable source pin remains a build failure;
+    no substitute archive or floating branch is accepted. Sandbox-only JDK real-path denial was
+    isolated; the authorized build ran outside the sandbox with a path-scoped Git safe-directory
+    setting for the temporary clone.
+11. **Tests:** on app source commit `4f228a6`, JDK 21.0.8, Go 1.26.8 and Android SDK build-tools
+    35.0.0: `:app:assembleOssDebug :app:testOssDebugUnitTest :app:lintOssDebug` PASS; `:rclone:buildAll`
+    compiled all four ABIs. JVM XML: 13 suites, 62 tests, 0 failures, 0 errors, 1 skipped for
+    Windows symlink capability. Lint task PASS with its configured baseline: 99 warnings shown,
+    baseline filtered 2 errors/438 warnings/1 hint; 65 baseline findings are stale. SDK XML-v4
+    versus SDK-tooling-v3 and deprecated BuildConfig warnings remain visible. Four per-ABI debug
+    APKs and universal APK were produced; universal SHA-256 is
+    `C78683CCB981986374879E6F3FE94A580B786DC7899E49023EF625F8927BE7E6` (134,490,595 bytes).
+    The APK is debug-signed, contains native rclone and is not a release artifact. Device
+    instrumentation and Galaxy S26 acceptance are **NOT RUN**.
+12. **Acceptance status:** engine pin/native compile/JVM/lint integration milestone PASS; WP01
+    provenance is exact at the source-tree level. The published API-created engine tip is unsigned;
+    this, debug-only signing, no CI evidence, and unavailable device/Proton tests are not release
+    acceptance. WP07 app implementation remains next.
+13. **Rollback point:** revert only the pin/evidence commit to restore the old engine commit;
+    keep the validated engine branch and do not rewrite either default branch.
