@@ -1201,3 +1201,48 @@ mutation authorization; keep initialization and recovery unavailable pending pro
 restore and fault-boundary evidence. Test instrumentation and runtime process/cancellation behavior
 when an emulator or the specified acceptance device is available. Preserve the published app pin
 until the compatible-state native feature has an independently reviewed/publication path.
+
+## 2026-09-24 - CloudBridge C03/WP04 task-mode preservation (PARTIAL)
+
+1. **Objective:** close the task-editor path that silently mapped legacy Bisync and unknown direction
+   values to local-to-remote sync when opening or saving a task.
+2. **Scope:** editor spinner selection, save mapping, user-visible explanation, and pure mapping
+   regression tests for legacy directions 5/6, unknown values, invalid positions, and explicit
+   supported replacements.
+3. **Out of scope:** full C03 audit of import/migration and all task launch paths; adding unsupported
+   Bisync execution, initialization, or recovery; user-facing preview launch/review; translation
+   publication; device/provider acceptance.
+4. **Preconditions:** verified base `4d4bdca04b54b61050ef1eb2c66bf04e08829cea`; legacy directions 5/6
+   remain absent from the ordinary editor choices; the activity persists the selected spinner mode.
+5. **Design:** add a visible placeholder for any existing direction not represented by the editor.
+   Keeping it selected preserves the exact saved integer during unrelated edits; only an explicit
+   supported selection replaces it. Invalid selection resolution returns no direction, never a
+   local-to-remote default.
+6. **Safety invariants:** never coerce directions 5/6, missing/default 0, negative, or future unknown
+   values to one-way sync; preserve existing task data unless the user deliberately changes mode;
+   unsupported mode stays blocked by the existing worker capability checks.
+7. **Implementation:** CloudBridge commit
+   `27043677e0777f7078f2dd771789ac1a9d4da45b` (base
+   `4d4bdca04b54b61050ef1eb2c66bf04e08829cea`) updates `TaskActivity`, direction mapping, default
+   strings, and adds `SyncDirectionObjectTest`.
+8. **Reuse:** existing task persistence and supported direction list; no DB schema or task format
+   changes.
+9. **Retired:** fallback to spinner item zero for unsupported saved directions and fallback to
+   local-to-remote for invalid spinner positions.
+10. **Failure behavior:** an unsupported saved mode remains visibly identified and is written back
+    unchanged while other fields are edited; malformed spinner selection without a saved value
+    blocks saving with an explanation.
+11. **Tests:** Windows JDK 21.0.8 / Gradle 8.13 / installed Android SDK run passed
+    `:app:testOssDebugUnitTest` (95 tests: 94 passed, 1 existing platform-capability skip),
+    `:app:compileOssDebugAndroidTestJavaWithJavac`, `:app:lintOssDebug`, and `git diff --check`.
+    Lint reports 97 non-baseline warnings, including 2 new MissingTranslation warnings for the
+    English strings to be submitted through Weblate/Crowdin; 2 errors and 428 warnings are filtered
+    by the existing baseline, with 76 stale baseline entries. Android instrumentation was compiled
+    but not executed; Galaxy S26 and Proton access remain **NOT RUN**.
+12. **Acceptance:** this concrete editor downgrade is fixed and regression-tested. C03/WP04 remain
+    **PARTIAL** until imports, migrations, and every launch path are freshly audited against fixtures.
+    The overall WP08 preview UX and all signing/provenance/release gates remain open; no APK/PR/release
+    is claimed.
+13. **Rollback/next:** revert only `27043677e0777f7078f2dd771789ac1a9d4da45b`; no task records or
+    provider/native state were modified by tests. Next continue the durable user-facing Bisync
+    preview request/review path; keep mutation, initialization, and recovery unavailable.
