@@ -31,12 +31,28 @@ enum class BisyncPreviewUnavailableReason {
     OUTPUT_TOO_LARGE,
     INVALID_JSON,
     UNSUPPORTED_VERSION,
-    INVALID_SCHEMA
+    INVALID_SCHEMA,
+    ENGINE_UNSUPPORTED,
+    REQUEST_REJECTED,
+    SCRATCH_CLEANUP_FAILED
 }
 
 sealed class BisyncPreviewParseResult {
     data class Available(val summary: BisyncPreviewSummary) : BisyncPreviewParseResult()
     data class Unavailable(val reason: BisyncPreviewUnavailableReason) : BisyncPreviewParseResult()
+}
+
+/** Sanitized result of one owned native preview attempt; it deliberately contains no paths/output. */
+data class BisyncPreviewNativeRunResult(
+    val parsed: BisyncPreviewParseResult,
+    val processStarted: Boolean,
+    val processStoppedConfirmed: Boolean,
+    val scratchCleaned: Boolean
+) {
+    override fun toString(): String =
+        "BisyncPreviewNativeRunResult(processStarted=$processStarted, " +
+            "processStoppedConfirmed=$processStoppedConfirmed, scratchCleaned=$scratchCleaned, " +
+            "available=${parsed is BisyncPreviewParseResult.Available})"
 }
 
 /** Strict parser for the native path-free v1 preview protocol. */

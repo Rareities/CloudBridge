@@ -9,6 +9,10 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.CancellationSignal;
 import android.os.Environment;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
 import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 
@@ -64,6 +68,16 @@ import ca.pkay.rcloneexplorer.Database.BisyncListingEvidence;
 import ca.pkay.rcloneexplorer.Database.BisyncListingValidator;
 import ca.pkay.rcloneexplorer.Database.BisyncNativeState;
 import ca.pkay.rcloneexplorer.Database.BisyncNativeStateEvidence;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewCommandBuilder;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewCommandRequest;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewIdentity;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewNativeRunResult;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewOperation;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewOperationState;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewParseResult;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewRepository;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewSummaryParser;
+import ca.pkay.rcloneexplorer.Database.BisyncPreviewUnavailableReason;
 import ca.pkay.rcloneexplorer.Database.BisyncPreflightReason;
 import ca.pkay.rcloneexplorer.Database.BisyncRootScanResult;
 import ca.pkay.rcloneexplorer.Items.FileItem;
@@ -91,6 +105,7 @@ public class Rclone {
     private static final int MAX_LISTING_JSON_CHARS = 16 * 1024 * 1024;
     private static final int MAX_CONFIG_JSON_CHARS = 4 * 1024 * 1024;
     private static final int MAX_ABOUT_JSON_CHARS = 256 * 1024;
+    private static final long BISYNC_PREVIEW_TIMEOUT_MILLIS = 10L * 60L * 1000L;
     public static final int SYNC_DIRECTION_LOCAL_TO_REMOTE = 1;
     public static final int SYNC_DIRECTION_REMOTE_TO_LOCAL = 2;
     public static final int SERVE_PROTOCOL_HTTP = 1;
@@ -653,6 +668,265 @@ public class Rclone {
         } catch (IOException | JSONException | SecurityException e) {
             return unknownBisyncNativeState("INSPECTION_OUTPUT_INVALID");
         }
+    }
+
+    /**
+     * Runs one dry-run preview through the same endpoint-claim and owned-handle boundary as other
+     * native work. The result is path-free; raw stdout is parsed in memory and never logged.
+     * A scratch directory is created exclusively for this preview and retained if process exit
+     * cannot be confirmed, so a later recovery path can inspect the uncertainty safely.
+     */
+    @NonNull
+    public BisyncPreviewNativeRunResult runBisyncPreview(
+            @NonNull String previewId,
+            @NonNull String ownerToken,
+            long ownerGeneration,
+            @NonNull BisyncPreviewIdentity identity,
+            @NonNull String localPath,
+            @NonNull RemoteItem remote,
+            @NonNull String remotePath,
+            @NonNull List<FilterEntry> filters,
+            boolean deleteExcluded,
+            boolean checksumRequested,
+            @Nullable CancellationSignal cancellationSignal) {
+        File workDirectory = null;
+        boolean processStarted = false;
+        boolean processStoppedConfirmed = false;
+        try {
+            if (!isCurrentPreviewOwner(previewId, ownerToken, ownerGeneration, identity)) {
+                return unavailablePreview(BisyncPreviewUnavailableReason.REQUEST_REJECTED, false, true, true);
+            }
+            String configuredEngine = "rclone:" + BuildConfig.RCLONE_ENGINE_VERSION + "@" +
+                    BuildConfig.RCLONE_ENGINE_REF;
+            if (!configuredEngine.equals(identity.getEngineRef())) {
+                return unavailablePreview(BisyncPreviewUnavailableReason.ENGINE_UNSUPPORTED, false, true, true);
+            }
+            if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+                return unavailablePreview(BisyncPreviewUnavailableReason.PROCESS_FAILED, false, true, true);
+            }
+            if (localPath.indexOf('\u0000') >= 0 || !new File(localPath).isAbsolute()
+                    || !isSafeAbsoluteBisyncPath(localPath)
+                    || remotePath.indexOf('\u0000') >= 0 || !isSafeBisyncRelativePath(remote, remotePath)) {
+                return unavailablePreview(BisyncPreviewUnavailableReason.REQUEST_REJECTED, false, true, true);
+            }
+            final String canonicalLocalPath;
+            final String remoteSection;
+            try {
+                canonicalLocalPath = new File(localPath).getCanonicalPath();
+                remoteSection = buildReadOnlyBisyncSection(remote, remotePath);
+            } catch (IOException | RuntimeException failure) {
+                return unavailablePreview(BisyncPreviewUnavailableReason.REQUEST_REJECTED, false, true, true);
+            }
+            if (remoteSection == null) {
+                return unavailablePreview(BisyncPreviewUnavailableReason.REQUEST_REJECTED, false, true, true);
+            }
+
+            File previewRoot = ensureBisyncPreviewRoot();
+            if (pathsOverlap(new File(canonicalLocalPath), previewRoot)) {
+                return unavailablePreview(BisyncPreviewUnavailableReason.REQUEST_REJECTED, false, true, true);
+            }
+            if (remote.isRemoteType(RemoteItem.LOCAL)) {
+                int separator = remoteSection.indexOf(':');
+                if (separator < 0 || pathsOverlap(new File(remoteSection.substring(separator + 1)), previewRoot)) {
+                    return unavailablePreview(BisyncPreviewUnavailableReason.REQUEST_REJECTED, false, true, true);
+                }
+            }
+            File requestedWorkDirectory = new File(previewRoot, previewId);
+            File acceptedStateDirectory = null;
+            if (identity.getNativeState() == BisyncNativeState.COMPATIBLE) {
+                acceptedStateDirectory = establishedProfileWorkDirectory(identity.getProfileId());
+                if (acceptedStateDirectory == null || !acceptedStateDirectory.isDirectory()) {
+                    return unavailablePreview(BisyncPreviewUnavailableReason.REQUEST_REJECTED, false, true, true);
+                }
+            }
+
+            BisyncPreviewCommandRequest request = new BisyncPreviewCommandRequest(
+                    identity,
+                    previewId,
+                    canonicalLocalPath,
+                    remoteSection,
+                    requestedWorkDirectory.getAbsolutePath(),
+                    filters,
+                    deleteExcluded,
+                    acceptedStateDirectory == null ? null : acceptedStateDirectory.getAbsolutePath(),
+                    checksumRequested);
+            final List<String> arguments;
+            try {
+                arguments = BisyncPreviewCommandBuilder.build(request);
+            } catch (IllegalArgumentException failure) {
+                String message = failure.getMessage();
+                boolean unsupportedEngine = message != null &&
+                        (message.contains("native engine") || message.contains("engine pin") ||
+                                message.contains("cannot clone"));
+                BisyncPreviewUnavailableReason reason = unsupportedEngine
+                        ? BisyncPreviewUnavailableReason.ENGINE_UNSUPPORTED
+                        : BisyncPreviewUnavailableReason.REQUEST_REJECTED;
+                return unavailablePreview(reason, false, true, true);
+            }
+
+            workDirectory = createUniqueBisyncPreviewWorkDirectory(previewRoot, previewId);
+            if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+                boolean cleaned = deleteOwnedPreviewTree(workDirectory, previewRoot);
+                return unavailablePreview(cleaned
+                                ? BisyncPreviewUnavailableReason.PROCESS_FAILED
+                                : BisyncPreviewUnavailableReason.SCRATCH_CLEANUP_FAILED,
+                        false, true, cleaned);
+            }
+            if (!isCurrentPreviewOwner(previewId, ownerToken, ownerGeneration, identity)) {
+                boolean cleaned = deleteOwnedPreviewTree(workDirectory, previewRoot);
+                return unavailablePreview(cleaned
+                                ? BisyncPreviewUnavailableReason.REQUEST_REJECTED
+                                : BisyncPreviewUnavailableReason.SCRATCH_CLEANUP_FAILED,
+                        false, true, cleaned);
+            }
+            ArrayList<String> nativeArguments = new ArrayList<>(arguments);
+            // The endpoint sections are generated by the same canonical mapper used by preflight.
+            CapturedText captured = runBoundedTextCommandCancellable(
+                    createCommandWithOptions(nativeArguments), getRcloneEnv(), "bisync-preview",
+                    BisyncPreviewSummaryParser.MAX_OUTPUT_CHARS,
+                    BISYNC_PREVIEW_TIMEOUT_MILLIS, cancellationSignal);
+            processStarted = true;
+            boolean stopped = captured.outcome.isConfirmed();
+            processStoppedConfirmed = stopped;
+            boolean succeeded = stopped && captured.outcome.isSuccess();
+            BisyncPreviewParseResult parsed = BisyncPreviewSummaryParser.parse(
+                    captured.text, succeeded,
+                    captured.exceededLimit || captured.outcome.isOutputTruncated());
+            boolean cleaned = false;
+            if (stopped) cleaned = deleteOwnedPreviewTree(workDirectory, previewRoot);
+            if (stopped && !cleaned) {
+                parsed = new BisyncPreviewParseResult.Unavailable(
+                        BisyncPreviewUnavailableReason.SCRATCH_CLEANUP_FAILED);
+            }
+            return new BisyncPreviewNativeRunResult(parsed, true, stopped, cleaned);
+        } catch (IOException | RuntimeException failure) {
+            boolean cleaned = workDirectory == null || deleteOwnedPreviewTree(workDirectory,
+                    new File(context.getCacheDir(), "bisync-preview"));
+            BisyncPreviewUnavailableReason reason = failure.getMessage() != null &&
+                    (failure.getMessage().contains("preview") || failure.getMessage().contains("engine"))
+                    ? BisyncPreviewUnavailableReason.REQUEST_REJECTED
+                    : BisyncPreviewUnavailableReason.PROCESS_FAILED;
+            if (!cleaned) reason = BisyncPreviewUnavailableReason.SCRATCH_CLEANUP_FAILED;
+            return unavailablePreview(reason, processStarted,
+                    processStarted ? processStoppedConfirmed : true, cleaned);
+        }
+    }
+
+    @NonNull
+    private static BisyncPreviewNativeRunResult unavailablePreview(
+            BisyncPreviewUnavailableReason reason,
+            boolean processStarted,
+            boolean processStoppedConfirmed,
+            boolean scratchCleaned) {
+        return new BisyncPreviewNativeRunResult(
+                new BisyncPreviewParseResult.Unavailable(reason),
+                processStarted, processStoppedConfirmed, scratchCleaned);
+    }
+
+    private boolean isCurrentPreviewOwner(String previewId, String ownerToken, long ownerGeneration,
+                                         BisyncPreviewIdentity identity) {
+        try {
+            BisyncPreviewOperation owner = new BisyncPreviewRepository(context).get(previewId);
+            return owner != null && owner.getState() == BisyncPreviewOperationState.RUNNING &&
+                    owner.getOwnerToken().equals(ownerToken) &&
+                    owner.getOwnerGeneration() == ownerGeneration &&
+                    owner.getIdentity().equals(identity);
+        } catch (RuntimeException unavailable) {
+            return false;
+        }
+    }
+
+    private File ensureBisyncPreviewRoot() throws IOException {
+        File cache = context.getCacheDir().getCanonicalFile();
+        File root = new File(cache, "bisync-preview");
+        if (!root.exists() && !root.mkdir()) throw new IOException("Preview scratch unavailable");
+        File canonicalRoot = root.getCanonicalFile();
+        if (!canonicalRoot.isDirectory() || !canonicalRoot.equals(root.getAbsoluteFile())) {
+            throw new IOException("Preview scratch root is not private and contained");
+        }
+        return canonicalRoot;
+    }
+
+    private static boolean pathsOverlap(File left, File right) throws IOException {
+        String leftPath = left.getCanonicalPath();
+        String rightPath = right.getCanonicalPath();
+        return isSameOrDescendantPath(leftPath, rightPath) || isSameOrDescendantPath(rightPath, leftPath);
+    }
+
+    private static boolean isSameOrDescendantPath(String possibleParent, String child) {
+        if (possibleParent.equals(child)) return true;
+        String parentWithSeparator = possibleParent.endsWith(File.separator)
+                ? possibleParent : possibleParent + File.separator;
+        return child.startsWith(parentWithSeparator);
+    }
+
+    private File createUniqueBisyncPreviewWorkDirectory(File previewRoot, String previewId) throws IOException {
+        UUID uuid;
+        try {
+            uuid = UUID.fromString(previewId);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Preview ID is invalid");
+        }
+        if (!uuid.toString().equals(previewId)) throw new IOException("Preview ID is not canonical");
+        File destination = new File(previewRoot, previewId);
+        if (!destination.mkdir()) throw new IOException("Preview work directory already exists or cannot be created");
+        File canonical = destination.getCanonicalFile();
+        if (!previewRoot.equals(canonical.getParentFile())) {
+            destination.delete();
+            throw new IOException("Preview work directory escaped its private root");
+        }
+        return canonical;
+    }
+
+    @Nullable
+    private File establishedProfileWorkDirectory(String profileId) {
+        try {
+            UUID uuid = UUID.fromString(profileId);
+            if (!uuid.toString().equals(profileId)) return null;
+            File profileRoot = new File(new File(context.getFilesDir(), "bisync"), "profiles").getCanonicalFile();
+            File expected = new File(profileRoot, profileId);
+            File canonical = expected.getCanonicalFile();
+            return canonical.equals(expected.getAbsoluteFile()) && canonical.isDirectory() ? canonical : null;
+        } catch (IOException | IllegalArgumentException | SecurityException failure) {
+            return null;
+        }
+    }
+
+    /** Deletes only the unique preview directory, never following symlinks or leaving its root. */
+    private boolean deleteOwnedPreviewTree(File target, File previewRoot) {
+        try {
+            File canonicalRoot = previewRoot.getCanonicalFile();
+            File canonicalTarget = target.getCanonicalFile();
+            if (!canonicalRoot.equals(canonicalTarget.getParentFile())) return false;
+            return deletePreviewNode(target, canonicalRoot);
+        } catch (IOException | SecurityException failure) {
+            return false;
+        }
+    }
+
+    private boolean deletePreviewNode(File node, File canonicalRoot) {
+        final StructStat stat;
+        try {
+            stat = Os.lstat(node.getAbsolutePath());
+        } catch (ErrnoException missing) {
+            return missing.errno == OsConstants.ENOENT;
+        }
+        if (OsConstants.S_ISLNK(stat.st_mode)) return node.delete();
+        try {
+            File canonical = node.getCanonicalFile();
+            String rootPath = canonicalRoot.getAbsolutePath() + File.separator;
+            if (!canonicalRoot.equals(canonical) && !canonical.getAbsolutePath().startsWith(rootPath)) return false;
+        } catch (IOException | SecurityException failure) {
+            return false;
+        }
+        if (OsConstants.S_ISDIR(stat.st_mode)) {
+            File[] children = node.listFiles();
+            if (children == null) return false;
+            for (File child : children) {
+                if (!deletePreviewNode(child, canonicalRoot)) return false;
+            }
+        }
+        return node.delete();
     }
 
     @NonNull
