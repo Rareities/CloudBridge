@@ -689,3 +689,61 @@ run-scoped backup coordinator; add permission/disk/network/cancellation/process-
 Maintain fail-closed readiness and do not surface an action as recoverable until native state,
 app ownership, exact backup bytes, and rollback boundaries are tested. The supplementary WP14
 migration requirements remain cross-cutting; the workspace master numbering is unchanged.
+
+## 2026-09-23 — WP08 preview-state and reinitialization-preservation checkpoint (PARTIAL)
+
+CloudBridge source commit: `d888297b0e84ae3532215c89ce710c0213d905ba`.
+Rareities/rclone source commit: `175c3508193eb13be1b5d8c39b8b26475bf4c58c` on
+`codex/luna-engine`. These are local commits; the new rclone source commit is not yet published
+or pinned by CloudBridge.
+
+1. **Objective:** ensure a successful native dry-run leaves durable Bisync state inspectable and
+   ensure explicit reinitialization does not discard the last accepted app identity baseline.
+2. **Scope:** `InspectState` classification of native `*.lst-dry*` scratch outputs and lock states;
+   byte-preservation regressions for first-run and existing-state previews; app repository reset
+   semantics and a confirmed/unconfirmed baseline-retention instrumentation regression.
+3. **Out of scope:** app preview UI/worker, automatic sync, initialization/recovery execution,
+   run-scoped remote backups, restore/fault injection, DB downgrade, live Proton, device and
+   release acceptance.
+4. **Preconditions:** WP08 read-only inspector is at `a2eec9f17e9624a8ed78afeccf520c5716270b1f`;
+   CloudBridge still pins published immutable rclone ref
+   `d53551e1722305268c6072263f11066f1278a4a0` pending safe publication of this follow-up.
+5. **Design:** `.lst-dry*` are non-authoritative dry-run scratch listings and do not replace the
+   accepted `.lst` pair. Ignore those scratch suffixes during inspection while retaining fail-
+   closed handling for a live native guard, stale active lock metadata, `.lst-new` and `.lst-err`.
+   A reinitialization request changes readiness/reason but retains the accepted baseline for
+   review and rollback.
+6. **Safety invariants:** previews do not change either root or canonical accepted listings;
+   a first-run dry-run remains ABSENT, not initialized. Unconfirmed reset throws without state
+   change. No recovery/restore is authorized by the diagnostic state or baseline.
+7. **Implementation:** native state commit `175c350` adjusts dry-run artifact classification and
+   adds exact root/listing-byte tests for absent and compatible state, including same-size,
+   same-mtime, different-byte input under checksum comparison. App commit `d888297` preserves
+   accepted baseline columns across an explicit reset and marks app/preflight readiness as
+   `INITIALIZATION_REQUIRED`.
+8. **Reuse:** native `InspectState`, existing native owner guard/lock metadata and Bisync dry-run;
+   existing app profile identity, transactional SQLite repository and instrumentation fixture.
+9. **Retired:** the prior inspector behavior treated successful dry-run scratch outputs as
+   unresolved/interrupted state. The app reset path no longer deletes the accepted baseline.
+10. **Failure behaviour:** active or stale native ownership and true `.lst-new`/`.lst-err`
+    artifacts remain blocked; unknown state remains fail-closed. Without explicit confirmation,
+    the app changes neither readiness nor accepted identity.
+11. **Tests:** full `go test ./cmd/bisync -count=1` PASS (40.573 s), `go vet ./cmd/bisync`
+    PASS, `GOOS=android GOARCH=arm64 go build -mod=readonly ./cmd/bisync` PASS. CloudBridge
+    `:app:testOssDebugUnitTest` PASS (14 suites, 76 tests, 0 failures/errors, 1 Windows
+    symlink-capability skip); `:app:lintOssDebug` PASS with baseline (92 warnings, 2 errors and
+    428 warnings filtered; 76 stale baseline entries); final instrumentation source compilation
+    PASS. Instrumentation execution is NOT RUN. Diff checks PASS. No new dependencies.
+12. **Acceptance:** this checkpoint is PARTIAL. The new instrumentation assertions compile but
+    have not executed on Android. ADB could not initialize its sandbox user-state directory;
+    Galaxy S26 / One UI 8.5/9, actual Android API/firmware and Proton disposable-area checks
+    remain **NOT RUN**. App preview, backup provisioning, recovery/restore, process-kill
+    boundaries, migration rollback, integrated build against `175c350`, APK/R8, signing, PR/CI
+    and release evidence remain open. No release readiness is claimed.
+13. **Rollback:** revert only `175c350` and/or `d888297`; retain the prior native inspector and
+    DB v13 migration. Never delete old baselines, native listings, backups or recovery evidence.
+
+**Next:** implement the app-owned, time-bounded preview coordinator/worker using native dry-run,
+fresh identity/config checks and bounded path-free summary output. Keep initialization disabled
+until durable same-provider backups, rollback and fault boundaries are implemented and tested.
+Refresh the remote fork/CI before publication; the branch has not been pushed or opened as a PR.
