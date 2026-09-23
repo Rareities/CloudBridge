@@ -998,3 +998,71 @@ contract, UUID-owned isolated workdir and owned-process drain/cancel lifecycle. 
 the local native `--preview-state-from` flag until its source boundary and publication path are
 reviewed; do not enable initialization/recovery before preserved-version, exact-restore and
 fault-boundary evidence passes.
+
+## 2026-09-24 - WP08 explicit initialization preference and DB v15 migration (PARTIAL)
+
+1. **Objective:** ensure an absent-state preview is bound to the user's explicit Bisync conflict
+   preference and that v14 preview records cannot be treated as if they had such a preference.
+2. **Scope:** CloudBridge identity/model, repository validation, SQLite schema v15 and the v14-to-v15
+   migration, JVM coverage, and Android instrumentation-test source for running and queued legacy
+   preview rows.
+3. **Out of scope:** preview worker/native command/UI, endpoint snapshotting, mutation authorization,
+   initialization/recovery execution, durable listing backups/restore, scheduler integration,
+   release identity/signing, and external publication.
+4. **Preconditions:** base CloudBridge commit `87c0c8c75cbb47f004fd10d8b122872858300db8` contains
+   the separate v14 preview-owner table and identity foundation. App engine pin remains the
+   published Rareities/rclone SHA `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; the isolated-state
+   native prototype remains local and is not invoked by this app change.
+5. **Design:** absent-state identity includes one of the six explicit rclone conflict policies and
+   uses a distinct v2 digest; compatible-baseline identities retain the v1 digest and must have no
+   initialization preference. The v15 schema requires policy for runnable absent-state rows and
+   uses strict non-null-aware aggregate constraints for terminal summary shape. During v14 upgrade,
+   absent-state RUNNING/INTERRUPTED/RECOVERY_REQUIRED rows become RECOVERY_REQUIRED with the owner
+   generation incremented; other absent-state rows become STALE. No policy is inferred.
+6. **Safety invariants:** never default an absent-state preview to path1 or another policy; never
+   release a running owner while upgrading; invalidate its late callback generation; clear
+   unusable summary values; keep a recovery hold for active legacy owners; retain the accepted
+   Bisync baseline and all existing user data.
+7. **Implementation:** CloudBridge commit
+   `7daef0620af7e809ab0e39076145c82c7030bc2c` (base
+   `87c0c8c75cbb47f004fd10d8b122872858300db8`) adds `BisyncPreviewResyncMode`, policy-aware
+   fingerprints and queue/claim checks, the v15 mode column and fail-closed migration, stricter
+   status/summary checks, JVM assertions, and v14 instrumentation fixture coverage for RUNNING and
+   QUEUED absent-state rows. Only the six intended source/test files were staged; the user-owned
+   untracked `.android/` directory was not touched or staged.
+8. **Reuse:** existing profile/preflight fingerprints, v14 preview owner/history repository,
+   immutable engine pin and current JVM/instrumentation test harness.
+9. **Retired:** implicit absent-state preview identity without a bound resync preference; no legacy
+   direction or normal run row was repurposed.
+10. **Failure behavior:** an absent-state preview without explicit policy is rejected at identity
+    creation, queue and claim; malformed stored policy fails closed. v14 active absent-state work
+    remains recovery-blocked after migration; queued/terminal absent-state evidence becomes stale
+    rather than runnable.
+11. **Tests:** with JDK 17.0.20.1, Gradle 8.13 and installed Android SDK 36/build-tools 35.0.0,
+    `:app:testOssDebugUnitTest`, `:app:compileOssDebugAndroidTestJavaWithJavac` and
+    `:app:lintOssDebug` passed offline with `-x :rclone:buildAll`; 88 JVM tests, zero failures/errors,
+    one existing Windows capability skip. Instrumentation sources compile; no instrumented device
+    execution occurred. Lint reports 94 visible warnings; the existing baseline filters 2 errors
+    and 428 warnings and has 76 stale entries. Source-generated table DDL/index checks in SQLite
+    accepted explicit absent/PATH1 and complete-with-counters records, and rejected duplicate active
+    ownership, absent-without-policy, and complete-without-counters. A separate v14-to-v15 SQLite
+    fixture produced RUNNING to RECOVERY_REQUIRED (generation 1 to 2, no completion/policy) and
+    QUEUED to STALE (completion set from update time, no policy). `git diff --check` passed. The initial
+    sandboxed Java run could not read the SDK stub JAR; the same offline tasks passed with approved
+    elevated process access. No APK was assembled and the native engine was not rebuilt in this
+    checkpoint.
+12. **Acceptance:** explicit-policy identity and schema/migration behavior pass source/JVM/SQLite
+    checks; WP08 remains PARTIAL. The Android migration instrumentation is compile-only. No worker,
+    CLI invocation, actual device database upgrade, preview UI, mutation-boundary revalidation,
+    initialization/recovery, backup/restore or process-kill/reboot test is complete. Galaxy S26 /
+    One UI 8.5/9 with actual API/firmware and live Proton remain **NOT RUN**. No PR, CI publication,
+    release or release-readiness claim.
+13. **Rollback:** revert only `7daef0620af7e809ab0e39076145c82c7030bc2c` to return from DB v15 to
+    the v14 preview-owner foundation at `87c0c8c75cbb47f004fd10d8b122872858300db8`; retain all
+    earlier accepted-baseline preservation work. No native state or remote data was touched.
+
+**Next:** implement a distinct durable preview worker/coordinator around the exact native CLI
+contract, UUID-owned isolated workdir and owned-process drain/cancel lifecycle. Keep the app on the
+currently published engine SHA until the local native preview-state change has a reviewed,
+reproducible publication path. Do not enable initialization/recovery before preserved-version,
+exact-restore and fault-boundary evidence passes.
