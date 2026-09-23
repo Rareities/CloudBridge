@@ -35,6 +35,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -58,6 +59,10 @@ import ca.pkay.rcloneexplorer.Database.json.Exporter;
 import ca.pkay.rcloneexplorer.Database.json.Importer;
 import ca.pkay.rcloneexplorer.Database.json.SharedPreferencesBackup;
 import ca.pkay.rcloneexplorer.Database.ResourceClaimLease;
+import ca.pkay.rcloneexplorer.Database.BisyncListingEvidence;
+import ca.pkay.rcloneexplorer.Database.BisyncListingValidator;
+import ca.pkay.rcloneexplorer.Database.BisyncPreflightReason;
+import ca.pkay.rcloneexplorer.Database.BisyncRootScanResult;
 import ca.pkay.rcloneexplorer.Items.FileItem;
 import ca.pkay.rcloneexplorer.Items.FilterEntry;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
@@ -409,6 +414,244 @@ public class Rclone {
             }
         }
         return fileItemList;
+    }
+
+    /**
+     * Performs a strict, read-only Bisync root stat followed by a complete filtered traversal.
+     * Unlike browser listings this path never allows exit code 6, --ignore-errors, or partial
+     * JSON. Call from a cancellable background owner, not the main thread.
+     */
+    @NonNull
+    public BisyncRootScanResult scanBisyncRoot(@NonNull RemoteItem remote, @NonNull String path,
+                                                @NonNull List<FilterEntry> filters) {
+        return scanBisyncRoot(remote, path, filters, null);
+    }
+
+    /** Variant that transfers cancellation to each active native listing process. */
+    @NonNull
+    public BisyncRootScanResult scanBisyncRoot(@NonNull RemoteItem remote, @NonNull String path,
+                                                @NonNull List<FilterEntry> filters,
+                                                @Nullable CancellationSignal cancellationSignal) {
+        final String remoteSection;
+        try {
+            if (path.indexOf('\u0000') >= 0 || !isSafeBisyncRelativePath(remote, path)) {
+                return incompleteBisyncScan(false);
+            }
+            remoteSection = buildReadOnlyBisyncSection(remote, path);
+            if (remoteSection == null) return incompleteBisyncScan(false);
+        } catch (RuntimeException e) {
+            return incompleteBisyncScan(false);
+        }
+        return scanBisyncSection(remoteSection, filters, cancellationSignal);
+    }
+
+    /** Read-only scan for an absolute local directory; never creates the target or its parent. */
+    @NonNull
+    public BisyncRootScanResult scanBisyncPath(@NonNull String path, @NonNull List<FilterEntry> filters,
+                                                @Nullable CancellationSignal cancellationSignal) {
+        if (path.indexOf('\u0000') >= 0 || !new File(path).isAbsolute() || !isSafeAbsoluteBisyncPath(path)) {
+            return incompleteBisyncScan(false);
+        }
+        try {
+            return scanBisyncSection(new File(path).getCanonicalPath(), filters, cancellationSignal);
+        } catch (IOException | SecurityException e) {
+            return incompleteBisyncScan(false);
+        }
+    }
+
+    private BisyncRootScanResult scanBisyncSection(@NonNull String remoteSection,
+                                                    @NonNull List<FilterEntry> filters,
+                                                    @Nullable CancellationSignal cancellationSignal) {
+        if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+            return cancelledBisyncScan(false);
+        }
+
+        CapturedText stat;
+        try {
+            stat = runBoundedTextCommandCancellable(
+                    createCommandWithOptions("lsjson", "--stat", remoteSection),
+                    getRcloneEnv(), "bisync-root-stat", MAX_LISTING_JSON_CHARS,
+                    BISYNC_SCAN_TIMEOUT_MILLIS, cancellationSignal);
+        } catch (IOException e) {
+            return incompleteBisyncScan(false);
+        }
+        if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+            return cancelledBisyncScan(false);
+        }
+        boolean statSucceeded = stat.outcome.isSuccess() && stat.outcome.isConfirmed();
+        BisyncListingEvidence root = BisyncListingValidator.parseRootStat(
+                stat.text, statSucceeded, stat.exceededLimit || stat.outcome.isOutputTruncated());
+        if (!root.getComplete() || !root.getRootIsDirectory()) {
+            return new BisyncRootScanResult(root, statSucceeded);
+        }
+
+        ArrayList<String> arguments = new ArrayList<>();
+        arguments.add("lsjson");
+        arguments.add("--recursive");
+        arguments.add(remoteSection);
+        if (filters.size() > MAX_BISYNC_FILTER_RULES) {
+            return incompleteBisyncScan(true);
+        }
+        for (FilterEntry filter : filters) {
+            if (filter == null || filter.filter == null || filter.filter.indexOf('\u0000') >= 0
+                    || (filter.filterType != FilterEntry.FILTER_INCLUDE
+                    && filter.filterType != FilterEntry.FILTER_EXCLUDE)) {
+                return incompleteBisyncScan(true);
+            }
+            arguments.add("--filter");
+            arguments.add((filter.filterType == FilterEntry.FILTER_INCLUDE ? "+ " : "- ") + filter.filter);
+        }
+        if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+            return cancelledBisyncScan(true);
+        }
+
+        try {
+            CapturedText listing = runBoundedTextCommandCancellable(
+                    createCommandWithOptions(arguments), getRcloneEnv(), "bisync-root-list",
+                    MAX_LISTING_JSON_CHARS, BISYNC_SCAN_TIMEOUT_MILLIS, cancellationSignal);
+            if (cancellationSignal != null && cancellationSignal.isCanceled()) {
+                return cancelledBisyncScan(true);
+            }
+            boolean listingSucceeded = listing.outcome.isSuccess() && listing.outcome.isConfirmed();
+            BisyncListingEvidence evidence = BisyncListingValidator.parseRecursiveList(
+                    listing.text, listingSucceeded,
+                    listing.exceededLimit || listing.outcome.isOutputTruncated());
+            return new BisyncRootScanResult(evidence, true);
+        } catch (IOException e) {
+            return incompleteBisyncScan(true);
+        }
+    }
+
+    private static final long BISYNC_SCAN_TIMEOUT_MILLIS = 10L * 60L * 1000L;
+    private static final int MAX_BISYNC_FILTER_RULES = 4096;
+    private static final long RCLONE_MODTIME_NOT_SUPPORTED_NANOS = 3_153_600_000_000_000_000L;
+
+    @Nullable
+    private String buildReadOnlyBisyncSection(@NonNull RemoteItem remote, @NonNull String path) {
+        if (!remote.isRemoteType(RemoteItem.LOCAL)) {
+            return buildRemoteSection(remote, path, context);
+        }
+        File base;
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.Q) {
+            base = context.getExternalFilesDir(null);
+            if (base == null) {
+                base = new File(context.getFilesDir(), "fallback-local");
+            }
+        } else {
+            base = Environment.getExternalStorageDirectory();
+        }
+        // Unlike the browser's compatibility path, preflight must never create a missing root.
+        if (!base.isDirectory()) return null;
+        String root = base.getAbsolutePath();
+        if (("//" + remote.getName()).equals(path)) return remote.getName() + ":" + root + "/";
+        return remote.getName() + ":" + root + "/" + path;
+    }
+
+    private static boolean isSafeBisyncRelativePath(@NonNull RemoteItem remote, @NonNull String path) {
+        if (("//" + remote.getName()).equals(path)) return true;
+        String portable = path.replace('\\', '/');
+        for (String segment : portable.split("/")) {
+            if (".".equals(segment) || "..".equals(segment)) return false;
+        }
+        return true;
+    }
+
+    private static boolean isSafeAbsoluteBisyncPath(@NonNull String path) {
+        String portable = path.replace('\\', '/');
+        for (String segment : portable.split("/")) {
+            if (".".equals(segment) || "..".equals(segment)) return false;
+        }
+        return true;
+    }
+
+    private static BisyncRootScanResult incompleteBisyncScan(boolean statProbeSucceeded) {
+        return new BisyncRootScanResult(new BisyncListingEvidence(
+                false, false, 0, BisyncPreflightReason.LISTING_INCOMPLETE), statProbeSucceeded);
+    }
+
+    private static BisyncRootScanResult cancelledBisyncScan(boolean statProbeSucceeded) {
+        return new BisyncRootScanResult(new BisyncListingEvidence(
+                false, false, 0, BisyncPreflightReason.PROBE_CANCELLED), statProbeSucceeded);
+    }
+
+    /** Returns a hash-only identity for providers with a known stable, non-token account locator. */
+    @Nullable
+    public String getBisyncRemoteAccountFingerprint(@NonNull RemoteItem remote) {
+        if (remote.isRemoteType(RemoteItem.LOCAL) || remote.isCrypt() || remote.isAlias()
+                || remote.isCache() || remote.isPathAlias()) return null;
+        JSONObject remotes = getCachedRemotesConfig();
+        JSONObject config = remotes == null ? null : remotes.optJSONObject(remote.getName());
+        if (config == null) return null;
+        String type = config.optString("type", "").trim().toLowerCase(Locale.ROOT);
+        final String identityKey;
+        switch (type) {
+            case "protondrive": identityKey = "username"; break;
+            case "internxt": identityKey = "email"; break;
+            case "drime": identityKey = "workspace_id"; break;
+            default: return null;
+        }
+        String stableIdentity = config.optString(identityKey, "").trim();
+        if (stableIdentity.isEmpty() || stableIdentity.equalsIgnoreCase("null")) return null;
+        String stableRoot = "";
+        if (type.equals("drime")) {
+            stableRoot = config.optString("root_folder_id", "").trim();
+            if (stableRoot.isEmpty()) return null;
+        }
+        return sha256Identity("bisync-account-v1", type, stableIdentity, stableRoot);
+    }
+
+    /** Reads rclone's native FS precision. Unknown or malformed capability output fails closed. */
+    @Nullable
+    public Boolean getBisyncModTimeCapability(@NonNull RemoteItem remote, @NonNull String path,
+                                               @Nullable CancellationSignal cancellationSignal) {
+        final String remoteSection;
+        try {
+            if (path.indexOf('\u0000') >= 0 || !isSafeBisyncRelativePath(remote, path)) return null;
+            remoteSection = buildReadOnlyBisyncSection(remote, path);
+            if (remoteSection == null) return null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+        try {
+            CapturedText result = runBoundedTextCommandCancellable(
+                    createCommandWithOptions("backend", "features", remoteSection), getRcloneEnv(),
+                    "bisync-capabilities", 256 * 1024, METADATA_COMMAND_TIMEOUT_MILLIS,
+                    cancellationSignal);
+            if (!result.outcome.isSuccess() || !result.outcome.isConfirmed()
+                    || result.exceededLimit || result.outcome.isOutputTruncated()) return null;
+            JSONObject info = new JSONObject(result.text);
+            Object precisionValue = info.opt("Precision");
+            if (!(precisionValue instanceof Number)) return null;
+            long precision = ((Number) precisionValue).longValue();
+            return precision >= 0 && precision < RCLONE_MODTIME_NOT_SUPPORTED_NANOS;
+        } catch (IOException | JSONException e) {
+            return null;
+        }
+    }
+
+    /** Transient-only config snapshot token; callers compare before/after a preflight and discard it. */
+    @Nullable
+    public String getBisyncConfigSnapshotFingerprint() {
+        return EndpointConflictCoordinator.fingerprintFile(new File(rcloneConf));
+    }
+
+    private static String sha256Identity(String... values) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (String value : values) {
+                byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+                digest.update(Integer.toString(bytes.length).getBytes(StandardCharsets.US_ASCII));
+                digest.update((byte) ':');
+                digest.update(bytes);
+                digest.update((byte) '|');
+            }
+            byte[] bytes = digest.digest();
+            StringBuilder encoded = new StringBuilder(bytes.length * 2);
+            for (byte value : bytes) encoded.append(String.format(Locale.ROOT, "%02x", value & 0xff));
+            return encoded.toString();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public List<RemoteItem> getRemotes() {
@@ -1462,19 +1705,42 @@ public class Rclone {
     private CapturedText runBoundedTextCommand(String[] command, String[] env, String label,
                                                int maxChars, long timeoutMillis,
                                                @Nullable NativeExecutionHandle.LineSink stderrSink) throws IOException {
+        return runBoundedTextCommand(command, env, label, maxChars, timeoutMillis, stderrSink, null);
+    }
+
+    private CapturedText runBoundedTextCommandCancellable(String[] command, String[] env, String label,
+                                                         int maxChars, long timeoutMillis,
+                                                         @Nullable CancellationSignal cancellationSignal)
+            throws IOException {
+        return runBoundedTextCommand(command, env, label, maxChars, timeoutMillis, null, cancellationSignal);
+    }
+
+    private CapturedText runBoundedTextCommand(String[] command, String[] env, String label,
+                                               int maxChars, long timeoutMillis,
+                                               @Nullable NativeExecutionHandle.LineSink stderrSink,
+                                               @Nullable CancellationSignal cancellationSignal) throws IOException {
         StringBuilder output = new StringBuilder(Math.min(maxChars, 4096));
         AtomicBoolean exceededLimit = new AtomicBoolean(false);
         NativeExecutionHandle handle = launchClaimed(command, env, label);
-        NativeExecutionHandle.Outcome outcome = handle.await(timeoutMillis, line -> {
-            if (exceededLimit.get()) {
-                return;
-            }
-            if (line.length() + 1 > maxChars - output.length()) {
-                exceededLimit.set(true);
-                return;
-            }
-            output.append(line).append('\n');
-        }, stderrSink);
+        if (cancellationSignal != null) {
+            cancellationSignal.setOnCancelListener(handle::cancel);
+            if (cancellationSignal.isCanceled()) handle.cancel();
+        }
+        NativeExecutionHandle.Outcome outcome;
+        try {
+            outcome = handle.await(timeoutMillis, line -> {
+                if (exceededLimit.get()) {
+                    return;
+                }
+                if (line.length() + 1 > maxChars - output.length()) {
+                    exceededLimit.set(true);
+                    return;
+                }
+                output.append(line).append('\n');
+            }, stderrSink);
+        } finally {
+            if (cancellationSignal != null) cancellationSignal.setOnCancelListener(null);
+        }
         boolean tooLarge = exceededLimit.get();
         String captured = outcome.isConfirmed() && !outcome.isOutputTruncated() && !tooLarge
                 ? output.toString() : "";

@@ -1,13 +1,12 @@
 package ca.pkay.rcloneexplorer.Database
 
 import android.content.Context
-import ca.pkay.rcloneexplorer.BuildConfig
 import ca.pkay.rcloneexplorer.Items.Task
 
 /** Public profile facade; legacy numeric tasks are only a compatibility adapter. */
 class ProfileRepository(context: Context) {
     private val context = context.applicationContext
-    private val engineRef = "rclone:${BuildConfig.RCLONE_ENGINE_VERSION}"
+    private val engineRef = EngineIdentity.current
 
     fun ensureLegacyTask(task: Task): ProfileRecord {
         val handler = DatabaseHandler(context)

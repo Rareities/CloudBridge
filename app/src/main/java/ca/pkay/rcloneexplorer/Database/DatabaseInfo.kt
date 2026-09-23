@@ -9,7 +9,7 @@ class DatabaseInfo {
     companion object {
 
         // If you change the database schema, you must increment the database version.
-        const val DATABASE_VERSION = 11
+        const val DATABASE_VERSION = 12
         const val DATABASE_NAME = "rcloneExplorer.db"
 
         const val PROFILE_TABLE_NAME = "profile_table"
@@ -57,6 +57,23 @@ class DatabaseInfo {
         const val CLAIM_COLUMN_OPERATION = "claim_operation"
         const val CLAIM_COLUMN_RESOURCES = "claim_resources"
         const val CLAIM_COLUMN_CREATED_AT = "claim_created_at"
+
+        const val BISYNC_PREFLIGHT_TABLE_NAME = "bisync_preflight_table"
+        const val BISYNC_PREFLIGHT_COLUMN_PROFILE_ID = "bisync_preflight_profile_id"
+        const val BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION = "bisync_preflight_profile_revision"
+        const val BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT = "bisync_preflight_profile_fingerprint"
+        const val BISYNC_PREFLIGHT_COLUMN_ENGINE_REF = "bisync_preflight_engine_ref"
+        const val BISYNC_PREFLIGHT_COLUMN_STATE_VERSION = "bisync_preflight_state_version"
+        const val BISYNC_PREFLIGHT_COLUMN_LEFT_ACCOUNT = "bisync_preflight_left_account_fingerprint"
+        const val BISYNC_PREFLIGHT_COLUMN_LEFT_SCOPE = "bisync_preflight_left_scope_fingerprint"
+        const val BISYNC_PREFLIGHT_COLUMN_RIGHT_ACCOUNT = "bisync_preflight_right_account_fingerprint"
+        const val BISYNC_PREFLIGHT_COLUMN_RIGHT_SCOPE = "bisync_preflight_right_scope_fingerprint"
+        const val BISYNC_PREFLIGHT_COLUMN_FILTER = "bisync_preflight_filter_fingerprint"
+        const val BISYNC_PREFLIGHT_COLUMN_COMPARISON = "bisync_preflight_comparison_mode"
+        const val BISYNC_PREFLIGHT_COLUMN_FINGERPRINT = "bisync_preflight_fingerprint"
+        const val BISYNC_PREFLIGHT_COLUMN_READINESS = "bisync_preflight_readiness"
+        const val BISYNC_PREFLIGHT_COLUMN_REASON = "bisync_preflight_reason_code"
+        const val BISYNC_PREFLIGHT_COLUMN_CHECKED_AT = "bisync_preflight_checked_at"
 
 
         val SQL_CREATE_TABLES_TASKS = "CREATE TABLE " + Task.TABLE_NAME + " (" +
@@ -143,6 +160,23 @@ class DatabaseInfo {
                 "$CLAIM_COLUMN_OPERATION TEXT NOT NULL," +
                 "$CLAIM_COLUMN_RESOURCES TEXT NOT NULL," +
                 "$CLAIM_COLUMN_CREATED_AT INTEGER NOT NULL)"
+
+        val SQL_CREATE_TABLE_BISYNC_PREFLIGHT = "CREATE TABLE IF NOT EXISTS $BISYNC_PREFLIGHT_TABLE_NAME (" +
+                "$BISYNC_PREFLIGHT_COLUMN_PROFILE_ID TEXT PRIMARY KEY NOT NULL REFERENCES $PROFILE_TABLE_NAME($PROFILE_COLUMN_ID) ON DELETE CASCADE," +
+                "$BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION INTEGER NOT NULL," +
+                "$BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT TEXT NOT NULL," +
+                "$BISYNC_PREFLIGHT_COLUMN_ENGINE_REF TEXT NOT NULL," +
+                "$BISYNC_PREFLIGHT_COLUMN_STATE_VERSION INTEGER NOT NULL," +
+                "$BISYNC_PREFLIGHT_COLUMN_LEFT_ACCOUNT TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_LEFT_SCOPE TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_RIGHT_ACCOUNT TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_RIGHT_SCOPE TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_FILTER TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_COMPARISON TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_FINGERPRINT TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_READINESS TEXT NOT NULL," +
+                "$BISYNC_PREFLIGHT_COLUMN_REASON TEXT," +
+                "$BISYNC_PREFLIGHT_COLUMN_CHECKED_AT INTEGER NOT NULL)"
 
     }
 }

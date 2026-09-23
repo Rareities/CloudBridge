@@ -1,6 +1,7 @@
 package ca.pkay.rcloneexplorer.Database;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 
@@ -47,6 +48,46 @@ public class ProfileStateTest {
         task.setRemotePath("other");
         ProfileSpec second = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0");
         assertNotEquals(first.getFingerprint(), second.getFingerprint());
+    }
+
+    @Test
+    public void filterContentAndImmutableEngineRefAreSemanticFingerprintInputs() {
+        Task task = new Task(11L);
+        task.setFilterId(3L);
+        String engine = "rclone:1.76.0@ec863fdcd9e1ce0d13357f791d5528aab10bf0ec";
+        ProfileSpec first = LegacyProfileMapper.INSTANCE.fromTask(task, engine, "+ /private/**\n", false);
+        ProfileSpec changedFilter = LegacyProfileMapper.INSTANCE.fromTask(task, engine, "+ /shared/**\n", false);
+        ProfileSpec changedEngine = LegacyProfileMapper.INSTANCE.fromTask(
+                task,
+                "rclone:1.76.0@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "+ /private/**\n",
+                false
+        );
+
+        assertNotEquals(first.getFingerprint(), changedFilter.getFingerprint());
+        assertNotEquals(first.getFingerprint(), changedEngine.getFingerprint());
+        assertFalse(first.getSettings().contains("/private/"));
+    }
+
+    @Test
+    public void missingSelectedFilterIsDurablyBlocked() {
+        Task task = new Task(12L);
+        task.setFilterId(8L);
+
+        ProfileSpec spec = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@ec863fdcd9e1ce0d13357f791d5528aab10bf0ec", null, true);
+
+        assertEquals(ProfileReadiness.BLOCKED, spec.getReadiness());
+        assertNotNull(spec.getReason());
+    }
+
+    @Test
+    public void titleOnlyEditDoesNotChangeSemanticFingerprint() {
+        Task task = new Task(13L);
+        ProfileSpec first = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@ec863fdcd9e1ce0d13357f791d5528aab10bf0ec");
+        task.setTitle("Renamed profile");
+        ProfileSpec renamed = LegacyProfileMapper.INSTANCE.fromTask(task, "rclone:1.76.0@ec863fdcd9e1ce0d13357f791d5528aab10bf0ec");
+
+        assertEquals(first.getFingerprint(), renamed.getFingerprint());
     }
 
     @Test

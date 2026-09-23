@@ -82,16 +82,31 @@ data class ProfileRecord(
 object LegacyProfileMapper {
     const val PROFILE_SCHEMA_VERSION = 1
 
-    fun fromTask(task: Task, engineRef: String): ProfileSpec {
+    @JvmOverloads
+    fun fromTask(
+        task: Task,
+        engineRef: String,
+        selectedFilterRaw: String? = null,
+        selectedFilterMissing: Boolean = false
+    ): ProfileSpec {
         val mode = ProfileMode.fromLegacyDirection(task.direction)
-        val readiness = when (mode) {
-            ProfileMode.BISYNC -> ProfileReadiness.RECOVERY_REQUIRED
-            ProfileMode.UNKNOWN -> ProfileReadiness.RECOVERY_REQUIRED
+        val filterFingerprint = when {
+            task.filterId == null -> fingerprintNoFilter()
+            selectedFilterMissing -> sha256(canonical("filter-schema", PROFILE_SCHEMA_VERSION.toString(), "missing-filter-id", task.filterId.toString()))
+            selectedFilterRaw != null -> fingerprintFilter(selectedFilterRaw)
+            else -> sha256(canonical("filter-schema", PROFILE_SCHEMA_VERSION.toString(), "unresolved-filter-id", task.filterId.toString()))
+        }
+        val readiness = when {
+            task.filterId != null && (selectedFilterMissing || selectedFilterRaw == null) -> ProfileReadiness.BLOCKED
+            mode == ProfileMode.BISYNC -> ProfileReadiness.RECOVERY_REQUIRED
+            mode == ProfileMode.UNKNOWN -> ProfileReadiness.RECOVERY_REQUIRED
             else -> ProfileReadiness.PREFLIGHT_REQUIRED
         }
-        val reason = when (mode) {
-            ProfileMode.BISYNC -> "Legacy Bisync requires reviewed profile initialization"
-            ProfileMode.UNKNOWN -> "Legacy direction is unsupported and requires repair"
+        val reason = when {
+            task.filterId != null && (selectedFilterMissing || selectedFilterRaw == null) ->
+                "Selected filter is unavailable; review the profile before running"
+            mode == ProfileMode.BISYNC -> "Legacy Bisync requires reviewed profile initialization"
+            mode == ProfileMode.UNKNOWN -> "Legacy direction is unsupported and requires repair"
             else -> null
         }
         val endpoint = canonical(
@@ -104,14 +119,13 @@ object LegacyProfileMapper {
             "direction", task.direction.toString(),
             "md5", task.md5sum.toString(),
             "wifiOnly", task.wifionly.toString(),
-            "filterId", task.filterId?.toString() ?: "null",
+            "filterFingerprint", filterFingerprint,
             "deleteExcluded", task.deleteExcluded.toString(),
             "onFail", task.onFailFollowup?.toString() ?: "null",
             "onSuccess", task.onSuccessFollowup?.toString() ?: "null",
             "transfers", task.transfers?.toString() ?: "null"
         )
         val fingerprint = sha256(canonical(
-            "title", task.title,
             "mode", mode.wireValue,
             "endpoint", endpoint,
             "settings", settings,
@@ -119,6 +133,15 @@ object LegacyProfileMapper {
         ))
         return ProfileSpec(task.title, mode, endpoint, settings, fingerprint, engineRef, readiness, reason)
     }
+
+    /** Hash exact filter bytes so an edit invalidates readiness without persisting filter text. */
+    fun fingerprintFilter(raw: String): String = sha256(canonical(
+        "filter-schema", PROFILE_SCHEMA_VERSION.toString(), "filter-content", raw
+    ))
+
+    fun fingerprintNoFilter(): String = sha256(canonical(
+        "filter-schema", PROFILE_SCHEMA_VERSION.toString(), "filter", "none"
+    ))
 
     /** Stable only for the first legacy migration; deletion retires the mapping before reuse. */
     fun stableIdForLegacyTask(taskId: Long): String =

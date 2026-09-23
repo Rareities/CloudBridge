@@ -3,6 +3,7 @@ package ca.pkay.rcloneexplorer.Database
 import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.PROFILE_COLUMN_CREATED_AT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.PROFILE_COLUMN_ENDPOINT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.PROFILE_COLUMN_ENGINE
@@ -30,6 +31,7 @@ import java.util.UUID
 
 /** Low-level profile writes shared by the legacy adapter and repository. */
 internal object ProfileStore {
+    private const val MAX_FILTER_FINGERPRINT_CHARS = 1_048_576
     private val projection = arrayOf(
         PROFILE_COLUMN_ID,
         PROFILE_COLUMN_LEGACY_TASK_ID,
@@ -47,7 +49,7 @@ internal object ProfileStore {
     )
 
     fun upsertLegacyTask(db: SQLiteDatabase, task: Task, engineRef: String): ProfileRecord {
-        val spec = LegacyProfileMapper.fromTask(task, engineRef)
+        val spec = profileSpec(db, task, engineRef)
         val existing = getByLegacyTaskId(db, task.id)
         if (existing == null) {
             var profileId = LegacyProfileMapper.stableIdForLegacyTask(task.id)
@@ -93,8 +95,49 @@ internal object ProfileStore {
                 "$PROFILE_COLUMN_ID = ?",
                 arrayOf(existing.profileId)
             )
+        } else if (existing.title != spec.title) {
+            // A display-name edit is not a semantic profile revision and must not invalidate a
+            // verified Bisync baseline, but the authoritative profile still tracks the title.
+            val values = ContentValues().apply {
+                put(PROFILE_COLUMN_TITLE, spec.title)
+                put(PROFILE_COLUMN_UPDATED_AT, System.currentTimeMillis())
+            }
+            db.update(
+                PROFILE_TABLE_NAME,
+                values,
+                "$PROFILE_COLUMN_ID = ? AND $PROFILE_COLUMN_REVISION = ?",
+                arrayOf(existing.profileId, existing.revision.toString())
+            )
         }
         return requireNotNull(getByLegacyTaskId(db, task.id))
+    }
+
+    private fun profileSpec(db: SQLiteDatabase, task: Task, engineRef: String): ProfileSpec {
+        val filterId = task.filterId ?: return LegacyProfileMapper.fromTask(task, engineRef)
+        val cursor = db.query(
+            Filter.TABLE_NAME,
+            arrayOf(Filter.COLUMN_NAME_FILTERS),
+            "${Filter.COLUMN_NAME_ID} = ?",
+            arrayOf(filterId.toString()),
+            null,
+            null,
+            null,
+            "1"
+        )
+        return try {
+            if (!cursor.moveToFirst() || cursor.isNull(0)) {
+                LegacyProfileMapper.fromTask(task, engineRef, selectedFilterMissing = true)
+            } else {
+                val filterRaw = cursor.getString(0)
+                if (filterRaw.length > MAX_FILTER_FINGERPRINT_CHARS) {
+                    LegacyProfileMapper.fromTask(task, engineRef, selectedFilterMissing = true)
+                } else {
+                    LegacyProfileMapper.fromTask(task, engineRef, selectedFilterRaw = filterRaw)
+                }
+            }
+        } finally {
+            cursor.close()
+        }
     }
 
     fun retireLegacyTask(db: SQLiteDatabase, taskId: Long) {

@@ -4,7 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
-import ca.pkay.rcloneexplorer.BuildConfig
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_CANCEL_REQUESTED
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_CONFLICT_ITEMS
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_CREATED_AT
@@ -35,7 +34,7 @@ import java.util.UUID
 /** Durable run owner and immutable execution snapshot. */
 class RunRepository(context: Context) {
     private val context = context.applicationContext
-    private val engineRef = "rclone:${BuildConfig.RCLONE_ENGINE_VERSION}"
+    private val engineRef = EngineIdentity.current
 
     fun queueLegacyTask(taskId: Long, requestedAt: Long = System.currentTimeMillis(), dueAt: Long? = null): RunRecord {
         val handler = DatabaseHandler(context)
