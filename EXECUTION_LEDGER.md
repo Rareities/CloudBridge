@@ -1127,9 +1127,77 @@ exact-restore and fault-boundary evidence passes.
     preserve the earlier schema and native state evidence. This change did not touch remote data or
     accepted Bisync listings.
 
-**Next:** implement durable WorkManager enqueue/worker coordination: load the queued identity,
-rerun fresh read-only preflight under a persisted owner, reconstruct the exact profile/task/filter
-snapshot, claim/recheck owner generation, invoke `Rclone.runBisyncPreview`, and call repository
-`finish` only with sanitized parsed output and confirmed process-stop state. Add crash/cancel tests;
-do not add UI authorization for initialization until preservation/restore and fault-boundary gates
-pass. Continue to keep the local native clone SHA unpublished/unpinned until its separate review.
+**Next at that checkpoint:** implement durable WorkManager enqueue/worker coordination. This was
+implemented in the checkpoint immediately below; add a user-facing preview path only after its safety
+and freshness boundaries are established. Do not add UI authorization for initialization until
+preservation/restore and fault-boundary gates pass. Continue to keep the local native clone SHA
+unpublished/unpinned until its separate review.
+
+## 2026-09-24 - CloudBridge WP08 durable preview scheduler/worker (PARTIAL)
+
+1. **Objective:** connect the path-free durable preview owner to WorkManager, rebuild current
+   read-only evidence before claim, and execute only the existing owner-bound dry-run adapter.
+2. **Scope:** preview scheduler and unique work request; worker foreground/cancel lifecycle; current
+   profile/task/filter snapshot reconstruction; fresh preflight and exact identity claim; sanitized
+   terminal result persistence; recent persisted-preflight admission checks; instrumentation source
+   coverage for queue admission and terminal owner transitions.
+3. **Out of scope:** user-facing launch/review UI, result freshness display, mutation-boundary
+   revalidation, actual Bisync mutation, initialization/recovery, preserved-version backup/restore,
+   compatible-state execution on a publishable engine, Proton/device acceptance, PR/CI/release.
+4. **Preconditions:** exact app pin remains published Rareities/rclone
+   `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; owner-bound command adapter is `2f26ebc`; preview
+   identity includes explicit absent-state policy. Local native clone-capable follow-up remains
+   unpublished and is not included in the app pin.
+5. **Design:** `BisyncPreviewWorkScheduler` persists an owner before dispatch and uses unique
+   WorkManager work with a connected-network constraint. The worker reopens the exact profile/task,
+   re-runs read-only preflight, reconstructs the transient raw endpoint/filter snapshot in memory,
+   builds and claims the identity, rechecks current profile state, runs `Rclone.runBisyncPreview`,
+   and stores only the sanitized parser result after confirmed process stop. Queue admission requires
+   a recent successful persisted preflight row; compatible state must match every accepted baseline
+   field, while absent state requires matching successful ABSENT/INITIALIZATION_REQUIRED evidence,
+   no accepted baseline, and explicit initialization mode.
+6. **Safety invariants:** no raw endpoint or native output is placed in WorkManager data or preview
+   history; queued IDs/tokens are owner-scoped; stale/expired/blocked preflight evidence is rejected;
+   current published engine capability remains authoritative; cancellation only finalizes the exact
+   queued owner and a running native owner still requires confirmed process stop; preview never
+   authorizes a write, deletion, initialization or recovery.
+7. **Implementation:** CloudBridge commit
+   `cd3fd57cf37728675f25f8e5d2ec7371aaee66fd` (base
+   `97ec846a156b7e14c9f2e766680b91674adf244c`) adds the WorkManager scheduler/worker, transient
+   preflight execution snapshot, queue freshness/baseline validation, exact-owner queued terminal
+   transitions, and instrumentation test source. The user-owned untracked `.android/` directory was
+   not staged or changed.
+8. **Reuse:** v15 `BisyncPreviewRepository`, `BisyncPreflightCoordinator`/policy, identity
+   fingerprints, existing endpoint resource claims, pinned CLI builder, owned native execution,
+   notifications and WorkManager dependencies.
+9. **Retired:** identity-only queue admission without persisted preflight evidence; no app-surface
+   inference from preview status; no WorkManager data containing endpoint paths or filters; no
+   automatic retry of an identity mismatch; no sync/init/recovery capability is enabled here.
+10. **Failure behavior:** stale/missing/mismatched preflight and profile evidence prevent launch;
+    dispatch/preflight failure finalizes only the exact queued owner; cancellation before claim is
+    terminal only for that owner; uncertain native stop remains a conservative recovery hold; failed
+    storage finalization leaves the durable owner blocking rather than reporting success.
+11. **Tests:** offline JDK 17.0.20.1 / Gradle 8.13 / Android SDK 36 run passed
+    `:app:testOssDebugUnitTest` (92 tests, 0 failures/errors, 1 existing Windows capability skip),
+    `:app:compileOssDebugAndroidTestJavaWithJavac` including instrumentation Kotlin/Java source
+    compilation, and `:app:lintOssDebug` (94 visible warnings; existing baseline filters 2 errors and
+    428 warnings, 76 stale entries). `git diff --check` passed. Android instrumentation was not
+    executed; ADB could not start its local server in this environment. The run used
+    `-x :rclone:buildAll`; no native rebuild or APK assembly was performed.
+12. **Acceptance:** scheduler/worker source and core Android compilation pass; persisted evidence
+    checks fail closed by construction and have instrumented regression source, but that source has
+    not run on a device. WP08 remains PARTIAL: no user-facing launch/review screen or mutation-boundary
+    revalidation; compatible-state preview fails closed on the published app pin; no init/recovery,
+    preservation/restore or process-kill/reboot runtime evidence. Galaxy S26 / One UI 8.5/9 (actual
+    API/firmware), Samsung instrumentation and live Proton are **NOT RUN**. No APK, PR, CI
+    publication, signing or release claim.
+13. **Rollback:** revert only `cd3fd57cf37728675f25f8e5d2ec7371aaee66fd` to
+    `97ec846a156b7e14c9f2e766680b91674adf244c`; retain the exact-pin command adapter, DB v15 identity
+    migration and earlier accepted-baseline preservation work. No remote data or native Bisync
+    state was touched.
+
+**Next:** add a user-mediated preview request/review surface that cannot treat preview completion as
+mutation authorization; keep initialization and recovery unavailable pending proven backups, exact
+restore and fault-boundary evidence. Test instrumentation and runtime process/cancellation behavior
+when an emulator or the specified acceptance device is available. Preserve the published app pin
+until the compatible-state native feature has an independently reviewed/publication path.
