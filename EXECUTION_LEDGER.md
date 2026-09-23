@@ -812,3 +812,54 @@ a PR.
 **Next:** continue WP08 with strict summary parsing, persisted identity/freshness, durable
 preview ownership and cancellation/process-death handling. Keep initialization disabled until
 run-scoped preservation and rollback are proven.
+
+## 2026-09-24 — WP08 strict app-side preview-summary parser (PARTIAL)
+
+CloudBridge implementation commit: `f7eed3c16ecbde3945903e2f162d95e4f9750996`.
+
+1. **Objective:** accept only a valid, path-free native preview summary after confirmed native
+   process success and complete output drain.
+2. **Scope:** a pure app-side v1 summary model/parser and unit coverage. No worker, UI, persistence,
+   init/recovery, or execution behavior was enabled.
+3. **Out of scope:** durable preview ownership/freshness, run wiring, scheduling, initialization,
+   recovery, same-provider preservation/restore, real-device and provider acceptance.
+4. **Preconditions:** CloudBridge pins Rareities/rclone
+   `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; its native `--preview-json` contract and
+   independent tests/build/Android arm64 cross-build are recorded in the rclone patch ledger.
+5. **Design:** Jackson streaming parser with strict duplicate-key detection; exact eight-field
+   allowlist; v1 only; known statuses; nonnegative integral 64-bit counters; `conflictsKnown`
+   must remain false; `COMPLETE` requires zero reported errors; output is capped at 4 KiB.
+6. **Safety invariants:** only counters/status are returned; paths or extra fields are rejected;
+   failed, unconfirmed, truncated or malformed output is unavailable; `INCOMPLETE` stays visibly
+   incomplete; even `COMPLETE` is review data, never authorization to mutate.
+7. **Implementation:** commit `f7eed3c` adds `BisyncPreviewSummary.kt` and parser tests. Jackson
+   Core was already a project dependency; no dependency changed. No raw native output or path is
+   persisted or logged.
+8. **Reuse:** existing Jackson Core dependency, immutable native protocol, and CloudBridge OSS
+   JVM unit-test harness.
+9. **Retired:** no permissive generic JSON-object coercion or unknown-field fallback is used for
+   preview summaries.
+10. **Failure behavior:** process failure/unconfirmed completion, truncation, empty/oversized
+    output, unsupported version, duplicate keys, unknown/path-like keys, wrong types, negative,
+    fractional or overflowing counters all produce a sanitized unavailable reason.
+11. **Tests:** six new parser tests pass. Full `:app:testOssDebugUnitTest` passes: 82 tests,
+    zero failures/errors, one existing Windows symlink-capability skip. `:app:lintOssDebug` passes
+    with the existing baseline (92 warnings, 2 errors and 428 warnings filtered; 76 stale
+    baseline entries). JDK 17.0.20.1 / Gradle 8.13 / SDK 36. This app-only rerun used the
+    previously verified clean rclone cache at exact SHA `fe775a8…` and excluded checkout/native
+    rebuild tasks; the fresh four-ABI build remains evidenced in the preceding checkpoint. The
+    sandbox cache write failed, and the final test/lint run succeeded with host access using
+    workspace-local Gradle and Android user homes. Diff checks passed before commit.
+12. **Acceptance:** parser foundation PASS; WP08 remains PARTIAL. No native preview command is
+    yet called by the app, and summary identity/freshness, durable run ownership, cancellation and
+    process-death reconciliation, UI, init/recovery, backup/restore and fault-boundary proof remain
+    open. Instrumentation execution, Galaxy S26 / One UI 8.5/9 (actual API/firmware), and live
+    Proton acceptance are **NOT RUN**. No release readiness is claimed.
+13. **Rollback:** revert only `f7eed3c`; it adds no schema or runtime call sites and cannot alter
+    existing data. Do not revert earlier accepted-state preservation work or discard any recovery
+    evidence.
+
+**Next:** design durable preview identity/freshness and run ownership against the existing run
+schema, then add the bounded cancellable native dry-run entry point and worker with tests for stale
+profile/config/engine state, process cancellation and death. Keep initialization disabled until
+run-scoped backups, rollback and fault boundaries are proven.
