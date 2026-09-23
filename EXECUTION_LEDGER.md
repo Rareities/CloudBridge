@@ -863,3 +863,18 @@ CloudBridge implementation commit: `f7eed3c16ecbde3945903e2f162d95e4f9750996`.
 schema, then add the bounded cancellable native dry-run entry point and worker with tests for stale
 profile/config/engine state, process cancellation and death. Keep initialization disabled until
 run-scoped backups, rollback and fault boundaries are proven.
+
+## 2026-09-24 — GitHub repository, PR and CI refresh
+
+Read-only GitHub refresh confirms `Rareities/CloudBridge` master is still
+`c492876258ca841232229249519abe92ff77c3a4`, with no implementation branch, PRs, or Actions runs.
+The local CloudBridge branch remains unpublished.
+
+`Rareities/rclone:codex/luna-engine` remains at `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`;
+its fork `master` is `1583cce1e28340e5d064ed955179f5f2b31e7757`. PR #1 remains closed/unmerged;
+no Actions runs or commit status checks exist for the feature head. Comparing that head with the
+fork's master still shows 180 commits ahead from the archive-import history, so that base is
+unsuitable. Current upstream `rclone/rclone:master` is `90e67915c88d4adf244f1d5251088c339c8b8e23`;
+comparing `Rareities:codex/luna-engine` to it reports 6 commits ahead, 1 behind, and 26 changed
+files. This is a candidate upstream PR boundary, not approval to publish: review/rebase and split
+scope remain pending. No PR was created during this refresh.
