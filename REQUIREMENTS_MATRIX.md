@@ -31,3 +31,15 @@ the corresponding Android instrumentation test sources compile but have not run.
 preview execution: no app worker/CLI invocation, result UI, mutation-boundary revalidation,
 initialization or recovery integration exists yet. The earlier debug APK does not contain DB v14 or
 v15 changes. Samsung and Proton acceptance remain **NOT RUN**.
+
+Latest WP08 update (2026-09-24): CloudBridge commit `2f26ebc` adds an exact-engine-SHA command
+builder and an `Rclone` adapter bound to the durable preview owner token/generation. It launches
+only dry-run/path-free JSON with explicit delete caps, filters and initialization policy; it bounds
+stdout, avoids output/path logging, checks scratch containment/endpoint overlap and retains scratch
+when process stop cannot be confirmed. The published app pin can preview absent state but fails
+closed for compatible state because that pin lacks `--preview-state-from`; the clone-capable native
+SHA remains local and unpublished. Latest offline app validation is 92 JVM tests (0 failures/errors,
+1 platform-capability skip), Android-test source compile PASS, and lint task PASS (94 visible
+warnings; existing baseline filters 2 errors/428 warnings, 76 stale entries). There is still no
+WorkManager call site/worker, no new APK, and no device/provider run; Samsung and Proton remain
+**NOT RUN**.

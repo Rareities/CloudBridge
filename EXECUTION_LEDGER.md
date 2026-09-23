@@ -1066,3 +1066,70 @@ contract, UUID-owned isolated workdir and owned-process drain/cancel lifecycle. 
 currently published engine SHA until the local native preview-state change has a reviewed,
 reproducible publication path. Do not enable initialization/recovery before preserved-version,
 exact-restore and fault-boundary evidence passes.
+
+## 2026-09-24 - WP08 owned native preview command boundary (PARTIAL)
+
+1. **Objective:** translate a claimed, fresh Bisync preview identity into a bounded native dry-run
+   without allowing engine drift, implicit initialization policy, accepted-baseline mutation,
+   endpoint overlap with scratch, or raw preview output to escape the owned execution boundary.
+2. **Scope:** exact-pin command builder and capability registry, Rclone native-run adapter, private
+   UUID workdir ownership/cleanup, durable preview owner-token rechecks, sanitized run result, and
+   JVM argument tests.
+3. **Out of scope:** WorkManager enqueue/worker, fresh preflight reconstruction, endpoint/filter
+   snapshot handoff, preview UI, cancellation/reboot integration tests, initialization/recovery,
+   preserved-version backup/restore, Proton/device acceptance, CI/PR/release.
+4. **Preconditions:** CloudBridge v15 explicit-initialization identity/owner foundation is at
+   `7f00c24`; app remains pinned to published rclone `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`.
+   The local native prototype `81ac481705944ac125e2f8eeab823d78f6b1cfdb` is unpublished and is
+   not the app's configured engine.
+5. **Design:** capability registry permits path-free preview JSON only for the exact published
+   engine SHA and grants `--preview-state-from` only to the exact local clone-capable SHA. Commands
+   always use dry-run, path-free JSON, unique absolute workdir, identity-bound compare/delete
+   limits, validated filters and no `--force`. Absent state requires the identity's explicit
+   resync mode. Compatible state requires a clone-capable pin and the established profile workdir;
+   current app pin therefore rejects that case before native launch. Rclone rechecks RUNNING owner
+   token/generation/identity immediately before launch, uses existing endpoint claims and owned
+   cancellable execution, caps stdout at 4 KiB, parses only in memory, and emits a sanitized result.
+6. **Safety invariants:** raw endpoint paths and native output are not persisted or logged; scratch
+   is private, unique, contained and rejected if it overlaps a local endpoint; cleanup never
+   follows symlinks or escapes the preview root; scratch is retained if process stop is unconfirmed;
+   scratch cleanup failure suppresses an otherwise valid summary. Unknown pins, legacy checksum mode,
+   unresolved state, stale owner, invalid filters and implicit absent-state policy fail closed.
+7. **Implementation:** CloudBridge commit `2f26ebc` (base `7f00c24`) adds
+   `BisyncPreviewCommandBuilder`, exact-SHA capability checks, the Rclone owner-bound native run
+   adapter, bounded parsing/cleanup result reasons, and exact argument/fail-closed JVM tests.
+   The user-owned untracked `.android/` directory was not staged or changed.
+8. **Reuse:** v15 durable preview identity/repository, native v1 path-free summary parser, existing
+   `launchClaimed` endpoint resource lease, `NativeExecutionHandle`, bounded cancellation/drain
+   runner, read-only endpoint mapper and local accepted-state inspector.
+9. **Retired:** no command is assembled through the ordinary sync path; no `--force`, implicit
+   resync mode, accepted-state copy on the published pin, or log of raw native output is permitted.
+10. **Failure behavior:** engine/capability, owner, identity, endpoint, filter and request failures
+    return a path-free unavailable reason before launch; failed/truncated native output is not
+    summarized; unconfirmed exit preserves scratch and caller must keep recovery ownership; a
+    confirmed but failed scratch deletion converts the result to unavailable.
+11. **Tests:** offline JDK 17.0.20.1 / Gradle 8.13 / Android SDK 36 run passed:
+    `:app:testOssDebugUnitTest` (92 tests, 0 failures/errors, 1 existing Windows capability skip),
+    `:app:compileOssDebugAndroidTestJavaWithJavac` (sources compile only), and `:app:lintOssDebug`
+    (task PASS; 94 visible warnings; existing baseline filters 2 errors and 428 warnings, with 76
+    stale baseline entries). `git diff --check` passed before commit. Gradle ran offline with
+    `-x :rclone:buildAll`; Android-test sources were not executed on a device. No native rebuild or
+    APK assembly in this checkpoint.
+12. **Acceptance:** the exact argv builder and native adapter compile, and builder tests prove the
+    published-pin absent-state flags, explicit mode, delete caps, filter encoding, no `--force`,
+    compatible-state fail-closed behavior, and exact clone-pin behavior. WP08 remains PARTIAL: no
+    WorkManager caller exists yet, so there is no app feature path to launch or view a preview; no
+    fresh preflight/identity revalidation in a worker, result UI, mutation-boundary check,
+    initialization/recovery, backup/restore, process-kill/reboot, or device migration proof. Galaxy
+    S26 / One UI 8.5/9 (actual API/firmware) and live Proton remain **NOT RUN**. No APK, PR, CI
+    publication, signing, release or release-readiness claim.
+13. **Rollback:** revert only `2f26ebc` to return to the v15 identity/owner state at `7f00c24`;
+    preserve the earlier schema and native state evidence. This change did not touch remote data or
+    accepted Bisync listings.
+
+**Next:** implement durable WorkManager enqueue/worker coordination: load the queued identity,
+rerun fresh read-only preflight under a persisted owner, reconstruct the exact profile/task/filter
+snapshot, claim/recheck owner generation, invoke `Rclone.runBisyncPreview`, and call repository
+`finish` only with sanitized parsed output and confirmed process-stop state. Add crash/cancel tests;
+do not add UI authorization for initialization until preservation/restore and fault-boundary gates
+pass. Continue to keep the local native clone SHA unpublished/unpinned until its separate review.
