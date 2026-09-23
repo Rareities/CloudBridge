@@ -747,3 +747,68 @@ or pinned by CloudBridge.
 fresh identity/config checks and bounded path-free summary output. Keep initialization disabled
 until durable same-provider backups, rollback and fault boundaries are implemented and tested.
 Refresh the remote fork/CI before publication; the branch has not been pushed or opened as a PR.
+
+## 2026-09-24 — WP08 immutable preview-protocol pin and integrated debug build (PARTIAL)
+
+CloudBridge implementation commit: `eb71b94fb563d75ce02c161530fe9ec594038642`.
+Rareities/rclone remote head: `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`, tree
+`68df728c1eb3cd1e60340286cd99548e6d0d0452`. The GitHub commit is unsigned; no signature is
+claimed. The pin remains on the local CloudBridge branch and has not yet been pushed or opened as
+a PR.
+
+1. **Objective:** adopt the independently tested WP08 native preview protocol at an immutable
+   Rareities/rclone revision and verify the Android integration contains the actual native engine.
+2. **Scope:** Gradle engine pin and identity fixtures, Windows Go executable resolution, fresh
+   four-ABI native build, OSS debug APK, JVM tests, lint and Android-test source compilation.
+3. **Out of scope:** app-owned preview worker/UI/persistence, initialization/recovery/backups,
+   real-device or live-Proton acceptance, R8/release signing, PR/CI and release publication.
+4. **Preconditions:** rclone commit `fe775a8…` is parented on published `d53551e…`; exact
+   GitHub tree `68df728…` was fetched by the app's Gradle checkout. The native preview protocol
+   passed independent Go tests/vet/build/cross-build and disposable CLI smoke as recorded in the
+   rclone patch ledger.
+5. **Design:** keep `https://github.com/Rareities/rclone.git` and pin the full SHA. Resolve Go
+   from explicit `de.schuelken.cloudbridge.goExecutable`, then `GOROOT/bin`, then PATH; never
+   select another repository or moving ref as fallback.
+6. **Safety invariants:** profile/run fixtures name the same SHA as BuildConfig; native outputs
+   and APKs remain generated artifacts; preview is not authorization to mutate; debug signing is
+   never production provenance. Existing `.android/analytics.settings` remains untracked.
+7. **Implementation:** commit `eb71b94` updates `gradle.properties`, the app pin fixtures and
+   requirements traceability, and changes `rclone/build.gradle` to invoke the resolved Go
+   executable. All four generated `librclone.so` files are from source SHA `fe775a8…`.
+8. **Reuse:** the native `--preview-json` contract, existing app build integration and the
+   existing immutable `d53551e…` engine lineage; no Android-side file-comparison algorithm was
+   added.
+9. **Retired:** CloudBridge's previous `d53551e…` pin is superseded. There is still no unpinned
+   fallback. No Bisync execution or recovery path was enabled.
+10. **Failure behavior:** Gradle continues to fail on a missing repository/ref; Go resolution
+    uses only the configured executable, `GOROOT/bin`, or PATH. Any unknown preview result must
+    remain unavailable/unknown in the still-pending app integration.
+11. **Tests:** Windows Go 1.26.8, JDK 17.0.20.1, Gradle 8.13 and Android SDK 36. Fresh
+    `:rclone:buildAll --no-daemon` PASS for arm64-v8a, armeabi-v7a, x86 and x86_64, printing
+    exact source `fe775a8…` and rclone v1.76.0. The integrated command
+    `:app:testOssDebugUnitTest :app:lintOssDebug :app:compileOssDebugAndroidTestJavaWithJavac
+    :app:assembleOssDebug --no-daemon -Pkotlin.compiler.execution.strategy=in-process
+    -x :rclone:buildAll` PASS: 14 suites/76 tests, 0 failures/errors, 1 Windows symlink skip;
+    lint PASS with baseline (92 warnings, 2 errors and 428 warnings filtered; 76 stale entries);
+    Android-test source compile PASS. Universal debug APK SHA-256 is
+    `71F6EA499419D1928E50BD2F211126E1E4BD6952B3B5552E981FF095626614CE`; its verified debug
+    certificate SHA-256 is `2dfd7565c808a6144fd1c7458b5dfe5fc04b31319f23055c8e4d0d80096273bb`.
+    APK lists all four ABI libraries. `git diff --cached --check` passed before commit. Initial
+    in-sandbox JDK/cache attempts failed on Windows real-path/cache ACL access; the final build
+    passed with an isolated workspace Gradle home and host-access escalation, without changing
+    the SDK or deleting caches.
+12. **Acceptance:** pin and four-ABI debug integration PASS, but WP08 remains PARTIAL. The app
+    does not yet persist or present the path-free summary or provide a time-bounded worker/UI;
+    initialization, recovery, backup/restore and mutation-fault evidence remain open.
+    Instrumentation execution, Galaxy S26 / One UI 8.5/9 (including actual API/firmware), and live
+    Proton tests are **NOT RUN**. The APK is `de.schuelken.cloudbridge.debug`, version
+    `1.0.1-DEBUG`, debug-signed. Existing release signing configuration still falls back to the
+    debug key when production signing is absent; WP13 must close that blocker. No release
+    readiness is claimed.
+13. **Rollback:** restore the previous immutable `d53551e…` app pin and matching fixture values
+    as one reviewed change; do not remove generated APK/native outputs as source cleanup, and do
+    not downgrade existing Bisync state or discard recovery evidence.
+
+**Next:** continue WP08 with strict summary parsing, persisted identity/freshness, durable
+preview ownership and cancellation/process-death handling. Keep initialization disabled until
+run-scoped preservation and rollback are proven.
