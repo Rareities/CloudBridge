@@ -1246,3 +1246,66 @@ until the compatible-state native feature has an independently reviewed/publicat
 13. **Rollback/next:** revert only `27043677e0777f7078f2dd771789ac1a9d4da45b`; no task records or
     provider/native state were modified by tests. Next continue the durable user-facing Bisync
     preview request/review path; keep mutation, initialization, and recovery unavailable.
+
+## 2026-09-24 - CloudBridge WP08 user-mediated preview request/review (PARTIAL)
+
+1. **Objective:** expose the durable Bisync dry-run owner through a user-mediated request and
+   path-free review/history surface without enabling sync, initialization, recovery, or apply.
+2. **Scope:** internal task-menu entry and non-exported activity; explicit absent-state policy
+   choice; bounded deletion thresholds; durable path-free admission request; active-owner/history
+   queries; connected-network WorkManager preflight admission; exact-owner queued resume; profile
+   work tags; fail-closed engine capability gate; path-free history counts/status.
+3. **Out of scope:** mutation authorization/revalidation at a write boundary, initializing a
+   baseline, recovery/restore, compatible-state enablement on the currently published app pin,
+   translated resource publication, device/provider acceptance, APK/PR/release.
+4. **Preconditions:** verified base a5c085c2f9b59e43cc0f457e87de42102b04ce13; existing DB v15
+   identity/owner, exact-pin preview command, preflight policy/coordinator, process ownership and
+   startup reconciliation are retained. Current app engine pin remains
+   fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0.
+5. **Design:** admission stores only profile UUID/revision/fingerprint and explicit review/policy
+   fields in WorkManager; raw endpoints, filters and native output remain transient. User must
+   choose one absent-state policy; the preference is bound to identity only if state is proved
+   absent. UI labels counts as display-only and recent history as staleable; no preview result
+   authorizes a write.
+6. **Safety invariants:** only directions 5/6 expose preview; ordinary Start Task is hidden for
+   those modes; no fallback to weaker engine/state capability; exact owner token/identity remains
+   required; queued/interrupted/recovery owners block a second request; uncertain process stop
+   remains a hold; WorkManager payload key set is regression-tested to exclude endpoints; no
+   remote/local mutation or Proton test data was used.
+7. **Implementation:** CloudBridge commit
+   d009c1e58781e4c07030bbbbb7d2f0373e711874 (base
+   a5c085c2f9b59e43cc0f457e87de42102b04ce13) adds the user-mediated activity, admission
+   scheduler/worker, profile active/history queries and tags, capability gate, UI resources and
+   regression/instrumentation test source. Earlier task-mode preservation commit remains
+   27043677e0777f7078f2dd771789ac1a9d4da45b. User-owned .android/ remains unstaged and
+   untouched.
+8. **Reuse:** DB v15 preview identity/repository, persisted fresh-preflight evidence, existing
+   read-only preflight coordinator, pinned native preview CLI, owner-scoped cancellation, WorkManager
+   foreground policy, existing notifications and task menu patterns.
+9. **Retired:** no user-facing path from Bisync task to a durable review screen; no path-free
+   admission payload regression; no automatic absent-state preference; no capability downgrade.
+10. **Failure behavior:** stale/missing/changed profile or preflight, unsupported engine/state,
+    dispatch failure and invalid policy stop before native preview; only enum reason codes and
+    opaque owner IDs are surfaced; interrupted or unconfirmed owners stay blocked. No error path
+    starts normal sync or authorizes apply.
+11. **Tests:** Windows JDK 21.0.8 / Gradle 8.13 / Android SDK 36 offline run passed
+    :app:testOssDebugUnitTest (97 tests: 96 passed, 1 existing platform-capability skip, 0
+    failures/errors), :app:compileOssDebugAndroidTestJavaWithJavac, :app:lintOssDebug, and
+    git diff --check. Lint reports 143 visible warnings; the existing baseline filters 2 errors
+    and 428 warnings, with 76 stale entries. Forty-five preview UI strings plus two task-mode
+    strings are currently default-English only and await Weblate/Crowdin; no localized resource was
+    hand-edited. adb devices -l returned no attached devices, so Android instrumentation was
+    compiled but NOT RUN. Galaxy S26/One UI actual API/firmware, Samsung acceptance and live
+    Proton remain NOT RUN. No app APK/native rebuild, PR, CI publication, signing or release.
+12. **Acceptance:** the user-mediated preview request/review slice is implemented and JVM/source
+    checks pass. WP08 remains PARTIAL: no initialization, recovery/restore, apply or mutation
+    boundary; compatible-state preview still fails closed on the published engine pin; UI/runtime,
+    fault-boundary and instrumented behavior lack device evidence. Release gates remain closed.
+13. **Rollback/next:** revert only d009c1e58781e4c07030bbbbb7d2f0373e711874; retain the earlier
+    scheduler/worker, DB v15, native protocol and C03 preservation commits. No remote or native
+    Bisync state was touched. Next continue the handoff sequence by independently validating the
+    clone-capable Rareities/rclone revision and its Proton changes, then integrate only a reviewed
+    immutable fork commit in CloudBridge. Follow with mutation-boundary and recovery/restore work
+    strictly at the owning layer; submit strings through the supported translation workflow; keep
+    Samsung/Proton NOT RUN and do not open a release until all acceptance/provenance/signing gates
+    pass.
