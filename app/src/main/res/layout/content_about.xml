@@ -216,7 +216,7 @@
                 </LinearLayout>
 
                 <LinearLayout
-                    android:id="@+id/report_bug"
+                        android:id="@+id/project_repository"
                     android:layout_width="match_parent"
                     android:layout_height="48dp"
                     android:layout_gravity="center_vertical"

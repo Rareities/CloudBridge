@@ -120,7 +120,7 @@ CloudBridge is a fork of [**Round-Sync**](https://github.com/newhinton/Round-Syn
 
 This repository is a maintained fork. Release cadence, signing identity, and feature compatibility are tracked independently; the fork currently has no published release. See [requirements](REQUIREMENTS_MATRIX.md), [test evidence](TEST_REPORT.md), [security review](SECURITY_REVIEW.md), and [release readiness](RELEASE_READINESS.md) for verified status and open gates.
 
-The inherited update notification currently targets upstream thies2005/CloudBridge rather than this fork; do not use it to check for Rareities releases. Correcting the release target and its tests remains an open fork-integration task.
+The optional update notification now checks Rareities/CloudBridge and opens this fork's release page. It is notification-only (no in-app download or install), defaults off, and stable builds ignore prereleases. The fork had no verified release candidate in the 2026-09-25 GitHub refresh; updater runtime, opt-out and notification behavior still need integrated/device validation before distribution.
 
 If you want to convey a modified version (fork), we ask you to use a different name, app icon and package id as well as proper attribution to avoid user confusion.
 

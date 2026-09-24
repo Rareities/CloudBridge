@@ -64,9 +64,11 @@
     When update notifications are enabled, source code schedules a connected-network
     WorkManager check on a 14-day interval; Android may run periodic work later than
     requested. The worker requests the GitHub releases API for
-    <code>thies2005/CloudBridge</code> (up to ten releases) and notifications open that
-    upstream project's release page. This does not track the Rareities fork and does not
-    download or install an update. The preference defaults off in the inspected source.
+    <code>Rareities/CloudBridge</code> (up to five pages of 100 published releases) and
+    notifications open that fork's latest-release page. If all five pages are full, the
+    worker leaves the stored update state unchanged. It does not download or install an update. The
+    preference defaults off in the inspected source; there is no verified Rareities release
+    candidate as of 2026-09-25.
     Runtime request behavior and device scheduling have not been tested here. Do not
     infer that the API request carries no network metadata.
   </p>

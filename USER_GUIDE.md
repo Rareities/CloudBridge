@@ -75,10 +75,10 @@ Obsidian is closed.
 ## Update notifications
 
 The inspected source defaults update notifications off. If enabled, periodic work checks
-the upstream thies2005/CloudBridge GitHub release API on a connected network and opens
-that upstream release page; it does not install updates. This is not a check for Rareities
-fork releases. WorkManager timing is best-effort, and this path has not had device/runtime
-acceptance. Do not use it to verify whether a Rareities fork update exists.
+the Rareities/CloudBridge GitHub release API on a connected network and opens this fork's
+latest-release page; it does not install updates. Stable builds ignore prereleases. WorkManager
+timing is best-effort, and the retargeted updater still needs integrated/device validation.
+Check the release page directly when you need to confirm whether a fork release exists.
 
 ## Reporting a problem
 

@@ -17,6 +17,7 @@ import de.schuelken.cloudbridge.extensions.tag
 import de.schuelken.cloudbridge.updates.UpdateUserchoiceReceiver
 import de.schuelken.cloudbridge.updates.UpdateUserchoiceReceiver.Companion.ACTION_IGNORE
 import de.schuelken.cloudbridge.updates.UpdateUserchoiceReceiver.Companion.IGNORE_VERSION_EXTRA
+import de.schuelken.cloudbridge.updates.workmanager.UpdateReleasePolicy
 
 
 class AppUpdateNotification(private var mContext: Context) {
@@ -24,7 +25,7 @@ class AppUpdateNotification(private var mContext: Context) {
     companion object {
         var NOTIFICATION_CHANNEL_ID = "NOTIFICATION_CHANNEL_ID"
         var NOTIFICATION_ID = 63598
-        var RELEASES_URL = "https://github.com/thies2005/CloudBridge/releases/latest"
+        var RELEASES_URL = UpdateReleasePolicy.LATEST_RELEASE_URL
     }
 
     @SuppressLint("MissingPermission") // Handled by PermissionManager

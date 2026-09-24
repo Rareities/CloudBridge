@@ -52,69 +52,80 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
         return Result.success()
     }
 
-    companion object {
-        private const val REPO_OWNER = "thies2005"
-        private const val REPO_NAME = "CloudBridge"
-    }
-
     /**
-     * Notification-only update check: fetches the newest GitHub release and compares
-     * semantic version prefixes (e.g. "1.0.1" of "v1.0.1-beta.abc123"). Inlined to
-     * replace the AppUpdateChecker library (flagged NonFreeNet by the FOSS scan).
+     * Notification-only update check: scans a bounded set of Rareities releases and compares
+     * semantic versions with stable/prerelease channel metadata. Inlined to replace the
+     * AppUpdateChecker library (flagged NonFreeNet by the FOSS scan).
      */
     private suspend fun checkGithubReleases() = withContext(Dispatchers.IO) {
-        val request = Request.Builder()
-            .url("https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases?per_page=10")
-            .header("Accept", "application/vnd.github+json")
-            .header("User-Agent", "CloudBridge-Updater")
-            .build()
+        val client = OkHttpClient()
+        val candidates = mutableListOf<UpdateReleasePolicy.ReleaseCandidate>()
+        var releaseListComplete = false
 
-        OkHttpClient().newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                FLog.e(tag(), "Release API returned HTTP ${response.code}")
-                return@withContext
+        for (page in 1..UpdateReleasePolicy.MAX_RELEASE_PAGES) {
+            val request = Request.Builder()
+                .url(UpdateReleasePolicy.releasesApiUrl(page))
+                .header("Accept", "application/vnd.github+json")
+                .header("User-Agent", "CloudBridge-Updater")
+                .build()
+
+            var continuePaging = true
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    FLog.e(tag(), "Release API returned HTTP ${response.code} on page $page")
+                    return@withContext
+                }
+                val body = response.body?.string()
+                if (body.isNullOrEmpty()) {
+                    FLog.e(tag(), "Release API returned an empty response body on page $page")
+                    return@withContext
+                }
+                val releases = try {
+                    JSONArray(body)
+                } catch (_: Exception) {
+                    FLog.e(tag(), "Release API returned malformed JSON on page $page")
+                    return@withContext
+                }
+
+                if (releases.length() == 0) {
+                    releaseListComplete = true
+                    continuePaging = false
+                } else {
+                    for (index in 0 until releases.length()) {
+                        val release = releases.optJSONObject(index) ?: continue
+                        candidates += UpdateReleasePolicy.ReleaseCandidate(
+                            release.optString("tag_name").takeIf { it.isNotBlank() },
+                            release.optBoolean("prerelease"),
+                            release.optBoolean("draft"),
+                            release.optString("body")
+                        )
+                    }
+                    if (releases.length() < UpdateReleasePolicy.RELEASES_PER_PAGE) {
+                        releaseListComplete = true
+                        continuePaging = false
+                    }
+                }
             }
-            val body = response.body?.string()
-            val releases = if (body.isNullOrEmpty()) null else JSONArray(body)
-            if (releases == null || releases.length() == 0) {
-                setFoundVersion(BuildConfig.VERSION_NAME)
-                return@withContext
-            }
-            val newest = releases.getJSONObject(0)
-            val tagName = newest.optString("tag_name")
-            if (isNewerVersion(BuildConfig.VERSION_NAME, tagName)) {
-                FLog.e(tag(), "Update found: $tagName")
-                setFoundVersion(tagName)
-                setChangelog(newest.optString("body"))
-                notifyIfRequired()
-            } else {
-                setFoundVersion(BuildConfig.VERSION_NAME)
-            }
+
+            if (!continuePaging) break
+        }
+
+        if (!releaseListComplete) {
+            FLog.e(tag(), "Release scan reached its page limit; leaving the stored update state unchanged")
+            return@withContext
+        }
+
+        val newest = UpdateReleasePolicy.newestEligibleRelease(BuildConfig.VERSION_NAME, candidates)
+        if (newest != null) {
+            val tagName = newest.tagName
+            FLog.e(tag(), "Update found: $tagName")
+            setFoundVersion(tagName)
+            setChangelog(newest.changelog)
+            notifyIfRequired()
+        } else {
+            setFoundVersion(BuildConfig.VERSION_NAME)
         }
     }
-
-    private fun isNewerVersion(currentVersion: String, tagName: String): Boolean {
-        val currentParts = numericVersionParts(currentVersion) ?: return false
-        val tagParts = numericVersionParts(tagName) ?: return false
-        for (i in 0 until maxOf(currentParts.size, tagParts.size)) {
-            val current = currentParts.getOrElse(i) { 0 }
-            val tag = tagParts.getOrElse(i) { 0 }
-            if (tag != current) {
-                return tag > current
-            }
-        }
-        return false
-    }
-
-    private fun numericVersionParts(version: String): List<Int>? {
-        val cleaned = version.substringBefore('-').removePrefix("v").removePrefix("V")
-        if (cleaned.isEmpty() || !cleaned[0].isDigit()) {
-            return null
-        }
-        return cleaned.split('.').map { segment -> segment.toIntOrNull() ?: return null }
-    }
-
-
 
     /**
      * Does not notify the user when the user skipped this update.

@@ -24,7 +24,7 @@
     <string name="license_and_contributors">Llicència i Contribuïdors</string>
     <string name="credits_libraries">Biblioteques i Crèdits</string>
     <string name="star_on_github">Valora a GitHub</string>
-    <string name="report_a_bug">Informa d\'un error</string>
+    <string name="report_a_bug">Repositori del projecte</string>
     <string name="author">Autor Original</string>
     <string name="follow_on_github">Segueix a GitHub</string>
     <string name="maintainer">Mantenidor</string>
@@ -110,7 +110,7 @@
     <string name="app_icon_made_by">Icona de l\'aplicació feta per</string>
     <string name="from">de</string>
     <string name="intro_welcome_title">Benvinguda!</string>
-    <string name="intro_welcome_description">CloudBridge és una eina de gestió de fitxers que pot gestionar fitxers emmagatzemats al teu dispositiu i/o al núvol. Si vols més informació vés a github.com/thies2005/CloudBridge.</string>
+    <string name="intro_welcome_description">CloudBridge és una eina de gestió de fitxers que pot gestionar fitxers emmagatzemats al teu dispositiu i/o al núvol. Si vols més informació vés a github.com/Rareities/CloudBridge.</string>
     <string name="intro_storage_title">Accés a l\'emmagatzematge</string>
     <string name="intro_storage_description">CloudBridge enllaça amb rclone i li cal permís per accedir a tots els fitxers. Concedeix permís d\'accés a l\'emmagatzematge quan t\'ho demani, si no l\'aplicació no funcionarà bé.</string>
     <string name="intro_community_title">Comunitat</string>
@@ -402,7 +402,7 @@
         <item quantity="other">%s fitxers s\'han pujat!</item>
     </plurals>
 
-    <string name="abi_not_supported_arm_downgrade">Per desgràcia aquesta versió de CloudBridge no és compatible amb el teu dispositiu. Intenta-ho amb l\'armeabi-v7a APK de github.com/thies2005/CloudBridge/releases/latest.</string>
+    <string name="abi_not_supported_arm_downgrade">Per desgràcia aquesta versió de CloudBridge no és compatible amb el teu dispositiu. Intenta-ho amb l\'armeabi-v7a APK de github.com/Rareities/CloudBridge/releases/latest.</string>
     <string name="abi_not_supported">El teu dispositiu no és compatible amb aquest versió de CloudBridge.</string>
     <string name="trigger">Disparadors</string>
     <string name="title_activity_trigger">Disparadors</string>
