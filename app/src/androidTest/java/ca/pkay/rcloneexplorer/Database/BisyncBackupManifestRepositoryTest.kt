@@ -301,13 +301,35 @@ class BisyncBackupManifestRepositoryTest {
     @Test
     fun runningOwnerCannotCreateBackupManifestAfterNativeWorkMayHaveStarted() {
         val owner = createOwner("running-owner")
+        val repository = BisyncBackupManifestRepository(context)
         val runningRun = owner.run.copy(state = RunState.RUNNING)
 
         assertThrows(BisyncBackupManifestRejectedException::class.java) {
-            BisyncBackupManifestRepository(context).createPending(request(owner, run = runningRun))
+            repository.createPending(request(owner, run = runningRun))
         }
-        assertTrue(BisyncBackupManifestRepository(context)
-            .unresolvedForProfile(owner.profile.profileId).isEmpty())
+        assertTrue(repository.unresolvedForProfile(owner.profile.profileId).isEmpty())
+
+        val handler = DatabaseHandler(context)
+        val db = handler.writableDatabase
+        try {
+            assertEquals(1, db.update(
+                DatabaseInfo.RUN_TABLE_NAME,
+                ContentValues().apply { put(DatabaseInfo.RUN_COLUMN_STATE, RunState.RUNNING.wireValue) },
+                "${DatabaseInfo.RUN_COLUMN_ID} = ?",
+                arrayOf(owner.run.runId)
+            ))
+        } finally {
+            db.close()
+            handler.close()
+        }
+
+        // The request snapshot is still PREFLIGHT; transactional validation must reject the
+        // newer persisted RUNNING state rather than trusting the caller's earlier RunRecord.
+        assertThrows(BisyncBackupManifestRejectedException::class.java) {
+            repository.createPending(request(owner))
+        }
+        assertNull(repository.getForRun(owner.run.runId))
+        assertTrue(repository.unresolvedForProfile(owner.profile.profileId).isEmpty())
     }
 
     @Test
