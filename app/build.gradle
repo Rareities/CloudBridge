@@ -2,29 +2,36 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply plugin: 'kotlinx-serialization'
 
+// Release signing is deliberately fail-closed. A missing production key must never
+// silently produce a debug-signed artifact from a release variant.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { input -> keystoreProperties.load(input) }
+}
+def releaseStorePath = keystoreProperties['storeFile'] ?: System.getenv('CB_STORE_FILE')
+def releaseKeyAlias = keystoreProperties['keyAlias'] ?: System.getenv('CB_KEY_ALIAS')
+def releaseStorePassword = keystoreProperties['storePassword'] ?: System.getenv('CB_STORE_PASSWORD')
+def releaseKeyPassword = keystoreProperties['keyPassword'] ?: System.getenv('CB_KEY_PASSWORD')
+def releaseStoreFile = releaseStorePath ? file(releaseStorePath) : null
+def releaseSigningConfigured = releaseStoreFile != null && releaseStoreFile.isFile() && releaseStoreFile.canRead() &&
+        [releaseKeyAlias, releaseStorePassword, releaseKeyPassword].every {
+            it != null && !it.toString().trim().isEmpty()
+        }
+
 android {
     def configuredRcloneVersion = project.properties['de.schuelken.cloudbridge.rCloneVersion'] ?: 'unknown'
     def configuredRcloneRef = project.properties['de.schuelken.cloudbridge.rCloneRef']?.toString()?.trim()
     if (!(configuredRcloneRef ==~ /(?i)[0-9a-f]{40}/)) {
         throw new GradleException('Rclone must be pinned to a full immutable 40-character commit SHA')
     }
-    // Release signing: credentials come from a git-ignored keystore.properties
-    // (local builds) or CB_* env vars (CI). Falls back to the debug key when
-    // neither is present so fresh checkouts still build an installable APK.
-    def keystoreProperties = new Properties()
-    def keystorePropertiesFile = rootProject.file("keystore.properties")
-    if (keystorePropertiesFile.exists()) {
-        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-    }
-    def releaseStorePath = keystoreProperties['storeFile'] ?: System.getenv('CB_STORE_FILE')
-    def releaseKeyConfigured = releaseStorePath != null && file(releaseStorePath).exists()
     signingConfigs {
         release {
-            if (releaseKeyConfigured) {
-                keyAlias = keystoreProperties['keyAlias'] ?: System.getenv('CB_KEY_ALIAS')
-                storeFile file(releaseStorePath)
-                storePassword = keystoreProperties['storePassword'] ?: System.getenv('CB_STORE_PASSWORD')
-                keyPassword = keystoreProperties['keyPassword'] ?: System.getenv('CB_KEY_PASSWORD')
+            if (releaseSigningConfigured) {
+                keyAlias = releaseKeyAlias
+                storeFile releaseStoreFile
+                storePassword = releaseStorePassword
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -36,7 +43,7 @@ android {
         minSdkVersion 23
         compileSdk 36
         targetSdkVersion 36
-        // CI bumps these per beta via CB_VERSION_CODE / CB_VERSION_NAME env vars.
+        // An explicitly gated release workflow may override these via CB_VERSION_CODE / CB_VERSION_NAME.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
         versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 20
         versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.1'
@@ -80,7 +87,7 @@ android {
                     appIcon: "@mipmap/ic_launcher",
                     appIconRound: "@mipmap/ic_launcher_round"
             ]
-            signingConfig releaseKeyConfigured ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 
@@ -173,6 +180,23 @@ android {
         includeInApk = false
         // Disables dependency metadata when building Android App Bundles.
         includeInBundle = false
+    }
+}
+
+def verifyProductionReleaseSigning = tasks.register("verifyProductionReleaseSigning") {
+    doLast {
+        if (!releaseSigningConfigured) {
+            throw new GradleException(
+                    "Release APK/AAB packaging requires a readable production keystore and non-empty " +
+                            "storeFile, keyAlias, storePassword, and keyPassword values; debug signing is never used for release."
+            )
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name ==~ /(?i)^(package|sign|bundle).*release.*$/) {
+        task.dependsOn(verifyProductionReleaseSigning)
     }
 }
 
