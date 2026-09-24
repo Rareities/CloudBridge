@@ -147,6 +147,10 @@ object LegacyProfileMapper {
     fun stableIdForLegacyTask(taskId: Long): String =
         UUID.nameUUIDFromBytes("cloudbridge.legacy.task.v1:$taskId".toByteArray(StandardCharsets.UTF_8)).toString()
 
+    /** Gives equivalent one-off sync requests the same durable admission identity. */
+    fun stableIdForEphemeralTask(fingerprint: String): String =
+        UUID.nameUUIDFromBytes("cloudbridge.ephemeral.task.v1:$fingerprint".toByteArray(StandardCharsets.UTF_8)).toString()
+
     private fun canonical(vararg values: String): String =
         values.joinToString("|") { value ->
             val bytes = value.toByteArray(StandardCharsets.UTF_8)

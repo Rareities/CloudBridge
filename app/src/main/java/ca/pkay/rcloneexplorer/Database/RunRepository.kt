@@ -36,16 +36,90 @@ class RunRepository(context: Context) {
     private val context = context.applicationContext
     private val engineRef = EngineIdentity.current
 
-    fun queueLegacyTask(taskId: Long, requestedAt: Long = System.currentTimeMillis(), dueAt: Long? = null): RunRecord {
+    fun queueLegacyTask(
+        taskId: Long,
+        requestedAt: Long = System.currentTimeMillis(),
+        dueAt: Long? = null
+    ): RunRecord = queueRun(requestedAt, dueAt) { handler, db ->
+        val task = handler.getTaskInTransaction(db, taskId)
+            ?: throw RunRejectedException("Task no longer exists")
+        ProfileStore.upsertLegacyTask(db, task, engineRef)
+    }
+
+    fun queueEphemeralTask(
+        task: Task,
+        requestedAt: Long = System.currentTimeMillis(),
+        dueAt: Long? = null
+    ): RunRecord = queueRun(requestedAt, dueAt) { _, db ->
+        ProfileStore.upsertEphemeralTask(db, task, engineRef)
+    }
+
+    /** Defers a dispatch failure only while this exact owner is still queued. */
+    fun deferQueuedDispatch(
+        runId: String,
+        ownerToken: String,
+        reason: String,
+        finishedAt: Long = System.currentTimeMillis()
+    ): Boolean = finishQueuedBeforeExecution(
+        runId,
+        ownerToken,
+        RunState.DEFERRED,
+        reason,
+        finishedAt
+    )
+
+    /** Completes only a still-queued owner when its request cannot safely be started. */
+    fun finishQueuedBeforeExecution(
+        runId: String,
+        ownerToken: String,
+        state: RunState,
+        reason: String,
+        finishedAt: Long = System.currentTimeMillis()
+    ): Boolean {
+        require(state == RunState.FAILED || state == RunState.CANCELLED ||
+            state == RunState.DEFERRED || state == RunState.AUTH_REQUIRED ||
+            state == RunState.RATE_LIMITED || state == RunState.BLOCKED) {
+            "A queued run can only stop before execution with a non-success outcome"
+        }
+        require(reason.isNotBlank())
+        require(finishedAt > 0L)
+        val handler = DatabaseHandler(context)
+        val db = handler.writableDatabase
+        db.beginTransaction()
+        return try {
+            val values = ContentValues().apply {
+                put(RUN_COLUMN_STATE, state.wireValue)
+                put(RUN_COLUMN_REASON, reason)
+                put(RUN_COLUMN_FINISHED_AT, finishedAt)
+                put(RUN_COLUMN_UPDATED_AT, finishedAt)
+            }
+            val updated = db.update(
+                RUN_TABLE_NAME,
+                values,
+                "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ?",
+                arrayOf(runId, ownerToken, RunState.QUEUED.wireValue)
+            )
+            db.setTransactionSuccessful()
+            updated == 1
+        } finally {
+            db.endTransaction()
+            db.close()
+            handler.close()
+        }
+    }
+
+    private fun queueRun(
+        requestedAt: Long,
+        dueAt: Long?,
+        resolveProfile: (DatabaseHandler, SQLiteDatabase) -> ProfileRecord
+    ): RunRecord {
         val handler = DatabaseHandler(context)
         val db = handler.writableDatabase
         val runId = UUID.randomUUID().toString()
         val ownerToken = UUID.randomUUID().toString()
         db.beginTransaction()
         try {
-            val task = handler.getTaskInTransaction(db, taskId)
-                ?: throw RunRejectedException("Task no longer exists")
-            val profile = ProfileStore.upsertLegacyTask(db, task, engineRef)
+            val profile = resolveProfile(handler, db)
             validateQueueEligibility(profile)
             if (activeRunExists(db, profile.profileId)) {
                 throw RunRejectedException("A run already owns this profile")

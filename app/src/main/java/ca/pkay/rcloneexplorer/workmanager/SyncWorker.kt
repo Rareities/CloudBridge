@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
 import android.net.wifi.WifiManager
+import android.os.Build
 import androidx.annotation.StringRes
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.preference.PreferenceManager
@@ -41,6 +42,7 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.io.InterruptedIOException
 import java.util.Random
+import java.util.concurrent.TimeUnit
 
 class SyncWorker (private var mContext: Context, workerParams: WorkerParameters): Worker(mContext, workerParams) {
 
@@ -64,7 +66,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
 
     internal enum class FAILURE_REASON {
-        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION
+        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED,
+        CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION, RUN_NOT_ADMITTED, FOREGROUND_UNAVAILABLE
     }
 
     // Objects
@@ -95,6 +98,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private val ongoingNotificationID = Random().nextInt()
     private var durableRunId: String? = null
     private var durableRunOwnerToken: String? = null
+    private var durableRunClaimed = false
     private var durableRunFinished = false
     private var nativeExitCode: Int? = null
     private var nativeCompletionUnconfirmed = false
@@ -109,70 +113,104 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     override fun doWork(): Result {
 
         prepareNotifications()
-        registerBroadcastReceivers()
+        return try {
+            var task: Task? = null
+            durableRunId = inputData.getString(RUN_ID)
+            durableRunOwnerToken = inputData.getString(RUN_OWNER_TOKEN)
 
-        updateForegroundNotification(mNotificationManager.updateSyncNotification(
-            mTitle,
-            mTitle,
-            ArrayList(),
-            0,
-            ongoingNotificationID
-        ))
-
-
-        var ephemeralTask: Task? = null
-
-        if(inputData.keyValueMap.containsKey(TASK_ID)){
-            val id = inputData.getLong(TASK_ID, -1)
-            ephemeralTask = mDatabase.getTask(id)
-            if (ephemeralTask != null) {
-                durableRunId = inputData.getString(RUN_ID)
-                durableRunOwnerToken = inputData.getString(RUN_OWNER_TOKEN)
-                if (durableRunId == null || durableRunOwnerToken == null) {
-                    try {
-                        val compatibilityRun = mRunRepository.queueLegacyTask(id)
-                        durableRunId = compatibilityRun.runId
-                        durableRunOwnerToken = compatibilityRun.ownerToken
-                    } catch (e: RunRejectedException) {
-                        failureReason = FAILURE_REASON.UNSUPPORTED_DIRECTION
+            if (inputData.keyValueMap.containsKey(TASK_ID)) {
+                val id = inputData.getLong(TASK_ID, -1)
+                task = mDatabase.getTask(id)
+                if (task != null) {
+                    if (durableRunId == null || durableRunOwnerToken == null) {
+                        try {
+                            val compatibilityRun = mRunRepository.queueLegacyTask(id)
+                            durableRunId = compatibilityRun.runId
+                            durableRunOwnerToken = compatibilityRun.ownerToken
+                        } catch (e: RunRejectedException) {
+                            failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
+                            log("Legacy task was not admitted: " + e.message)
+                        }
                     }
                 }
             }
-        }
 
-        if(inputData.keyValueMap.containsKey(TASK_EPHEMERAL)){
-            val taskString = inputData.getString(TASK_EPHEMERAL) ?: ""
-            if(taskString.isNotEmpty()) {
-                try {
-                    ephemeralTask = Json.decodeFromString<Task>(taskString)
-                } catch (e: Exception) {
-                    log("Could not deserialize")
+            if (inputData.keyValueMap.containsKey(TASK_EPHEMERAL)) {
+                val taskString = inputData.getString(TASK_EPHEMERAL) ?: ""
+                if (taskString.isNotEmpty()) {
+                    try {
+                        task = Json.decodeFromString<Task>(taskString)
+                    } catch (e: Exception) {
+                        log("Could not deserialize ephemeral sync task")
+                    }
+                }
+                if (task != null) {
+                    if (durableRunId == null || durableRunOwnerToken == null) {
+                        try {
+                            val compatibilityRun = mRunRepository.queueEphemeralTask(task)
+                            durableRunId = compatibilityRun.runId
+                            durableRunOwnerToken = compatibilityRun.ownerToken
+                        } catch (e: RunRejectedException) {
+                            failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
+                            log("Ephemeral sync task was not admitted: " + e.message)
+                        }
+                    }
                 }
             }
-        }
 
-        if (ephemeralTask != null) {
-            mTask = ephemeralTask
-            if (failureReason == FAILURE_REASON.NO_FAILURE && durableRunId != null && durableRunOwnerToken != null) {
-                try {
-                    mRunRepository.claim(durableRunId!!, durableRunOwnerToken!!)
-                } catch (e: RunRejectedException) {
-                    failureReason = FAILURE_REASON.RCLONE_ERROR
-                    log("Durable run claim was rejected")
+            if (task == null) {
+                failureReason = FAILURE_REASON.NO_TASK
+                finishUnstartableQueuedRun("Sync request data was missing or invalid")
+                postSync()
+                return Result.failure()
+            }
+
+            mTask = task
+            if (failureReason == FAILURE_REASON.NO_FAILURE) {
+                if (durableRunId == null || durableRunOwnerToken == null) {
+                    failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
+                    log("Sync request has no durable run owner")
+                } else {
+                    try {
+                        mRunRepository.claim(durableRunId!!, durableRunOwnerToken!!)
+                        durableRunClaimed = true
+                    } catch (e: RunRejectedException) {
+                        failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
+                        log("Durable run claim was rejected")
+                    }
                 }
             }
+
+            if (failureReason == FAILURE_REASON.NO_FAILURE) {
+                registerBroadcastReceivers()
+                val notification = mNotificationManager.updateSyncNotification(
+                    mTitle,
+                    mTitle,
+                    ArrayList(),
+                    0,
+                    ongoingNotificationID
+                )
+                val promotionFailure = if (notification == null) {
+                    IllegalStateException("Sync foreground notification was unavailable")
+                } else {
+                    promoteForeground(notification)
+                }
+                if (promotionFailure != null) {
+                    failureReason = FAILURE_REASON.FOREGROUND_UNAVAILABLE
+                    log("Foreground promotion failed before native sync: " + promotionFailure.message)
+                }
+            }
+
             if (failureReason == FAILURE_REASON.NO_FAILURE) {
                 handleTask()
             }
             postSync()
-        } else {
-            failureReason = FAILURE_REASON.NO_TASK
-            postSync()
-            return Result.failure()
-        }
 
-        // Indicate whether the work finished successfully with the Result
-        return if (failureReason == FAILURE_REASON.NO_FAILURE) Result.success() else Result.failure()
+            // Indicate whether the work finished successfully with the Result.
+            if (failureReason == FAILURE_REASON.NO_FAILURE) Result.success() else Result.failure()
+        } finally {
+            unregisterBroadcastReceiver()
+        }
     }
 
     override fun onStopped() {
@@ -195,12 +233,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         sRcloneProcess?.cancelAndAwait(null, null)?.let {
             if (!it.isConfirmed) nativeCompletionUnconfirmed = true
         }
-        synchronized(receiverLock) {
-            if (receiverRegistered) {
-                mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
-                receiverRegistered = false
-            }
-        }
+        unregisterBroadcastReceiver()
         postSync()
     }
 
@@ -364,7 +397,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             return
         }
         recordDurableRunOutcome()
-        if (durableRunId != null && durableRunOwnerToken != null && !durableRunFinished) {
+        if (durableRunClaimed && durableRunId != null && durableRunOwnerToken != null && !durableRunFinished) {
             failureReason = FAILURE_REASON.RCLONE_ERROR
         }
         if (!::mTask.isInitialized) {
@@ -399,6 +432,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             FAILURE_REASON.NO_UNMETERED -> {
                 content = mContext.getString(R.string.operation_failed_no_unmetered, mTitle)
             }
+            FAILURE_REASON.FOREGROUND_UNAVAILABLE,
+            FAILURE_REASON.RUN_NOT_ADMITTED -> {
+                content = mContext.getString(R.string.operation_failed_unknown, mTitle)
+            }
             FAILURE_REASON.NO_CONNECTION -> {
                 content = mContext.getString(R.string.operation_failed_no_connection, mTitle)
             }
@@ -416,7 +453,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     }
 
     private fun recordDurableRunOutcome() {
-        if (durableRunFinished || durableRunId == null || durableRunOwnerToken == null) {
+        if (!durableRunClaimed || durableRunFinished || durableRunId == null || durableRunOwnerToken == null) {
             return
         }
         val state = if (nativeCompletionUnconfirmed) RunState.RECOVERY_REQUIRED else when (failureReason) {
@@ -427,8 +464,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             FAILURE_REASON.CANCELLED -> RunState.CANCELLED
             FAILURE_REASON.NO_UNMETERED,
             FAILURE_REASON.NO_CONNECTION,
-            FAILURE_REASON.CONNECTIVITY_CHANGED -> RunState.DEFERRED
-            FAILURE_REASON.UNSUPPORTED_DIRECTION -> RunState.BLOCKED
+            FAILURE_REASON.CONNECTIVITY_CHANGED,
+            FAILURE_REASON.FOREGROUND_UNAVAILABLE -> RunState.DEFERRED
+            FAILURE_REASON.UNSUPPORTED_DIRECTION,
+            FAILURE_REASON.RUN_NOT_ADMITTED -> RunState.BLOCKED
             else -> RunState.FAILED
         }
         val reason = if (nativeCompletionUnconfirmed) "Native exit was not confirmed; profile requires recovery" else when (failureReason) {
@@ -437,6 +476,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             FAILURE_REASON.NO_UNMETERED -> "Unmetered network is required"
             FAILURE_REASON.NO_CONNECTION -> "No usable network connection"
             FAILURE_REASON.CONNECTIVITY_CHANGED -> "Connectivity changed during execution"
+            FAILURE_REASON.FOREGROUND_UNAVAILABLE -> "Android did not confirm foreground execution; no native sync was started"
+            FAILURE_REASON.RUN_NOT_ADMITTED -> "The sync request was rejected before native execution"
             FAILURE_REASON.UNSUPPORTED_DIRECTION -> "Legacy direction requires reviewed repair"
             else -> "Native sync failed"
         }
@@ -450,6 +491,24 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             conflictItems = null,
             unknownItems = null
         )
+    }
+
+    private fun finishUnstartableQueuedRun(reason: String) {
+        val runId = durableRunId ?: return
+        val ownerToken = durableRunOwnerToken ?: return
+        try {
+            val finished = mRunRepository.finishQueuedBeforeExecution(
+                runId,
+                ownerToken,
+                RunState.BLOCKED,
+                reason
+            )
+            if (!finished) {
+                log("Unstartable request no longer owns a queued run; leaving its state unchanged")
+            }
+        } catch (failure: Exception) {
+            FLog.e(TAG, "Unable to persist blocked sync request", failure)
+        }
     }
 
     private fun showCancelledNotification(notificationId: Int) {
@@ -591,9 +650,26 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     // ongoing notification.
     private fun updateForegroundNotification(notification: Notification?) {
         notification?.let {
-            setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC))
+            setForegroundAsync(foregroundInfo(it))
         }
     }
+
+    private fun promoteForeground(notification: Notification): Throwable? = try {
+        awaitForegroundPromotion(
+            setForegroundAsync(foregroundInfo(notification)),
+            timeout = 10,
+            unit = TimeUnit.SECONDS
+        )
+    } catch (failure: Exception) {
+        failure
+    }
+
+    private fun foregroundInfo(notification: Notification): ForegroundInfo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(ongoingNotificationID, notification, FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(ongoingNotificationID, notification)
+        }
 
 
     private fun log(message: String) {
@@ -611,6 +687,15 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             if (!stopRequested && !isStopped && !receiverRegistered) {
                 mContext.registerReceiver(connectivityChangeBroadcastReceiver, intentFilter)
                 receiverRegistered = true
+            }
+        }
+    }
+
+    private fun unregisterBroadcastReceiver() {
+        synchronized(receiverLock) {
+            if (receiverRegistered) {
+                mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
+                receiverRegistered = false
             }
         }
     }

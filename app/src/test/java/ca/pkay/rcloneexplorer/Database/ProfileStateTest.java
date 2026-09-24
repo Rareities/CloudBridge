@@ -101,4 +101,28 @@ public class ProfileStateTest {
                 LegacyProfileMapper.INSTANCE.stableIdForLegacyTask(42L)
         );
     }
+
+    @Test
+    public void ephemeralProfileIdentityIsStableForEquivalentSnapshots() {
+        Task firstTask = new Task(-1L);
+        firstTask.setRemoteId("account");
+        firstTask.setRemotePath("notes");
+        ProfileSpec first = LegacyProfileMapper.INSTANCE.fromTask(firstTask, "rclone:test");
+
+        Task equivalentTask = new Task(-2L);
+        equivalentTask.setRemoteId("account");
+        equivalentTask.setRemotePath("notes");
+        ProfileSpec equivalent = LegacyProfileMapper.INSTANCE.fromTask(equivalentTask, "rclone:test");
+
+        assertEquals(
+                LegacyProfileMapper.INSTANCE.stableIdForEphemeralTask(first.getFingerprint()),
+                LegacyProfileMapper.INSTANCE.stableIdForEphemeralTask(equivalent.getFingerprint())
+        );
+        assertNotEquals(
+                LegacyProfileMapper.INSTANCE.stableIdForEphemeralTask(first.getFingerprint()),
+                LegacyProfileMapper.INSTANCE.stableIdForEphemeralTask(
+                        LegacyProfileMapper.INSTANCE.fromTask(firstTask, "rclone:other").getFingerprint()
+                )
+        );
+    }
 }

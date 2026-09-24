@@ -112,6 +112,37 @@ internal object ProfileStore {
         return requireNotNull(getByLegacyTaskId(db, task.id))
     }
 
+    fun upsertEphemeralTask(db: SQLiteDatabase, task: Task, engineRef: String): ProfileRecord {
+        val spec = profileSpec(db, task, engineRef)
+        val profileId = LegacyProfileMapper.stableIdForEphemeralTask(spec.fingerprint)
+        val existing = getById(db, profileId)
+        if (existing == null) {
+            val now = System.currentTimeMillis()
+            db.insertOrThrow(
+                PROFILE_TABLE_NAME,
+                null,
+                valuesFor(profileId, null, 1L, spec, now, now)
+            )
+        } else {
+            if (existing.fingerprint != spec.fingerprint) {
+                throw IllegalStateException("Ephemeral profile identity collision")
+            }
+            if (existing.title != spec.title) {
+                val values = ContentValues().apply {
+                    put(PROFILE_COLUMN_TITLE, spec.title)
+                    put(PROFILE_COLUMN_UPDATED_AT, System.currentTimeMillis())
+                }
+                db.update(
+                    PROFILE_TABLE_NAME,
+                    values,
+                    "$PROFILE_COLUMN_ID = ?",
+                    arrayOf(profileId)
+                )
+            }
+        }
+        return requireNotNull(getById(db, profileId))
+    }
+
     private fun profileSpec(db: SQLiteDatabase, task: Task, engineRef: String): ProfileSpec {
         val filterId = task.filterId ?: return LegacyProfileMapper.fromTask(task, engineRef)
         val cursor = db.query(
