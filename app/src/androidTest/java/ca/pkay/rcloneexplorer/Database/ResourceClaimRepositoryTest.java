@@ -201,6 +201,58 @@ public class ResourceClaimRepositoryTest {
     }
 
     @Test
+    public void bisyncCoordinatorReservesBothExplicitBackupRoots() throws Exception {
+        EndpointConflictCoordinator coordinator = new EndpointConflictCoordinator(testContext);
+        JSONObject remotes = new JSONObject().put("drive", new JSONObject().put("type", "drive"));
+        String localBackup = new java.io.File(testContext.getFilesDir(), "history/run-1").getAbsolutePath();
+        ResourceClaimLease bisync = coordinator.acquireForCommand(
+                new String[]{"/rclone", "bisync", "--filter-from", "/data/local/tmp/filters.txt",
+                        new java.io.File(testContext.getFilesDir(), "sync").getAbsolutePath(), "drive:sync",
+                        "--backup-dir1", localBackup, "--backup-dir2=drive:history/run-1"},
+                remotes, "native-bisync");
+        try {
+            try {
+                coordinator.acquireForCommand(new String[]{"/rclone", "delete", localBackup + "/child"},
+                        remotes, "native-delete-local-backup");
+                fail("a local backup root must remain claimed for the Bisync process lifetime");
+            } catch (java.io.IOException expected) {
+                // The run's durable claim covers its local backup root.
+            }
+            try {
+                coordinator.acquireForCommand(new String[]{"/rclone", "delete", "drive:history/run-1/child"},
+                        remotes, "native-delete-remote-backup");
+                fail("a remote backup root must remain claimed for the Bisync process lifetime");
+            } catch (java.io.IOException expected) {
+                // The run's durable claim covers its remote backup root.
+            }
+        } finally {
+            bisync.close();
+        }
+        assertEquals(0, repository.activeCount());
+    }
+
+    @Test
+    public void unknownValueOptionBeforeBisyncEndpointsFallsBackToGlobalClaim() throws Exception {
+        EndpointConflictCoordinator coordinator = new EndpointConflictCoordinator(testContext);
+        JSONObject remotes = new JSONObject().put("drive", new JSONObject().put("type", "drive"));
+        ResourceClaimLease bisync = coordinator.acquireForCommand(
+                new String[]{"/rclone", "bisync", "--future-option", "/data/local/tmp/filters.txt",
+                        "/data/local/tmp/sync", "drive:sync", "--backup-dir1", "/data/local/tmp/history/run-2"},
+                remotes, "ambiguous-bisync");
+        try {
+            try {
+                coordinator.acquireForCommand(new String[]{"/rclone", "delete", "drive:unrelated"},
+                        remotes, "native-delete-unrelated");
+                fail("ambiguous endpoint parsing must serialize globally");
+            } catch (java.io.IOException expected) {
+                // Unknown option arity is not guessed; fail closed to a global claim.
+            }
+        } finally {
+            bisync.close();
+        }
+    }
+
+    @Test
     public void versionTenDatabaseUpgradesWithoutDroppingExistingRows() {
         SQLiteDatabase versionTen = SQLiteDatabase.openOrCreateDatabase(
                 testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);

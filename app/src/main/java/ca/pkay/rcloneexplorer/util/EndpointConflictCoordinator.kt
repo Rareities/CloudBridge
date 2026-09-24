@@ -59,8 +59,11 @@ class EndpointConflictCoordinator(context: Context) {
         private val VALUE_OPTIONS = setOf(
             "--max-depth", "--transfers", "--checkers", "--stats", "--stats-log-level",
             "--buffer-size", "--timeout", "--contimeout", "--retries", "--low-level-retries",
-            "--user-agent", "--header", "--exclude", "--include", "--filter", "--config",
-            "--cache-chunk-path", "--cache-db-path", "--log-file", "--log-level"
+            "--user-agent", "--header", "--exclude", "--include", "--filter", "--filter-from",
+            "--include-from", "--exclude-from", "--files-from", "--files-from-raw", "--config",
+            "--cache-chunk-path", "--cache-db-path", "--log-file", "--log-level",
+            "--backup-dir1", "--backup-dir2", "--workdir", "--compare", "--max-delete",
+            "--max-delete-count", "--resync-mode", "--preview-state-from"
         )
 
         /** Content identity for config-cache validation; oversized/unreadable files fail closed. */
@@ -84,6 +87,78 @@ class EndpointConflictCoordinator(context: Context) {
             } catch (_: Exception) {
                 null
             }
+        }
+
+        /**
+         * Returns every explicit Bisync backup root, or null when the argv is ambiguous or
+         * malformed. Known option values are skipped so filter text cannot impersonate a flag.
+         */
+        internal fun parseBisyncBackupDirTargets(command: Array<String>, commandIndex: Int): List<String>? {
+            if (commandIndex !in command.indices || command[commandIndex] != "bisync") return null
+            val result = ArrayList<String>(2)
+            val seen = HashSet<String>(2)
+            var index = commandIndex + 1
+            while (index < command.size) {
+                val token = command[index]
+                if (token == "--") break
+
+                val option = when {
+                    token == "--backup-dir1" || token.startsWith("--backup-dir1=") -> "--backup-dir1"
+                    token == "--backup-dir2" || token.startsWith("--backup-dir2=") -> "--backup-dir2"
+                    else -> null
+                }
+                if (option != null) {
+                    if (!seen.add(option)) return null
+                    val value = if (token == option) {
+                        command.getOrNull(index + 1).also { index++ }
+                    } else {
+                        token.substringAfter('=')
+                    }
+                    if (value.isNullOrBlank() || value.startsWith("-") || value.contains('\u0000')) return null
+                    result += value
+                } else if (token in VALUE_OPTIONS) {
+                    if (command.getOrNull(index + 1) == null) return null
+                    index++
+                } else if (token.startsWith("-")) {
+                    // An unknown option could consume the next token, including a backup flag.
+                    return null
+                }
+                index++
+            }
+            return result
+        }
+
+        /** Extracts positional endpoints; unknown flags before them make classification global. */
+        internal fun parsePositionalTargets(command: Array<String>, start: Int, count: Int): List<String>? {
+            if (start !in 0..command.size || count < 0) return null
+            val result = ArrayList<String>(count)
+            var index = start
+            while (index < command.size && result.size < count) {
+                val value = command[index]
+                if (value == "--") {
+                    index++
+                    while (index < command.size && result.size < count) {
+                        result.add(command[index++])
+                    }
+                    break
+                }
+                if (value.startsWith("-")) {
+                    val option = value.substringBefore('=')
+                    if (value.contains('=')) {
+                        index++
+                    } else if (option in VALUE_OPTIONS) {
+                        if (command.getOrNull(index + 1) == null) return null
+                        index += 2
+                    } else {
+                        // Guessing an unknown option's arity can mistake its value for an endpoint.
+                        return null
+                    }
+                    continue
+                }
+                result.add(value)
+                index++
+            }
+            return if (result.size == count) result else null
         }
     }
 
@@ -135,30 +210,17 @@ class EndpointConflictCoordinator(context: Context) {
         }
         val targets = positionalTargets(command, commandIndex + 1, arity) ?: return global()
         val resources = targets.map { endpoint(it, remotes) }
-        return if (resources.any { it.isGlobal }) global() else resources
+        if (resources.any { it.isGlobal }) return global()
+        if (verb != "bisync") return resources
+
+        // Backup roots are independently mutable endpoints and must stay claimed with both roots.
+        val backupTargets = parseBisyncBackupDirTargets(command, commandIndex) ?: return global()
+        val backupResources = backupTargets.map { endpoint(it, remotes) }
+        return if (backupResources.any { it.isGlobal }) global() else resources + backupResources
     }
 
     private fun positionalTargets(command: Array<String>, start: Int, count: Int): List<String>? {
-        val result = ArrayList<String>(count)
-        var index = start
-        while (index < command.size && result.size < count) {
-            val value = command[index]
-            if (value == "--") {
-                index++
-                if (index < command.size) result.add(command[index])
-                index++
-                continue
-            }
-            if (value.startsWith("-")) {
-                val option = value.substringBefore('=')
-                if (!value.contains('=') && option in VALUE_OPTIONS) index++
-                index++
-                continue
-            }
-            result.add(value)
-            index++
-        }
-        return if (result.size == count) result else null
+        return parsePositionalTargets(command, start, count)
     }
 
     private fun endpoint(argument: String, remotes: JSONObject?): EndpointResource {
