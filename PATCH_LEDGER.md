@@ -10,6 +10,7 @@
 | `755454e35838384e1b161053cc4fa7b15469ad1e` | WP08 | Bounded foreground-future cancellation/timeout behavior | Kotlin compilation passed in prior ledger evidence; full WP08 backup/restore/mutation boundary remains incomplete. |
 | `115cd94b2dec78841c85f211a721f0e581799b5c` | WP10 | Partial one-off WorkManager dispatch/scheduling | Ledger records the bounded slice; persisted dispatcher/coalescing/missed-run/device behavior remain open. |
 | `70b2375f6d8cce4d65433b9658f7e0a6dcbf1809` | WP08/WP10 | Missing Java import for schedule calculator; corrected canonical future-schema test mutation | Full offline OSS debug JVM suite: 24 suites, 130 tests, 1 platform-capability skip, 0 failures; native Gradle tasks excluded. |
+| `a35e0b323626a3e544986619acd010c3fa079369` | WP13 documentation slice | Fork-specific user/build/security/test/release docs, accurate subprocess architecture, qualified ABI/API statements, portability/status corrections, and updater comment interval | `git diff --cached --check` passed; local Markdown/HTML target and stale-claim searches passed. Runtime behavior unchanged; updater URLs still target upstream pending tested WP13 implementation. No APK/release. |
 
 ## Promotion boundaries
 
