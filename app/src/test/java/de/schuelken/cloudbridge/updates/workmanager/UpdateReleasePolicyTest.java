@@ -31,6 +31,18 @@ public class UpdateReleasePolicyTest {
     }
 
     @Test
+    public void releaseNotificationTargetsTheSelectedTagAndRejectsUnsafeStoredValues() {
+        assertEquals("https://github.com/Rareities/CloudBridge/releases/tag/v1.2.3",
+                UpdateReleasePolicy.releasePageUrl("v1.2.3"));
+        assertEquals("https://github.com/Rareities/CloudBridge/releases/tag/v1.2.3-beta.4+build.7",
+                UpdateReleasePolicy.releasePageUrl("v1.2.3-beta.4+build.7"));
+        assertEquals(UpdateReleasePolicy.RELEASES_INDEX_URL,
+                UpdateReleasePolicy.releasePageUrl("../../attacker.example"));
+        assertEquals(UpdateReleasePolicy.RELEASES_INDEX_URL,
+                UpdateReleasePolicy.releasePageUrl(""));
+    }
+
+    @Test
     public void stableInstallSelectsHighestStableVersionRegardlessOfApiOrder() {
         UpdateReleasePolicy.ReleaseCandidate lower = release("v2.0.0", false, false);
         UpdateReleasePolicy.ReleaseCandidate higher = release("v10.0.0", false, false);

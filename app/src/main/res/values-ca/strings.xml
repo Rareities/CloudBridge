@@ -175,9 +175,9 @@
     <string name="title_activity_remote_config">Selecciona el tipus</string>
     <string name="error_exporting_config_file">Error en exportar el fitxer de configuració</string>
     <string name="app_update_notification_title">Hi ha una actualització de l\'aplicació!</string>
-    <string name="app_update_notification_description">S\'ha trobat la versió %1$s! La vols actualitzar?</string>
+    <string name="app_update_notification_description">La nova versió (%1$s) està disponible. Toca per obrir-ne la pàgina.</string>
     <string name="app_updates_notification_action_ignore">Ignora l\'actualització</string>
-    <string name="app_updates_notification_action_apply">Actualitza</string>
+    <string name="app_updates_notification_action_apply">Mostra la versió</string>
     <string name="app_updates_notifications">Notifica\'m les actualitzacions</string>
     <string name="app_update_notification_channel_name">Notificació de les actualitzacions</string>
     <string name="app_update_notification_channel_description">Mostra les notificacions referides a les actualitzacions de l\'aplicació</string>

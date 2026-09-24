@@ -170,8 +170,13 @@
     <string name="next">下一步</string>
     <string name="title_activity_remote_config">选择类型</string>
     <string name="error_exporting_config_file">导出配置文件时出错</string>
-    <string name="app_update_notification_title">应用更新现已发布在 Github 上</string>
-    <string name="app_updates_notifications">获得有关应用更新的通知</string>
+    <string name="app_update_notification_title">有可用的应用更新</string>
+    <string name="app_update_notification_description">新版本（%1$s）可用。点击查看对应的发布版本。</string>
+    <string name="app_updates_notification_action_ignore">忽略更新</string>
+    <string name="app_updates_notification_action_apply">查看发布版本</string>
+    <string name="app_update_notification_channel_name">应用更新通知</string>
+    <string name="app_update_notification_channel_description">显示应用更新相关通知</string>
+    <string name="app_updates_notifications">接收应用更新通知</string>
     <string name="delete_remote_title">是否删除远端？</string>
     <string name="rename_remote">重命名远端</string>
     <string name="empty_trash">清空回收站</string>

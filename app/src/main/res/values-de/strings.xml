@@ -156,8 +156,13 @@
     <string name="next">Weiter</string>
     <string name="title_activity_remote_config">Neuer Speicherort</string>
     <string name="error_exporting_config_file">Fehler beim Exportieren der Konfigurationsdatei</string>
-    <string name="app_update_notification_title">App-Update auf GitHub verfügbar</string>
-    <string name="app_updates_notifications">Über App-Aktualisierungen benachrichtigen</string>
+    <string name="app_update_notification_title">App-Update verfügbar</string>
+    <string name="app_update_notification_description">Version %1$s ist verfügbar. Tippe, um die passende Release-Seite zu öffnen.</string>
+    <string name="app_updates_notification_action_ignore">Update ignorieren</string>
+    <string name="app_updates_notification_action_apply">Release ansehen</string>
+    <string name="app_update_notification_channel_name">App-Update-Benachrichtigungen</string>
+    <string name="app_update_notification_channel_description">Zeigt Benachrichtigungen zu App-Updates an</string>
+    <string name="app_updates_notifications">Benachrichtigungen zu App-Updates erhalten</string>
     <string name="delete_remote_title">Remote löschen?</string>
     <string name="rename_remote">Remote umbenennen</string>
     <string name="empty_trash">Papierkorb leeren</string>

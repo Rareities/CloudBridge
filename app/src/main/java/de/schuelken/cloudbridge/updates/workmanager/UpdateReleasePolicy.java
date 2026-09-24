@@ -11,12 +11,15 @@ public final class UpdateReleasePolicy {
     public static final String REPOSITORY_OWNER = "Rareities";
     public static final String REPOSITORY_NAME = "CloudBridge";
     public static final String REPOSITORY_URL = "https://github.com/Rareities/CloudBridge";
+    public static final String RELEASES_INDEX_URL = REPOSITORY_URL + "/releases";
     public static final int RELEASES_PER_PAGE = 100;
     public static final int MAX_RELEASE_PAGES = 5;
+    private static final String RELEASES_API_BASE_URL =
+            "https://api.github.com/repos/" + REPOSITORY_OWNER + "/" + REPOSITORY_NAME + "/releases";
     public static final String RELEASES_API_URL =
-            "https://api.github.com/repos/Rareities/CloudBridge/releases?per_page=100&page=1";
-    public static final String LATEST_RELEASE_URL =
-            "https://github.com/Rareities/CloudBridge/releases/latest";
+            RELEASES_API_BASE_URL + "?per_page=" + RELEASES_PER_PAGE + "&page=1";
+    public static final String LATEST_RELEASE_URL = RELEASES_INDEX_URL + "/latest";
+    private static final String RELEASE_TAG_URL_PREFIX = RELEASES_INDEX_URL + "/tag/";
     private static final Pattern VERSION_PATTERN = Pattern.compile(
             "^[vV]?((?:0|[1-9][0-9]*))\\.((?:0|[1-9][0-9]*))\\.((?:0|[1-9][0-9]*))"
                     + "(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?"
@@ -28,8 +31,14 @@ public final class UpdateReleasePolicy {
         if (page < 1 || page > MAX_RELEASE_PAGES) {
             throw new IllegalArgumentException("Release page is outside the bounded scan");
         }
-        return "https://api.github.com/repos/Rareities/CloudBridge/releases?per_page="
-                + RELEASES_PER_PAGE + "&page=" + page;
+        return RELEASES_API_BASE_URL + "?per_page=" + RELEASES_PER_PAGE + "&page=" + page;
+    }
+
+    /** Returns the exact validated release page, or the safe release index for invalid stored data. */
+    public static String releasePageUrl(String tagName) {
+        return SemanticVersion.parse(tagName) == null
+                ? RELEASES_INDEX_URL
+                : RELEASE_TAG_URL_PREFIX + tagName;
     }
 
     /** Chooses the highest valid release newer than the installed version. */
