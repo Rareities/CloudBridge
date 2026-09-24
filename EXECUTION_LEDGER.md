@@ -1456,6 +1456,22 @@ until the compatible-state native feature has an independently reviewed/publicat
     package from the global ledger; continue the remaining WP08 state-preservation/mutation-boundary
     work and WP09 dependency decision before treating WP10 as accepted. Keep release gates closed.
 
+## 2026-09-24 - WP08 preview foreground-promotion cancellation (PARTIAL)
+
+1. **Objective:** ensure a Bisync preview or preview-admission worker cannot leave an unconfirmed foreground-promotion request running after timeout or interruption.
+2. **Scope:** source commit `755454e35838384e1b161053cc4fa7b15469ad1e` on `codex/luna-implementation`; shared promotion helper, preview/admission workers, and focused helper regression source. No data or engine pin changed.
+3. **Out of scope:** initialization/apply authorization, native backup/restore lifecycle, Proton/device acceptance, PR, APK, signing or release.
+4. **Preconditions:** both workers already awaited `setForegroundAsync` before preflight/native execution; the shared helper already canceled on timeout/interruption for ordinary sync.
+5. **Design:** use the bounded shared helper that cancels on timeout/interruption, restores interrupt status, and raises failure into the workers' existing conservative failure paths.
+6. **Safety invariants:** no preview/native work proceeds unless promotion is confirmed; admission failure remains sanitized; preview failure remains unavailable/interrupted conservatively; no listing mutation is authorized.
+7. **Implementation:** added `requireForegroundPromotion`, replaced raw timed `.get()` calls in both preview workers, and added regression source for timeout cancellation and platform-cause preservation.
+8. **Reuse:** existing `awaitForegroundPromotion`, worker failure handling, and durable preview repository.
+9. **Retired/decision:** raw waits did not cancel their futures after timeout/interruption; timeout duration and foreground-service policy are unchanged.
+10. **Failure behavior:** timeout/platform failure enters the existing catch path; timeout/interruption cancels the future; interrupt status is restored; preview does not authorize mutation.
+11. **Tests:** forced offline `:app:compileOssDebugKotlin` passed on JDK 21.0.8 / Gradle 8.13 / SDK 36 with in-process Kotlin and rclone/SAF Java compilation exclusions. `git diff --check` passed before commit. Focused unit-test execution is **BLOCKED/NOT PASSED**: the initial attempt could not start Go for `:rclone:checkoutRclone`; excluding native checkout/build reached Java compilation, which failed on `AccessDeniedException` for cached `androidx.arch.core:core-common:2.2.0` and subsequent missing Java symbols. No focused/full unit tests ran. Instrumentation, actual Galaxy S26 API/firmware, and live Proton are **NOT RUN**.
+12. **Acceptance:** Kotlin source compiles, but the new JVM regressions have not executed and Java/test compilation remains blocked. WP08 stays **PARTIAL**; no restore, mutation, provider, or device acceptance is claimed. WP09/WP10 and release gates remain open.
+13. **Rollback/next:** revert only source commit `755454e35838384e1b161053cc4fa7b15469ad1e` if review identifies an unsafe worker transition. `.android/` remains untouched. Continue WP08 run-scoped preservation/explicit restore and remaining native failure boundaries; keep initialization/apply and release closed. Samsung actual API/firmware and Proton remain **NOT RUN**.
+
 ## 2026-09-24 - CloudBridge WP10 durable one-off dispatch and foreground gate (PARTIAL)
 
 1. **Objective:** bring File Explorer's one-off "sync this folder" path under durable run ownership and require confirmed Android foreground promotion before native execution.
