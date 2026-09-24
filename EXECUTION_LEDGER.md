@@ -1375,7 +1375,7 @@ until the compatible-state native feature has an independently reviewed/publicat
 7. **Implementation:** three app files changed: add
    `SyncDirectionObject.isRegularSyncWorkerDirectionSupported`, call it before `SyncWorker` starts,
    and test that every spinner-supported direction is accepted while both Bisync values and 0, -1,
-   and 99 are rejected. Source commit hash will be recorded in the documentation follow-up.
+   and 99 are rejected. Source implementation is commit `25f2199`; this entry is its documentation follow-up.
 8. **Reuse:** `SPINNER_TO_DIRECTION`/`spinnerPositionForDirection` remain the single source for
    supported task modes; `SyncWorker` still emits its existing unsupported-direction failure.
 9. **Retired:** removed the worker's duplicated six-value guard; no task formats, worker behavior for
