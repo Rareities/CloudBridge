@@ -1327,7 +1327,8 @@ until the compatible-state native feature has an independently reviewed/publicat
    and no accepted baseline. Missing evidence has its own non-fresh label.
 6. **Safety invariants:** never interpret freshness as permission to mutate; never treat missing or
    unknown state as fresh; do not persist paths or endpoint data.
-7. **Implementation:** five app files changed: `BisyncPreviewOperation.kt`,
+7. **Implementation:** CloudBridge commit `eb7c449a7089f2cf1cdcccb0779fef2499aafff7` changes
+   five app files: `BisyncPreviewOperation.kt`,
    `BisyncPreviewActivity.kt`, default-English `strings.xml`, JVM freshness regressions, and the
    repository instrumentation test expectation. No schema or rclone pin change. The native build
    used the pre-existing app cache after verifying it resolved exactly to the pinned Rareities
