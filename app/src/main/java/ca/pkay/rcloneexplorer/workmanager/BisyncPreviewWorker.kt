@@ -260,7 +260,7 @@ class BisyncPreviewWorker(context: Context, parameters: WorkerParameters) : Work
         } else {
             ForegroundInfo(id, notification)
         }
-        setForegroundAsync(info).get(10, TimeUnit.SECONDS)
+        requireForegroundPromotion(setForegroundAsync(info), 10, TimeUnit.SECONDS)
     }
 
     private fun unavailable(reason: BisyncPreviewUnavailableReason) =

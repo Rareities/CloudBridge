@@ -160,6 +160,6 @@ class BisyncPreviewAdmissionWorker(context: Context, parameters: WorkerParameter
         } else {
             ForegroundInfo(notificationId, notification)
         }
-        setForegroundAsync(foreground).get(10, TimeUnit.SECONDS)
+        requireForegroundPromotion(setForegroundAsync(foreground), 10, TimeUnit.SECONDS)
     }
 }

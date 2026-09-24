@@ -6,6 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 
 class ForegroundPromotionTest {
     @Test
@@ -44,6 +45,34 @@ class ForegroundPromotionTest {
             assertTrue(Thread.currentThread().isInterrupted)
         } finally {
             Thread.interrupted()
+        }
+    }
+
+    @Test
+    fun requiredPromotionFailsClosedAndCancelsTimedOutFuture() {
+        val promotion = CompletableFuture<Unit>()
+
+        try {
+            requireForegroundPromotion(promotion, timeout = 1, unit = TimeUnit.MILLISECONDS)
+            throw AssertionError("An unconfirmed promotion must fail")
+        } catch (failure: IllegalStateException) {
+            assertTrue(failure.cause is TimeoutException)
+            assertTrue(promotion.isCancelled)
+        }
+    }
+
+    @Test
+    fun requiredPromotionPreservesPlatformFailure() {
+        val platformFailure = IllegalArgumentException("foreground start denied")
+        val promotion = CompletableFuture<Unit>().apply {
+            completeExceptionally(platformFailure)
+        }
+
+        try {
+            requireForegroundPromotion(promotion)
+            throw AssertionError("A failed promotion must fail")
+        } catch (failure: IllegalStateException) {
+            assertSame(platformFailure, failure.cause)
         }
     }
 }

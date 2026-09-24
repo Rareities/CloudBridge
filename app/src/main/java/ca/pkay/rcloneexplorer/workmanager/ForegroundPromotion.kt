@@ -24,3 +24,12 @@ internal fun awaitForegroundPromotion(
 } catch (failure: Exception) {
     failure
 }
+
+internal fun requireForegroundPromotion(
+    promotion: Future<*>,
+    timeout: Long = 10,
+    unit: TimeUnit = TimeUnit.SECONDS
+) {
+    val failure = awaitForegroundPromotion(promotion, timeout, unit) ?: return
+    throw IllegalStateException("Foreground promotion was not confirmed", failure)
+}
