@@ -143,15 +143,20 @@ class BisyncPreviewFreshnessTest {
         val completedAt = 1_800_000_000_000L
         val operation = operation(id, BisyncPreviewOperationState.COMPLETE, completedAt,
             BisyncPreviewSummary(BisyncPreviewStatus.COMPLETE, 0, 0, 0, 0, 0))
+        val currentPreflight = preflight(id)
 
         assertEquals(BisyncPreviewFreshness.NATIVE_STATE_CHANGED,
             BisyncPreviewFreshnessPolicy.evaluate(operation, id,
-                preflight(id).copy(nativeState = BisyncNativeState.INCOMPATIBLE,
+                currentPreflight.copy(nativeState = BisyncNativeState.INCOMPATIBLE,
                     readiness = ProfileReadiness.BLOCKED), completedAt + 1))
         assertEquals(BisyncPreviewFreshness.NATIVE_STATE_CHANGED,
             BisyncPreviewFreshnessPolicy.evaluate(operation, id,
-                preflight(id).copy(acceptedBaseline = preflight(id).acceptedBaseline!!.copy(
+                currentPreflight.copy(acceptedBaseline = currentPreflight.acceptedBaseline!!.copy(
                     preflightFingerprint = digest('e'))), completedAt + 1))
+        assertEquals(BisyncPreviewFreshness.NATIVE_STATE_CHANGED,
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id,
+                currentPreflight.copy(acceptedBaseline = currentPreflight.acceptedBaseline!!.copy(
+                    leftScopeFingerprint = digest('f'))), completedAt + 1))
         assertEquals(BisyncPreviewFreshness.NATIVE_STATE_UNVERIFIED,
             BisyncPreviewFreshnessPolicy.evaluate(operation, id, null, completedAt + 1))
     }
@@ -169,6 +174,9 @@ class BisyncPreviewFreshnessTest {
             BisyncPreviewFreshnessPolicy.evaluate(operation, id,
                 preflight(id).copy(nativeState = BisyncNativeState.COMPATIBLE,
                     readiness = ProfileReadiness.READY), completedAt + 1))
+        assertEquals(BisyncPreviewFreshness.NATIVE_STATE_CHANGED,
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id,
+                preflight(id).copy(acceptedBaseline = preflight(identity()).acceptedBaseline), completedAt + 1))
     }
 
     @Test
