@@ -48,10 +48,9 @@ class EndpointSnapshotCodecTest {
         assertNull(truncated.snapshot)
         assertEquals(EndpointSnapshotDecodeFailure.MALFORMED_ENDPOINT_SNAPSHOT, truncated.failure)
 
-        val futureSchema = EndpointSnapshotCodec.decode(
-            spec.endpointIdentity,
-            spec.settings.replaceFirst("6:schema1:1", "6:schema1:9")
-        )
+        val futureSchemaSettings = spec.settings.replaceFirst("6:schema|1:1", "6:schema|1:9")
+        assertFalse(futureSchemaSettings == spec.settings)
+        val futureSchema = EndpointSnapshotCodec.decode(spec.endpointIdentity, futureSchemaSettings)
         assertNull(futureSchema.snapshot)
         assertEquals(EndpointSnapshotDecodeFailure.UNKNOWN_SCHEMA_VERSION, futureSchema.failure)
     }

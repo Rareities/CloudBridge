@@ -26,6 +26,7 @@ import ca.pkay.rcloneexplorer.Items.Trigger;
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.notifications.AppErrorNotificationManager;
 import ca.pkay.rcloneexplorer.util.PermissionManager;
+import ca.pkay.rcloneexplorer.workmanager.ScheduleTimeCalculator;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
 
 public class TriggerService extends Service {
