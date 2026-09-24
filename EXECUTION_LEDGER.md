@@ -1503,3 +1503,19 @@ until the compatible-state native feature has an independently reviewed/publicat
 11. **Tests:** rclone focused regression plus full Bisync/ProtonDrive tests, vet, all-package build, gofmt and diff check **PASS** on Go 1.26.8 Windows/amd64. CloudBridge full app JVM tests remain **BLOCKED/NOT PASSED** at JDK ZipFS `AccessDeniedException`; emulator/instrumentation has no connected device. Samsung actual API/firmware and live Proton remain **NOT RUN**.
 12. **Acceptance:** the collision/reuse hazard is now established for local native storage, but the app contract and executable feature are not implemented. WP08 remains **PARTIAL** and initialization/apply/recovery remain disabled; WP09 and release gates remain open.
 13. **Rollback/next:** no source rollback is needed. Implement the fail-closed endpoint-specific planner/reservation and durable run-owned manifest with testable restart/restore transitions; first prove local sibling and supported remote sibling semantics independently, then wire native mutation only after tests and app compilation can execute. Preserve `.android/`; do not push, open a PR, build a release APK, sign, or publish from this partial evidence.
+
+## 2026-09-24 - CloudBridge Java compile retry under Android Studio JBR 25 (NOT PASSED)
+
+1. **Objective:** retry the blocked Android Java/test compilation under a distinct installed JVM after JDK 21 ZipFS failures.
+2. **Scope:** build-environment validation only; no CloudBridge source, dependency, version pin, SDK installation, or provider data changed.
+3. **Out of scope:** APK packaging, unit/instrumentation execution, emulator/device acceptance, Galaxy S26, Proton, PR, signing, or release.
+4. **Preconditions:** CloudBridge branch `codex/luna-implementation` at `1edf355c9b80876daef424c6feff260a24022785`; Gradle 8.13 and SDK paths already configured; task-local Android user home; offline dependencies.
+5. **Design:** confirm Gradle launcher compatibility with the bundled Android Studio JBR, then run only `:safdav:compileDebugJavaWithJavac`.
+6. **Safety invariants:** keep all source unchanged, do not clear/replace caches, do not change SDK permissions/settings, and leave user-owned `.android/` untouched.
+7. **Implementation:** none. JBR 25.0.3 launched Gradle successfully; Java compilation emitted an internal javac diagnostic and failed while ZipFS closed Android SDK `core-for-system-modules.jar` / `core-lambda-stubs.jar`, reporting `AccessDeniedException`.
+8. **Reuse:** installed Android Studio JBR, Gradle 8.13, SDK 36, existing task-local Android user-home path.
+9. **Retired/decision:** a different JVM did not clear the access boundary; do not keep cycling JDKs or widen permissions without a specific writable-mirror/CI plan.
+10. **Failure behavior:** Gradle treats the Java compile task as failed despite source diagnostics; no downstream unit-test task is considered executed or passed.
+11. **Tests:** `gradlew --offline --no-daemon --version` under JBR25 **PASS**; `:safdav:compileDebugJavaWithJavac` **FAIL/NOT PASSED** on ZipFS `AccessDeniedException`; full app unit tests **NOT RUN**. No connected Android device is available; Samsung actual API/firmware and live Proton are **NOT RUN**.
+12. **Acceptance:** app Java/test compilation remains blocked, so WP08/WP09/WP10 and release acceptance remain partial; no APK or release artifact was produced.
+13. **Rollback/next:** no rollback needed. Continue native/backend and pure app work; revisit Java tests in controlled CI or after establishing an explicitly scoped writable SDK/dependency mirror. No PR, signing, release, or pin change; `.android/` remains untouched.
