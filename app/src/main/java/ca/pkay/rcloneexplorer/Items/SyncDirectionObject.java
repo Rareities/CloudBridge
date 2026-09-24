@@ -108,6 +108,14 @@ public class SyncDirectionObject {
         return -1;
     }
 
+    /**
+     * Returns whether a legacy task direction may enter the ordinary sync worker. Bisync and
+     * unknown values stay blocked until they have their own reviewed execution path.
+     */
+    public static boolean isRegularSyncWorkerDirectionSupported(int direction) {
+        return spinnerPositionForDirection(direction) >= 0;
+    }
+
     /** Returns the editor position, using zero for an unsupported-value placeholder if present. */
     public static int spinnerPositionForDirection(int direction, boolean hasUnsupportedPlaceholder) {
         int position = spinnerPositionForDirection(direction);

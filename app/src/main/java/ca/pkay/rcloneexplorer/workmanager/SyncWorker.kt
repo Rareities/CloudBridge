@@ -229,7 +229,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             mTitle = mTask.remotePath
         }
         statusObject.syncDirection = mTask.direction
-        if (!isDirectionSupported(mTask.direction)) {
+        if (!SyncDirectionObject.isRegularSyncWorkerDirectionSupported(mTask.direction)) {
             failureReason = FAILURE_REASON.UNSUPPORTED_DIRECTION
             return
         }
@@ -309,15 +309,6 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 }
             }
         }
-    }
-
-    private fun isDirectionSupported(direction: Int): Boolean {
-        return direction == SyncDirectionObject.SYNC_LOCAL_TO_REMOTE ||
-               direction == SyncDirectionObject.SYNC_REMOTE_TO_LOCAL ||
-               direction == SyncDirectionObject.COPY_LOCAL_TO_REMOTE ||
-               direction == SyncDirectionObject.COPY_REMOTE_TO_LOCAL ||
-               direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE ||
-               direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
     }
 
     private fun handleSync(title: String) {

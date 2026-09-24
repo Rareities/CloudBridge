@@ -1358,3 +1358,41 @@ until the compatible-state native feature has an independently reviewed/publicat
     Bisync state was touched. Continue with preservation/restore and mutation-boundary evidence at
     the owning layer; do not expose initialization/apply before fault-boundary gates pass. Keep
     Samsung/Proton NOT RUN and release gates closed.
+
+## 2026-09-24 - WP08 ordinary worker direction gate (PARTIAL)
+
+1. **Objective:** ensure Bisync and unknown direction values cannot enter the ordinary sync worker.
+2. **Scope:** centralize the ordinary-worker direction allowlist in `SyncDirectionObject`, reuse it
+   from `SyncWorker`, and add direct regressions for supported, Bisync, and invalid values.
+3. **Out of scope:** preview execution, native/apply authorization, initialization/recovery, schema,
+   localization, device/provider tests, engine pin changes, PR or release.
+4. **Preconditions:** legacy `SyncWorker` handles only the six regular one-way/copy directions;
+   Bisync modes 5/6 must remain on the separate reviewed preview path.
+5. **Design:** derive worker support from the canonical spinner direction mapping instead of a second
+   hand-maintained list. Unsupported and unknown values fail closed.
+6. **Safety invariants:** the normal worker never executes Bisync; invalid directions do not fall
+   through to a default sync; this helper is not an authorization to initialize or mutate state.
+7. **Implementation:** three app files changed: add
+   `SyncDirectionObject.isRegularSyncWorkerDirectionSupported`, call it before `SyncWorker` starts,
+   and test that every spinner-supported direction is accepted while both Bisync values and 0, -1,
+   and 99 are rejected. Source commit hash will be recorded in the documentation follow-up.
+8. **Reuse:** `SPINNER_TO_DIRECTION`/`spinnerPositionForDirection` remain the single source for
+   supported task modes; `SyncWorker` still emits its existing unsupported-direction failure.
+9. **Retired:** removed the worker's duplicated six-value guard; no task formats, worker behavior for
+   the six supported directions, or persisted state was otherwise changed.
+10. **Failure behavior:** an unrecognized or Bisync direction exits through
+    `FAILURE_REASON.UNSUPPORTED_DIRECTION` before starting rclone.
+11. **Tests:** forced focused run of `:app:testOssDebugUnitTest --tests
+    ca.pkay.rcloneexplorer.Items.SyncDirectionObjectTest --rerun-tasks --offline` passed (4 tests,
+    0 failures/errors/skips). The full offline verification command completed: four-ABI
+    `:rclone:buildAll`, `:app:compileOssDebugAndroidTestJavaWithJavac`, and `:app:lintOssDebug`
+    passed; the full unit-test task was up-to-date in that invocation. `git diff --check` passed.
+    The full suite's previously recorded executed result at this same change set is 100 tests (99
+    passed, 1 existing platform-capability skip). Instrumentation execution, Samsung acceptance,
+    and Proton live testing remain **NOT RUN**.
+12. **Acceptance:** the ordinary worker's direction gate is centralized and directly regression-
+    tested. WP08 remains PARTIAL: no initialization, recovery/restore, mutation boundary, device
+    fault-injection evidence, or compatible-state preview on the currently published app pin.
+13. **Rollback/next:** revert the source commit recorded by the follow-up if this gate regresses;
+    no user or native Bisync data was touched. Continue WP08 preservation/restore and mutation-boundary
+    proof without exposing initialization or apply; keep Samsung/Proton NOT RUN and release gates shut.
