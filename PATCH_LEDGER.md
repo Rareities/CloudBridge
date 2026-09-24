@@ -17,4 +17,5 @@
 - The app remains pinned to Rareities/rclone commit `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`.
 - Local rclone worktrees `rclone-history` and `rclone-preview-state` have separate candidate code/evidence and must not be conflated with the app pin. The broad preview-state branch is not approved for wholesale promotion.
 - Do not cherry-pick proposals or generated documentation blindly. Re-review each patch against the refreshed upstream/fork state and current package prerequisites.
+- CloudBridge WP08 commit `2557a835918ad8c3d245d0875abcdcaa6be64561` adds only a pure, hash-only placement-shape assessment. It is not mutation authorization and remains local/unpublished.
 - No external branch, pull request, APK, production signature, or release was created by the entries above.

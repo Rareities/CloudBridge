@@ -9,7 +9,8 @@ read alongside this summary.
 | Project / scope | Revision and environment | Command or test | Result |
 |---|---|---|---|
 | CloudBridge JVM suite | Source fix 70b2375f6d8cce4d65433b9658f7e0a6dcbf1809; Temurin JDK 21.0.8, Gradle 8.13, Android SDK 36; isolated workspace Gradle home, offline dependencies and task-local build-tools 36 override | Gradle task :app:testOssDebugUnitTest; :rclone:checkoutRclone and :rclone:buildAll excluded | **PASS** — 24 suites, 130 tests, one platform-capability skip, zero failures/errors. App Kotlin/Java and unit-test Kotlin/Java compiled. |
-| CloudBridge focused regression | Same source revision and environment | EndpointSnapshotCodecTest | **PASS** — canonical delimiter parsing and a future-schema fixture that actually changes the schema value. |
+| CloudBridge focused regression | Same source revision and environment | EndpointSnapshotCodecTest | **PASS** - canonical delimiter parsing and a future-schema fixture that actually changes the schema value. |
+| WP08 backup-placement shape policy | Source commit 2557a835918ad8c3d245d0875abcdcaa6be64561; app Kotlin classes compiled by Gradle on JDK 21.0.8 / Gradle 8.13 / SDK 36 | Standalone Kotlin K2 compiler 1.9.22 compile of BisyncBackupPlacementTest, then JUnitCore 4.13.2 | **PASS** - 4 pure tests. Structural identity/account/overlap rules only; mutation permission remains hard-coded false. A full Gradle unit-task retry failed before JUnit in javac while closing Android SDK core JARs; see the execution ledger. |
 | App Java/Kotlin linkage | Same source revision | Included in full JVM task | **PASS** — TriggerService.java resolves the Kotlin ScheduleTimeCalculator static API. |
 | Standalone rclone active worktree | Source 894298219d4f3798b5507fee5f457464bab6547c; ledger-only follow-up brought active HEAD to a881c6ac9bfd9509ce8ca8a93cdb51997ee45fac; Go 1.26.8 Windows/amd64, offline modules and disposable local fixtures | TestBisyncBackupDirReuseReplacesExistingPreservedPath (20 repetitions); go test -mod=readonly -count=1 ./cmd/bisync ./backend/protondrive; go vet -mod=readonly ./cmd/bisync ./backend/protondrive; go build -mod=readonly ./...; Android/arm64 Bisync cross-build | **PASS** for the recorded local source and package scope. These worktrees are not the app pin. Detailed evidence is in the task-level execution ledger and the rclone worktree PATCH_LEDGER.md, which is outside this repository. |
 | Standalone rclone preview-state CLI candidate | Source commit 645848e4a1d58fa54106b1a4eae23f14490b28a9; ledger follow-up 4f2af750aae33837864bcbf837c83e03cce3c790; local broad branch `codex/luna-preview-isolation`, not the app pin; Go 1.26.8 Windows/amd64, offline modules, short task temp root | Focused preview-state tests `-count=20`; full `go test -mod=readonly -count=1 ./cmd/bisync ./backend/protondrive`; `go vet` for both; `go build -mod=readonly ./...`; gofmt and `git diff --check` | **PASS** for this local WP08 CLI boundary. Blank explicit state sources now fail closed; accepted-source listing bytes are copied into a separate preview workdir. Go emitted an access-denied module stat-cache warning outside the workspace; tests/build exited 0 using cached modules. Earlier long-temp run hit a Windows path-length failure and was rerun successfully with the short task root. No app pin/PR/runtime/provider/device acceptance. |
@@ -26,6 +27,7 @@ read alongside this summary.
 - Galaxy S26 / One UI 8.5/9: **NOT RUN**; no actual model, Android API, firmware, battery settings or device artifact certificate were recorded.
 - Live Proton Drive: **NOT RUN**; no credentials or verified unique disposable area. Proton:RoundSync-Test is not deletion authorization.
 - CI/Actions and published artifacts: **NOT RUN**. The 2026-09-25 GitHub refresh observed no workflow runs, open PRs or releases for the two Rareities repositories.
+- Full `:app:testOssDebugUnitTest` on source commit 2557a83: **NOT PASSED**. Gradle Kotlin compilation completed, but Java compilation failed before JUnit because JDK ZipFS could not close Android SDK `core-for-system-modules.jar` / `core-lambda-stubs.jar`; the 4 focused policy tests were run separately and passed as recorded above.
 
 ## Interpretation and next tests
 
@@ -36,7 +38,7 @@ restore and mutation-boundary revalidation. WP09 still requires independent
 dependency/library closure and live disposable-vault acceptance. WP10 still requires the
 persisted global dispatch/coalescing/missed-run policy and device lifecycle acceptance.
 Do not enable Bisync initialization/apply/recovery or claim release readiness from these
-test results.
+test results. The new structural placement evaluator does not alter that boundary.
 
 ## Evidence locations
 

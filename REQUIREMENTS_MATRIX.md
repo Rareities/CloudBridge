@@ -33,4 +33,4 @@ Package numbering follows the master handoff WP00-WP15. The addendum's migration
 | WP14 | Partial/not accepted: migration/rollback compatibility from the addendum plus deterministic stress and actual device/provider evidence remain. |
 | WP15 | Not started: final traceability, PR/CI review, and release recommendation remain gated. |
 
-The 2026-09-25 Android JVM result is local to CloudBridge source commit `70b2375` plus ledger commit `f3f684a`; it excludes native checkout/build, does not produce an APK, and does not change any **NOT RUN** device/provider result. The full GitHub refresh and local Go/Gradle caveats are recorded in `EXECUTION_LEDGER.md`.
+The 2026-09-25 Android JVM result is local to CloudBridge source commit `70b2375` plus ledger commit `f3f684a`; it excludes native checkout/build, does not produce an APK, and does not change any **NOT RUN** device/provider result. Commit `2557a83` adds a structural WP08 placement evaluator only; mutation permission remains false. The full GitHub refresh and local Go/Gradle caveats are recorded in `EXECUTION_LEDGER.md`.
