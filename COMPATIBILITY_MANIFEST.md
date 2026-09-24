@@ -7,7 +7,7 @@
 | Field | Current value | Evidence / limitation |
 |---|---|---|
 | CloudBridge repository | `https://github.com/Rareities/CloudBridge` | Public fork; default branch `master` was `c492876258ca841232229249519abe92ff77c3a4` at refresh. |
-| Current local app branch | `codex/luna-implementation` | Current HEAD `d38f6a3` is a WP08 instrumentation-test follow-up to production source `193d972` (which includes WP08 `2c302158`, WP12 `af638f3`, prior updater commits `d715e16`/`d9e130a`, and the WP12 locale-format fix); documentation/evidence commits may advance HEAD without source changes. This is not a published commit or APK. The last full Android JVM pass is older source `70b2375`; current-source JVM/JUnit acceptance has not been established. |
+| Current local app branch | `codex/luna-implementation` | Latest code/test snapshot `d38f6a3` is a WP08 instrumentation-test follow-up to production source `193d972` (which includes WP08 `2c302158`, WP12 `af638f3`, prior updater commits `d715e16`/`d9e130a`, and the WP12 locale-format fix); later commits in this checkpoint are documentation-only. This is not a published commit or APK. The last full Android JVM pass is older source `70b2375`; current-source JVM/JUnit acceptance has not been established. |
 | Application ID | `de.schuelken.cloudbridge` | Debug variants append `.debug`. Existing signing continuity is not established. |
 | App version defaults | `1.0.1`, versionCode `20` before ABI offsets | `app/build.gradle`; environment overrides exist. Not approved as a release version. |
 | Minimum / compile / target SDK | 23 / 36 / 36 | `app/build.gradle`; API support does not imply device acceptance. |
