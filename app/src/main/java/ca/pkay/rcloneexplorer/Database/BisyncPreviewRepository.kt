@@ -46,6 +46,7 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_C
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_LEFT_ACCOUNT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_LEFT_SCOPE
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_OBSERVATION_FINGERPRINT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_FINGERPRINT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.BISYNC_PREFLIGHT_COLUMN_PROFILE_REVISION
@@ -474,7 +475,8 @@ class BisyncPreviewRepository(context: Context) {
             BISYNC_PREFLIGHT_COLUMN_REASON,
             BISYNC_PREFLIGHT_COLUMN_CHECKED_AT,
             BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE,
-            BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID
+            BISYNC_PREFLIGHT_COLUMN_RECOVERY_LISTINGS_VALID,
+            BISYNC_PREFLIGHT_COLUMN_OBSERVATION_FINGERPRINT
         )
         val cursor = db.query(
             BISYNC_PREFLIGHT_TABLE_NAME,
@@ -497,6 +499,19 @@ class BisyncPreviewRepository(context: Context) {
                 BisyncNativeState.COMPATIBLE -> ProfileReadiness.READY.wireValue
                 else -> throw BisyncPreviewRejectedException("Bisync native state is not previewable")
             }
+            val expectedObservation = BisyncPreflightPolicy.identityFingerprint(
+                identity.profileFingerprint,
+                identity.engineRef,
+                identity.leftAccountFingerprint,
+                identity.leftScopeFingerprint,
+                identity.rightAccountFingerprint,
+                identity.rightScopeFingerprint,
+                identity.filterFingerprint,
+                identity.comparisonMode,
+                identity.maxDeletePercent,
+                identity.maxDeleteCount,
+                identity.stateVersion
+            )
             val reason = if (cursor.isNull(12)) null else cursor.getString(12)
             val commonMatches = cursor.getLong(0) == identity.profileRevision &&
                 cursor.getString(1) == identity.profileFingerprint &&
@@ -505,6 +520,7 @@ class BisyncPreviewRepository(context: Context) {
                 cursor.getString(11) == expectedReadiness &&
                 cursor.getString(14) == identity.nativeState.name &&
                 cursor.getInt(15) == 0 &&
+                !cursor.isNull(16) && cursor.getString(16) == expectedObservation &&
                 (reason == null || (reason == SIZE_ONLY_DISCLOSURE &&
                     identity.comparisonMode == BisyncComparisonMode.SIZE_ONLY))
             if (!commonMatches) {
@@ -701,7 +717,7 @@ class BisyncPreviewRepository(context: Context) {
     }
 
     private companion object {
-        const val PREFLIGHT_MAX_AGE_MILLIS = 15L * 60L * 1000L
+        const val PREFLIGHT_MAX_AGE_MILLIS = BisyncPreflightPolicy.MAX_EVIDENCE_AGE_MILLIS
         const val SIZE_ONLY_DISCLOSURE = "SIZE_ONLY_CONTENT_CHANGES_UNDETECTED"
 
         val projection = arrayOf(

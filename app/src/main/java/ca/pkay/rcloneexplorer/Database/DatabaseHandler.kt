@@ -30,10 +30,15 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_B
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREFLIGHT_ADD_OBSERVATION_FINGERPRINT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_BISYNC_PREVIEWS
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_BISYNC_PREVIEW_ADD_INITIALIZATION_MODE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_BISYNC_BACKUP_MANIFESTS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_BISYNC_BACKUP_LOCATIONS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_ACTIVE_BISYNC_BACKUP_PROFILE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_CREATE_INDEX_BISYNC_BACKUP_HISTORY
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
@@ -42,6 +47,11 @@ import java.util.HashMap
 
 class DatabaseHandler(context: Context?) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+
+    override fun onConfigure(sqLiteDatabase: SQLiteDatabase) {
+        super.onConfigure(sqLiteDatabase)
+        sqLiteDatabase.setForeignKeyConstraintsEnabled(true)
+    }
 
     override fun onCreate(sqLiteDatabase: SQLiteDatabase) {
         sqLiteDatabase.execSQL(SQL_CREATE_TABLES_TASKS)
@@ -66,9 +76,14 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE)
         sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON)
         sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID)
+        sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_OBSERVATION_FINGERPRINT)
         sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_PREVIEWS)
         sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW)
         sqLiteDatabase.execSQL(SQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_BACKUP_MANIFESTS)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_BACKUP_LOCATIONS)
+        sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_BISYNC_BACKUP_PROFILE)
+        sqLiteDatabase.execSQL(SQL_CREATE_INDEX_BISYNC_BACKUP_HISTORY)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -158,6 +173,15 @@ class DatabaseHandler(context: Context?) :
                     "WHERE ${DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE} = 'ABSENT' AND " +
                     "${DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS} NOT IN ('RUNNING','INTERRUPTED','RECOVERY_REQUIRED')"
             )
+        }
+        if (oldVersion < 16) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_BISYNC_PREFLIGHT_ADD_OBSERVATION_FINGERPRINT)
+        }
+        if (oldVersion < 16) {
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_BACKUP_MANIFESTS)
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_BISYNC_BACKUP_LOCATIONS)
+            sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_BISYNC_BACKUP_PROFILE)
+            sqLiteDatabase.execSQL(SQL_CREATE_INDEX_BISYNC_BACKUP_HISTORY)
         }
     }
 

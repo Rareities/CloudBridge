@@ -216,6 +216,24 @@ class BisyncPreflightTest {
         assertEquals(BisyncPreflightReason.FILTER_MISSING, missingFilter.reason)
     }
 
+    @Test
+    fun observationFingerprintBindsListingCountsAndCapabilityFacts() {
+        val original = input()
+        val identity = requireNotNull(BisyncPreflightPolicy.evaluate(original).identityFingerprint)
+        val originalObservation = requireNotNull(
+            BisyncPreflightPolicy.observationFingerprint(original, identity)
+        )
+        val changedListing = original.copy(
+            leftListing = original.leftListing.copy(itemCount = original.leftListing.itemCount + 1)
+        )
+        val changedCapability = original.copy(
+            left = original.left.copy(supportsModTimeComparison = false)
+        )
+
+        assertTrue(originalObservation != BisyncPreflightPolicy.observationFingerprint(changedListing, identity))
+        assertTrue(originalObservation != BisyncPreflightPolicy.observationFingerprint(changedCapability, identity))
+    }
+
     private fun initialBaseline(): BisyncPreflightBaseline =
         requireNotNull(BisyncPreflightPolicy.evaluate(input()).candidateBaseline)
 

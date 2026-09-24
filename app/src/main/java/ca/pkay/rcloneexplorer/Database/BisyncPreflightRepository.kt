@@ -103,6 +103,11 @@ class BisyncPreflightRepository(context: Context) {
         if (input.profileRevision != expectedRevision || input.profileFingerprint != expectedProfileFingerprint) {
             throw StaleBisyncPreflightException("Preflight profile snapshot does not match its request")
         }
+        val evaluated = BisyncPreflightPolicy.evaluate(input)
+        if ((result.identityFingerprint != null || result.readiness != ProfileReadiness.BLOCKED) &&
+            evaluated != result) {
+            throw IllegalArgumentException("Preflight result does not match its supplied evidence")
+        }
         val handler = DatabaseHandler(context)
         val db = handler.writableDatabase
         db.beginTransaction()
@@ -319,6 +324,9 @@ class BisyncPreflightRepository(context: Context) {
             }
             if (reason == null) putNull(BISYNC_PREFLIGHT_COLUMN_REASON) else put(BISYNC_PREFLIGHT_COLUMN_REASON, reason)
             put(BISYNC_PREFLIGHT_COLUMN_CHECKED_AT, checkedAt)
+            val observationFingerprint = BisyncPreflightPolicy.observationFingerprint(input, result.identityFingerprint)
+            if (observationFingerprint == null) putNull(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_OBSERVATION_FINGERPRINT)
+            else put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_OBSERVATION_FINGERPRINT, observationFingerprint)
             put(BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE, input.nativeState.name)
             put(BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON, safeNativeStateReason(input.nativeStateReason))
             put(

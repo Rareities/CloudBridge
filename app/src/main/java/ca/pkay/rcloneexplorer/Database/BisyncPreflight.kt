@@ -187,6 +187,7 @@ object BisyncPreflightPolicy {
     const val DEFAULT_MAX_DELETE_COUNT = 25
     const val MAX_LISTING_ITEMS = 200_000
     const val MAX_LISTING_JSON_CHARS = 16 * 1024 * 1024
+    const val MAX_EVIDENCE_AGE_MILLIS: Long = 15L * 60L * 1000L
 
     const val SIZE_ONLY_DISCLOSURE =
         "Size-only comparison cannot detect changed contents when file sizes remain equal."
@@ -225,14 +226,13 @@ object BisyncPreflightPolicy {
         }
         val leftScope = input.left.scope.fingerprint() ?: return blocked(BisyncPreflightReason.ACCOUNT_IDENTITY_UNKNOWN)
         val rightScope = input.right.scope.fingerprint() ?: return blocked(BisyncPreflightReason.ACCOUNT_IDENTITY_UNKNOWN)
-        val identity = digest(canonical(listOf(
-            "bisync-preflight-v1", requireNotNull(input.profileFingerprint), input.engineRef,
+        val identity = identityFingerprint(
+            requireNotNull(input.profileFingerprint), input.engineRef,
             requireNotNull(input.left.accountFingerprint), leftScope,
             requireNotNull(input.right.accountFingerprint), rightScope,
-            requireNotNull(input.filterFingerprint), input.comparisonMode.wireValue,
-            input.maxDeletePercent.toString(), input.maxDeleteCount.toString(),
-            input.stateVersion.toString()
-        )))
+            requireNotNull(input.filterFingerprint), input.comparisonMode,
+            input.maxDeletePercent, input.maxDeleteCount, input.stateVersion
+        )
         val candidate = BisyncPreflightBaseline(
             input.profileRevision,
             input.profileFingerprint,
@@ -290,6 +290,50 @@ object BisyncPreflightPolicy {
 
     private fun isPinnedEngineRef(value: String): Boolean =
         Regex("^rclone:[^@\\s]+@[0-9a-fA-F]{40}$").matches(value)
+
+    /** Recomputes the path-free identity from persisted preview fields for stale-evidence checks. */
+    @JvmStatic
+    fun identityFingerprint(
+        profileFingerprint: String,
+        engineRef: String,
+        leftAccountFingerprint: String,
+        leftScopeFingerprint: String,
+        rightAccountFingerprint: String,
+        rightScopeFingerprint: String,
+        filterFingerprint: String,
+        comparisonMode: BisyncComparisonMode,
+        maxDeletePercent: Int,
+        maxDeleteCount: Int,
+        stateVersion: Int
+    ): String = digest(canonical(listOf(
+        "bisync-preflight-v1", profileFingerprint, engineRef,
+        leftAccountFingerprint, leftScopeFingerprint,
+        rightAccountFingerprint, rightScopeFingerprint,
+        filterFingerprint, comparisonMode.wireValue,
+        maxDeletePercent.toString(), maxDeleteCount.toString(), stateVersion.toString()
+    )))
+
+    /** Hashes safety-relevant observations separately from the stable profile/endpoint identity. */
+    @JvmStatic
+    fun observationFingerprint(input: BisyncPreflightInput, identityFingerprint: String?): String? {
+        if (!validDigest(identityFingerprint)) return null
+        fun listingFields(listing: BisyncListingEvidence): List<String> = listOf(
+            listing.complete.toString(),
+            listing.rootIsDirectory.toString(),
+            listing.itemCount.toString(),
+            listing.failure?.wireValue ?: "NONE"
+        )
+
+        return digest(canonical(listOf(
+            "bisync-preflight-observation-v1",
+            requireNotNull(identityFingerprint),
+            input.left.supportsModTimeComparison?.toString() ?: "UNKNOWN",
+            input.right.supportsModTimeComparison?.toString() ?: "UNKNOWN",
+            input.filterResolved.toString(),
+            input.nativeState.name,
+            input.nativeRecoveryListingsValid.toString()
+        ) + listingFields(input.leftListing) + listingFields(input.rightListing)))
+    }
 }
 
 /** Native lsjson output is accepted only after confirmed exit, full drain, bounded size and strict parse. */
