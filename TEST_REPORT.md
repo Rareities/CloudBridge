@@ -1,13 +1,15 @@
 # CloudBridge + Rareities/rclone test report
 
 **Snapshot:** 2026-09-25. **Overall status:** PARTIAL; this is not release acceptance.
-Per-package execution ledgers contain the full 13-field work-package records and must be
-read alongside this summary.
+Per-package execution ledgers contain detailed work-package records and must be read
+alongside this summary. WP14 acceptance is tracked gate by gate as **NOT RUN**; planning
+records are not acceptance evidence.
 
 ## Tested revisions and results
 
 | Project / scope | Revision and environment | Command or test | Result |
 |---|---|---|---|
+| Current WP10 trigger-dispatch checkpoint | CloudBridge commit `e6097f1dc4f7fba87440359039c84196d250c922`; JDK 21.0.8, Gradle 8.13, Android SDK 36; isolated workspace Android/Gradle/temp homes, offline | `:app:mergeOssDebugResources`; `:app:compileOssDebugKotlin`; standalone JUnitCore `TriggerDispatchPolicyTest` and `ScheduledTriggerExecutionPolicyTest`; `:app:testOssDebugUnitTest` | Resource merge and Kotlin production compile **PASS**; both pure policy suites **4/4 PASS each (8 tests total)**. Javac printed a ZipFS `AccessDeniedException` while closing the cached JUnit archive but exited 0; JUnit executed the tests. Full Gradle Java/JUnit task **BLOCKED / NOT PASSED before JUnit** by `AccessDeniedException` on transformed `viewbinding-8.13.2-api.jar`; subsequent missing symbols are dependent diagnostics. No test method ran in that Gradle invocation. Source inspection confirms `BootReceiver` requeues every trigger on `BOOT_COMPLETED` and an interval resumes from `now + interval`; reboot/missed-run platform behavior is not instrumented. Trigger model-copy test, Android instrumentation, device and provider acceptance are **NOT RUN**. |
 | Current WP08 schema v16 / manifest foundation | Source commit `2c302158d131f566724aa1814d2ee8b9e1440b02`; persisted-running-state instrumentation regression follow-up `d38f6a3`; production compile snapshot `193d972`; JDK 21.0.8, Gradle 8.13, SDK 36, offline | `:app:compileOssDebugKotlin`; `:app:compileOssDebugAndroidTestKotlin` attempt; migration/repository instrumentation sources authored | Kotlin production compilation **PASS** on source content through `193d972`. Atomic DB-only pending manifests bind run, preflight/preview identity, safety observation digest, and paired locations; overlap conflicts are checked transactionally. Creation now rejects runs outside `PREFLIGHT`, but there is no production caller or mandatory pre-mutation transition. Android-test compilation is **BLOCKED before test compilation** at main javac's cached `viewbinding-8.13.2-api.jar` access failure. Repository/migration instrumentation and SQLite runtime behavior are **NOT RUN**. User-confirmation time remains caller supplied; mutation is hard-disabled. |
 | Current WP12 canonical document-ID policy | CloudBridge source commit `af638f33c5173ea8541a340a01cf4aa5e4a3dacc`; JDK 21.0.8 / JUnitCore 4.13.2; Gradle 8.13 / SDK 36 for current attempt | `DocumentIdPolicyTest`; targeted public VCP Java tests authored | Pure document-ID policy suite: **4 tests PASS**. Javac printed a ZipFS `AccessDeniedException` while closing the cached Hamcrest archive after producing the classes; JUnitCore still executed the test class and reported 4/4 passing. New public VCP tests, including mismatched-parent removal and TODO API validation, are **NOT RUN**. SAF authorization/device acceptance is also **NOT RUN**. |
 | Current WP13 bounded scanner and HTTP cancellation | CloudBridge source commit `193d972839679c66a667e8ded4e480b0c2a35ed5`; JDK 21.0.8, Gradle 8.13, SDK 36, offline | `:app:compileOssDebugKotlin`; scanner unit-test sources authored | Kotlin compilation **PASS** on this source. Scanner HTTP/page/error/cancellation tests and worker preference/notification integration are **NOT RUN**. Worker uses cancellable OkHttp enqueue, streaming response cap, atomic version/changelog preference update, and a 30-second call timeout; runtime behavior is unverified. |
@@ -36,18 +38,25 @@ read alongside this summary.
 - Galaxy S26 / One UI 8.5/9: **NOT RUN**; no actual model, Android API, firmware, battery settings or device artifact certificate were recorded.
 - `adb devices` could not enumerate connected devices because this shell cannot initialize the host `.android` directory (`Permission denied`); this is not evidence of device absence. Device and Galaxy acceptance remain **NOT RUN**.
 - Live Proton Drive: **NOT RUN**; no credentials or verified unique disposable area. Proton:RoundSync-Test is not deletion authorization.
+
+## Continued verification on 2026-09-25
+
+- WP09: exact app-pinned rclone revision `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0` was paired with the local Proton API Bridge v1.0.5 candidate in an isolated temporary Go workspace. `go list -m` resolved to that candidate; ProtonDrive package tests and scoped vet passed. Credential/config variables were unset and no provider calls occurred. Broader rclone/app coverage, promotion and live Proton remain open/NOT RUN; see the WP09 13-field record in `EXECUTION_LEDGER.md`.
+- WP13 pure policy: current standalone `UpdateReleasePolicyTest` result is **10/10 PASS** via JDK 21.0.8 and JUnitCore 4.13.2, including bounded paging URL, selected-tag fallback, full SemVer ordering, whitespace rejection and build metadata. Javac emitted a ZipFS close warning after compilation but exited 0; JUnit ran all methods.
+- Fresh-home `:app:testOssDebugUnitTest` retry remained **BLOCKED / NOT PASSED before JUnit**. Javac/ZipFS raised `AccessDeniedException` while closing Android SDK platform archives and transformed `viewpager-1.0.0-api.jar`, then emitted dependent missing-symbol diagnostics. No tests ran in that Gradle invocation; this is not evidence of a source compile defect. No device, `.android/`, or SDK repair was attempted.
 - CI/Actions and published artifacts: **NOT RUN**. A fresh 2026-09-25 GitHub refresh confirmed no open PRs and no combined status checks or PR-triggered workflow runs for CloudBridge master (`c492876258ca841232229249519abe92ff77c3a4`), rclone master (`1583cce1e28340e5d064ed955179f5f2b31e7757`), or app-pinned rclone (`fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`). rclone PR #1 is closed unmerged because its selected base included 180 unrelated commits. No remote write was made; this refresh did not publish an artifact.
 - Full `:app:testOssDebugUnitTest` on source commit 2557a83: **NOT PASSED**. Gradle Kotlin compilation completed, but Java compilation failed before JUnit because JDK ZipFS could not close Android SDK `core-for-system-modules.jar` / `core-lambda-stubs.jar`; the 4 focused policy tests were run separately and passed as recorded above.
 - WP13 updater Android integration: **NOT RUN**. The targeted Gradle unit task failed before JUnit; the executed standalone policy evidence covers URL and pure SemVer/channel selection only, not HTTP paging/error behavior, preferences, notification intents, or device installation channels. A current standalone re-run also did not reach JUnit due javac output/ZipFS failure.
 
 ## Interpretation and next tests
 
-The JVM pass closes the specific app compilation/test defects in EXECUTION_LEDGER.md;
-it does not close WP08, WP09 or WP10. WP08 still requires endpoint-specific backup
+The older JVM pass closes only the specific app compilation/test defects in its recorded
+source snapshot; it does not close WP08, WP09 or WP10. WP08 still requires endpoint-specific backup
 placement, a durable run-owned manifest/reservation, restart reconciliation, exact-byte
 restore and mutation-boundary revalidation. WP09 still requires independent
 dependency/library closure and live disposable-vault acceptance. WP10 still requires the
-persisted global dispatch/coalescing/missed-run policy and device lifecycle acceptance.
+legacy WorkManager decision, durable unique trigger generations/identity, a persisted
+global dispatch/coalescing/missed-run policy, full Java/JUnit and device lifecycle acceptance.
 Do not enable Bisync initialization/apply/recovery or claim release readiness from these
 test results. The new structural placement evaluator does not alter that boundary.
 
@@ -57,3 +66,20 @@ test results. The new structural placement evaluator does not alter that boundar
 - CloudBridge source change index: PATCH_LEDGER.md.
 - Standalone engine evidence: task-level execution ledger and the rclone worktree PATCH_LEDGER.md; the latter is a separate workspace checkout, not a file in this repository.
 - Current scope/status maps: REQUIREMENTS_MATRIX.md, FEATURE_SURVIVAL_MATRIX.md and COMPATIBILITY_MANIFEST.md.
+
+## WP14 acceptance gate matrix — current status
+
+WP14's master precondition (“core packages complete”) is unmet. This section inventories
+acceptance evidence; it does not claim a partial pass or substitute older library tests.
+
+| Gate | Current evidence/status |
+|---|---|
+| Real-engine local data matrix (create/modify both sides, conflicts, metadata, deletion, rename/case/Unicode, zero/large/many files, directory conflicts, empty/inaccessible roots, partial listings, initialization/filter/account changes, retry/unknown completion, delete thresholds, preview/recovery) | **NOT RUN as WP14 acceptance.** Previously recorded focused rclone package/regression tests are narrower and are not this complete matrix. |
+| Fault injection at launch/list/read/write/upload/download/delete/native-state/init/resync/cancel/finalization boundaries; app kill/reboot/network/auth/rate/storage/permission/disk-full outcomes | **NOT RUN.** No current integrated persisted-state oracle or full fault harness result is recorded. |
+| At least 100 deterministic barrier-driven repetitions per critical app/native race | **NOT RUN.** Existing rclone `-count=100` preservation tests are not the required app/integrated per-race matrix. |
+| Separate-process native lock scenarios (crashed owner, expiry/takeover, renewal, delayed stale release, malformed/truncated lock, clock behavior) | **NOT RUN.** Goroutine/local package tests do not establish process-lock behavior. |
+| Mixed-operation local soak (initial target 8 hours), byte-manifest checks and resource trend samples | **NOT RUN.** No soak duration, seed/operation log, baseline or resource series is recorded. |
+| Supported database source/target migration, rollback and interruption matrix | **NOT RUN.** Instrumentation migration sources are authored but did not compile/run in the blocked Android-test task; no full rollback matrix exists. |
+| Galaxy S26 / One UI 8.5 or 9 screen-off/overnight, permissions, network/battery/Doze/reboot/force-stop/cancel/large-transfer acceptance | **NOT RUN.** Actual model, Android API and firmware are not available/recorded; emulator is not a substitute. |
+| Disposable Proton vault sequence verified with official client, revision history and second-client edits | **NOT RUN.** No verified unique disposable scope or credentials/client access. `Proton:RoundSync-Test` remains a proposal only; never delete/overwrite it without verified ownership. |
+| Core-package precondition and final WP14 release acceptance | **NOT MET / NOT ACCEPTED.** WP08/WP09/WP10/WP11/WP12/WP13 have open acceptance gates; all exclusions remain explicit. |
