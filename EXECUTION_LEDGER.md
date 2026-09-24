@@ -1330,7 +1330,8 @@ until the compatible-state native feature has an independently reviewed/publicat
 7. **Implementation:** CloudBridge commit `eb7c449a7089f2cf1cdcccb0779fef2499aafff7` changes
    five app files: `BisyncPreviewOperation.kt`,
    `BisyncPreviewActivity.kt`, default-English `strings.xml`, JVM freshness regressions, and the
-   repository instrumentation test expectation. No schema or rclone pin change. The native build
+   repository instrumentation test expectation. Follow-up commit `900f8e1` adds endpoint-scope
+   and absent-state baseline mismatch assertions. No schema or rclone pin change. The native build
    used the pre-existing app cache after verifying it resolved exactly to the pinned Rareities
    commit `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; `rclone:buildAll` rebuilt all four ABIs.
    `rclone:checkoutRclone` was excluded because the host Git runtime cannot fetch over HTTPS.
@@ -1341,7 +1342,8 @@ until the compatible-state native feature has an independently reviewed/publicat
 10. **Failure behavior:** a mismatch returns `NATIVE_STATE_CHANGED`; absent preflight/baseline
     returns `NATIVE_STATE_UNVERIFIED`. Neither leads to normal sync or apply.
 11. **Tests:** Windows JDK 21.0.8 / Gradle 8.13 / Android SDK 36, offline: focused regression
-    passed; `:rclone:buildAll` passed for arm, arm64, x86, x86_64 from the verified pinned local
+    passed again after commit `900f8e1` added endpoint-scope and absent-state baseline mismatch
+    assertions; `:rclone:buildAll` passed for arm, arm64, x86, x86_64 from the verified pinned local
     source cache; full `:app:testOssDebugUnitTest` passed (99 tests: 98 passed, 1 existing
     platform-capability skip, 0 failures/errors); `:app:compileOssDebugAndroidTestJavaWithJavac`
     passed; `:app:lintOssDebug` passed with 145 visible warnings, 2 errors and 428 warnings filtered
