@@ -122,6 +122,11 @@ object EndpointSnapshotCodec {
             if (field.indexOf('\u0000') >= 0) return null
             fields.add(field)
             cursor += length
+            if (cursor < bytes.size) {
+                if (bytes[cursor] != '|'.code.toByte()) return null
+                cursor++
+                if (cursor == bytes.size) return null
+            }
         }
         return fields
     }
