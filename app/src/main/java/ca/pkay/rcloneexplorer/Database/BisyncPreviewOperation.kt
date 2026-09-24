@@ -265,6 +265,8 @@ enum class BisyncPreviewFreshness {
     INCOMPLETE,
     RESULT_UNAVAILABLE,
     IDENTITY_CHANGED,
+    NATIVE_STATE_CHANGED,
+    NATIVE_STATE_UNVERIFIED,
     CLOCK_INVALID,
     EXPIRED
 }
@@ -280,6 +282,7 @@ object BisyncPreviewFreshnessPolicy {
     fun evaluate(
         operation: BisyncPreviewOperation,
         currentIdentity: BisyncPreviewIdentity,
+        currentPreflight: BisyncPreflightStatus?,
         now: Long
     ): BisyncPreviewFreshness {
         if (!operation.state.terminal) return BisyncPreviewFreshness.NOT_COMPLETE
@@ -293,6 +296,38 @@ object BisyncPreviewFreshnessPolicy {
         if (operation.identity != currentIdentity ||
             operation.identity.fingerprint != currentIdentity.fingerprint) {
             return BisyncPreviewFreshness.IDENTITY_CHANGED
+        }
+        if (currentPreflight == null) return BisyncPreviewFreshness.NATIVE_STATE_UNVERIFIED
+        if (currentPreflight.nativeState != operation.identity.nativeState) {
+            return BisyncPreviewFreshness.NATIVE_STATE_CHANGED
+        }
+        when (operation.identity.nativeState) {
+            BisyncNativeState.COMPATIBLE -> {
+                val accepted = currentPreflight.acceptedBaseline
+                    ?: return BisyncPreviewFreshness.NATIVE_STATE_UNVERIFIED
+                val identity = operation.identity
+                if (currentPreflight.readiness != ProfileReadiness.READY ||
+                    accepted.profileRevision != identity.profileRevision ||
+                    accepted.profileFingerprint != identity.profileFingerprint ||
+                    accepted.engineRef != identity.engineRef ||
+                    accepted.stateVersion != identity.stateVersion ||
+                    accepted.leftAccountFingerprint != identity.leftAccountFingerprint ||
+                    accepted.leftScopeFingerprint != identity.leftScopeFingerprint ||
+                    accepted.rightAccountFingerprint != identity.rightAccountFingerprint ||
+                    accepted.rightScopeFingerprint != identity.rightScopeFingerprint ||
+                    accepted.filterFingerprint != identity.filterFingerprint ||
+                    accepted.comparisonMode != identity.comparisonMode ||
+                    accepted.preflightFingerprint != identity.acceptedBaselineFingerprint) {
+                    return BisyncPreviewFreshness.NATIVE_STATE_CHANGED
+                }
+            }
+            BisyncNativeState.ABSENT -> {
+                if (currentPreflight.readiness != ProfileReadiness.INITIALIZATION_REQUIRED ||
+                    currentPreflight.acceptedBaseline != null) {
+                    return BisyncPreviewFreshness.NATIVE_STATE_CHANGED
+                }
+            }
+            else -> return BisyncPreviewFreshness.NATIVE_STATE_CHANGED
         }
         val completedAt = operation.completedAt ?: return BisyncPreviewFreshness.RESULT_UNAVAILABLE
         if (completedAt <= 0L || now < completedAt) return BisyncPreviewFreshness.CLOCK_INVALID

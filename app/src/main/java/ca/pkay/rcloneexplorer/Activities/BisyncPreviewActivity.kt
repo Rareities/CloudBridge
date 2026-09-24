@@ -358,11 +358,18 @@ class BisyncPreviewActivity : AppCompatActivity() {
                 profileFingerprint = current.profile.fingerprint,
                 engineRef = current.profile.engineRef
             )
-            val freshness = BisyncPreviewFreshnessPolicy.evaluate(operation, currentIdentity, System.currentTimeMillis())
+            val freshness = BisyncPreviewFreshnessPolicy.evaluate(
+                operation,
+                currentIdentity,
+                current.preflight,
+                System.currentTimeMillis()
+            )
             val freshnessLabel = getString(when (freshness) {
                 BisyncPreviewFreshness.FRESH_FOR_DISPLAY -> R.string.bisync_preview_fresh_display
                 BisyncPreviewFreshness.EXPIRED -> R.string.bisync_preview_expired
                 BisyncPreviewFreshness.IDENTITY_CHANGED -> R.string.bisync_preview_profile_changed
+                BisyncPreviewFreshness.NATIVE_STATE_CHANGED -> R.string.bisync_preview_native_state_changed
+                BisyncPreviewFreshness.NATIVE_STATE_UNVERIFIED -> R.string.bisync_preview_native_state_unverified
                 BisyncPreviewFreshness.CLOCK_INVALID -> R.string.bisync_preview_clock_invalid
                 BisyncPreviewFreshness.NOT_COMPLETE -> R.string.bisync_preview_not_complete
                 BisyncPreviewFreshness.INCOMPLETE -> R.string.bisync_preview_status_incomplete

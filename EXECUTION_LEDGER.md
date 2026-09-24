@@ -1309,3 +1309,49 @@ until the compatible-state native feature has an independently reviewed/publicat
     strictly at the owning layer; submit strings through the supported translation workflow; keep
     Samsung/Proton NOT RUN and do not open a release until all acceptance/provenance/signing gates
     pass.
+
+## 2026-09-24 - WP08 preview history freshness bound to native preflight (PARTIAL)
+
+1. **Objective:** make preview-history freshness conservative when a later persisted preflight
+   finds that the native Bisync state or accepted baseline has changed.
+2. **Scope:** pure history freshness policy, activity label mapping, JVM tests, and
+   instrumentation-source compatibility.
+3. **Out of scope:** mutation/apply authorization, initialization, recovery/restore, DB changes,
+   engine pin changes, translation publication, device/provider acceptance, PR/release.
+4. **Preconditions:** the DB v15 preview identity/owner store and persisted preflight status are
+   authoritative; current history labels are expressly display-only.
+5. **Design:** require a successful current identity/time check plus a persisted current preflight
+   that still matches the operation. For compatible state, compare the complete accepted baseline
+   (profile, engine, endpoint scope/account fingerprints, filters, comparison, state version, and
+   baseline fingerprint). For absent state, require state still absent, initialization-required,
+   and no accepted baseline. Missing evidence has its own non-fresh label.
+6. **Safety invariants:** never interpret freshness as permission to mutate; never treat missing or
+   unknown state as fresh; do not persist paths or endpoint data.
+7. **Implementation:** five app files changed: `BisyncPreviewOperation.kt`,
+   `BisyncPreviewActivity.kt`, default-English `strings.xml`, JVM freshness regressions, and the
+   repository instrumentation test expectation. No schema or rclone pin change. The native build
+   used the pre-existing app cache after verifying it resolved exactly to the pinned Rareities
+   commit `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; `rclone:buildAll` rebuilt all four ABIs.
+   `rclone:checkoutRclone` was excluded because the host Git runtime cannot fetch over HTTPS.
+8. **Reuse:** `BisyncPreflightStatus`, its accepted baseline, current profile identity, and the
+   existing 15-minute display-only window.
+9. **Retired:** no execution path or persisted state retired; latest native-state disagreement can
+   no longer retain a “recent for display” label.
+10. **Failure behavior:** a mismatch returns `NATIVE_STATE_CHANGED`; absent preflight/baseline
+    returns `NATIVE_STATE_UNVERIFIED`. Neither leads to normal sync or apply.
+11. **Tests:** Windows JDK 21.0.8 / Gradle 8.13 / Android SDK 36, offline: focused regression
+    passed; `:rclone:buildAll` passed for arm, arm64, x86, x86_64 from the verified pinned local
+    source cache; full `:app:testOssDebugUnitTest` passed (99 tests: 98 passed, 1 existing
+    platform-capability skip, 0 failures/errors); `:app:compileOssDebugAndroidTestJavaWithJavac`
+    passed; `:app:lintOssDebug` passed with 145 visible warnings, 2 errors and 428 warnings filtered
+    by the existing baseline, and 76 stale baseline entries; `git diff --check` passed. Two new
+    default-English strings await Weblate/Crowdin. Android instrumentation execution, Galaxy S26
+    actual API/firmware acceptance, and live Proton tests remain **NOT RUN**.
+12. **Acceptance:** this history-display freshness gap is fixed and verified on JVM/build/lint.
+    WP08 remains PARTIAL: no mutation boundary, initialization, recovery/restore, device/fault
+    acceptance, compatible-state feature on the published pin, APK, PR, signing, CI publication, or
+    release evidence.
+13. **Rollback/next:** revert only the WP08 preview-history freshness commit; no profile or native
+    Bisync state was touched. Continue with preservation/restore and mutation-boundary evidence at
+    the owning layer; do not expose initialization/apply before fault-boundary gates pass. Keep
+    Samsung/Proton NOT RUN and release gates closed.

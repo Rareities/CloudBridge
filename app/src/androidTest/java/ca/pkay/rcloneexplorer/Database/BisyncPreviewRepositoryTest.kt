@@ -58,8 +58,8 @@ class BisyncPreviewRepositoryTest {
         assertEquals(BisyncPreviewOperationState.COMPLETE, stored!!.state)
         assertEquals(10_200L, stored.updatedAt)
         assertEquals(2L, stored.summary!!.plannedTransfers)
-        assertEquals(BisyncPreviewFreshness.FRESH_FOR_DISPLAY,
-            BisyncPreviewFreshnessPolicy.evaluate(stored, identity, 10_201L))
+        assertEquals(BisyncPreviewFreshness.NATIVE_STATE_UNVERIFIED,
+            BisyncPreviewFreshnessPolicy.evaluate(stored, identity, null, 10_201L))
     }
 
     @Test

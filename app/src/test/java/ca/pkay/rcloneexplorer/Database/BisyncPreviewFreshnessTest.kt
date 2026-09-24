@@ -106,14 +106,17 @@ class BisyncPreviewFreshnessTest {
         val completedAt = 1_800_000_000_000L
         val operation = operation(id, BisyncPreviewOperationState.COMPLETE, completedAt,
             BisyncPreviewSummary(BisyncPreviewStatus.COMPLETE, 2, 26, 0, 0, 0))
+        val currentPreflight = preflight(id)
 
         assertEquals(BisyncPreviewFreshness.FRESH_FOR_DISPLAY,
-            BisyncPreviewFreshnessPolicy.evaluate(operation, id, completedAt))
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id, currentPreflight, completedAt))
         assertEquals(BisyncPreviewFreshness.FRESH_FOR_DISPLAY,
             BisyncPreviewFreshnessPolicy.evaluate(operation, id,
+                currentPreflight,
                 completedAt + BisyncPreviewFreshnessPolicy.MAX_AGE_MILLIS - 1))
         assertEquals(BisyncPreviewFreshness.EXPIRED,
             BisyncPreviewFreshnessPolicy.evaluate(operation, id,
+                currentPreflight,
                 completedAt + BisyncPreviewFreshnessPolicy.MAX_AGE_MILLIS))
         assertTrue("A fresh preview is review data, not a write authorization",
             BisyncPreviewFreshnessPolicy.MAX_AGE_MILLIS == 15L * 60L * 1000L)
@@ -125,11 +128,47 @@ class BisyncPreviewFreshnessTest {
         val completedAt = 1_800_000_000_000L
         val operation = operation(id, BisyncPreviewOperationState.COMPLETE, completedAt,
             BisyncPreviewSummary(BisyncPreviewStatus.COMPLETE, 0, 0, 0, 0, 0))
+        val changedIdentity = id.copy(profileRevision = 2)
 
         assertEquals(BisyncPreviewFreshness.IDENTITY_CHANGED,
-            BisyncPreviewFreshnessPolicy.evaluate(operation, id.copy(profileRevision = 2), completedAt + 1))
+            BisyncPreviewFreshnessPolicy.evaluate(operation, changedIdentity,
+                preflight(changedIdentity), completedAt + 1))
         assertEquals(BisyncPreviewFreshness.CLOCK_INVALID,
-            BisyncPreviewFreshnessPolicy.evaluate(operation, id, completedAt - 1))
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id, preflight(id), completedAt - 1))
+    }
+
+    @Test
+    fun aRecentPreviewIsNotFreshWhenLatestPreflightDoesNotVerifyItsNativeState() {
+        val id = identity()
+        val completedAt = 1_800_000_000_000L
+        val operation = operation(id, BisyncPreviewOperationState.COMPLETE, completedAt,
+            BisyncPreviewSummary(BisyncPreviewStatus.COMPLETE, 0, 0, 0, 0, 0))
+
+        assertEquals(BisyncPreviewFreshness.NATIVE_STATE_CHANGED,
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id,
+                preflight(id).copy(nativeState = BisyncNativeState.INCOMPATIBLE,
+                    readiness = ProfileReadiness.BLOCKED), completedAt + 1))
+        assertEquals(BisyncPreviewFreshness.NATIVE_STATE_CHANGED,
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id,
+                preflight(id).copy(acceptedBaseline = preflight(id).acceptedBaseline!!.copy(
+                    preflightFingerprint = digest('e'))), completedAt + 1))
+        assertEquals(BisyncPreviewFreshness.NATIVE_STATE_UNVERIFIED,
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id, null, completedAt + 1))
+    }
+
+    @Test
+    fun absentStatePreviewRequiresTheCurrentPreflightToRemainAbsent() {
+        val id = identity(nativeState = BisyncNativeState.ABSENT, acceptedBaselineFingerprint = null)
+        val completedAt = 1_800_000_000_000L
+        val operation = operation(id, BisyncPreviewOperationState.COMPLETE, completedAt,
+            BisyncPreviewSummary(BisyncPreviewStatus.COMPLETE, 1, 12, 0, 0, 0))
+
+        assertEquals(BisyncPreviewFreshness.FRESH_FOR_DISPLAY,
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id, preflight(id), completedAt + 1))
+        assertEquals(BisyncPreviewFreshness.NATIVE_STATE_CHANGED,
+            BisyncPreviewFreshnessPolicy.evaluate(operation, id,
+                preflight(id).copy(nativeState = BisyncNativeState.COMPATIBLE,
+                    readiness = ProfileReadiness.READY), completedAt + 1))
     }
 
     @Test
@@ -140,13 +179,40 @@ class BisyncPreviewFreshnessTest {
             BisyncPreviewSummary(BisyncPreviewStatus.INCOMPLETE, 0, 0, 0, 0, 1))
         val failed = operation(id, BisyncPreviewOperationState.UNAVAILABLE, time, null)
         val interrupted = operation(id, BisyncPreviewOperationState.INTERRUPTED, null, null)
+        val currentPreflight = preflight(id)
 
         assertEquals(BisyncPreviewFreshness.INCOMPLETE,
-            BisyncPreviewFreshnessPolicy.evaluate(incomplete, id, time + 1))
+            BisyncPreviewFreshnessPolicy.evaluate(incomplete, id, currentPreflight, time + 1))
         assertEquals(BisyncPreviewFreshness.RESULT_UNAVAILABLE,
-            BisyncPreviewFreshnessPolicy.evaluate(failed, id, time + 1))
+            BisyncPreviewFreshnessPolicy.evaluate(failed, id, currentPreflight, time + 1))
         assertEquals(BisyncPreviewFreshness.NOT_COMPLETE,
-            BisyncPreviewFreshnessPolicy.evaluate(interrupted, id, time + 1))
+            BisyncPreviewFreshnessPolicy.evaluate(interrupted, id, currentPreflight, time + 1))
+    }
+
+    private fun preflight(identity: BisyncPreviewIdentity): BisyncPreflightStatus {
+        val compatible = identity.nativeState == BisyncNativeState.COMPATIBLE
+        val accepted = if (compatible) BisyncPreflightBaseline(
+            profileRevision = identity.profileRevision,
+            profileFingerprint = identity.profileFingerprint,
+            engineRef = identity.engineRef,
+            leftAccountFingerprint = identity.leftAccountFingerprint,
+            leftScopeFingerprint = identity.leftScopeFingerprint,
+            rightAccountFingerprint = identity.rightAccountFingerprint,
+            rightScopeFingerprint = identity.rightScopeFingerprint,
+            filterFingerprint = identity.filterFingerprint,
+            comparisonMode = identity.comparisonMode,
+            stateVersion = identity.stateVersion,
+            preflightFingerprint = requireNotNull(identity.acceptedBaselineFingerprint)
+        ) else null
+        return BisyncPreflightStatus(
+            acceptedBaseline = accepted,
+            readiness = if (compatible) ProfileReadiness.READY else ProfileReadiness.INITIALIZATION_REQUIRED,
+            reasonCode = null,
+            checkedAt = 1_800_000_000_000L,
+            nativeState = identity.nativeState,
+            nativeStateReason = if (compatible) "LISTINGS_COMPATIBLE" else "WORKDIR_ABSENT",
+            recoveryListingsValid = false
+        )
     }
 
     private fun identity(

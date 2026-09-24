@@ -546,6 +546,8 @@
     <string name="bisync_preview_fresh_display">Recent for display only</string>
     <string name="bisync_preview_expired">Expired for display</string>
     <string name="bisync_preview_profile_changed">Profile changed</string>
+    <string name="bisync_preview_native_state_changed">Native Bisync state changed since this preview</string>
+    <string name="bisync_preview_native_state_unverified">Current native Bisync state could not be verified</string>
     <string name="bisync_preview_clock_invalid">Completion time could not be verified</string>
     <string name="bisync_preview_not_complete">Not complete</string>
     <string name="bisync_preview_result_unavailable">Result unavailable</string>
