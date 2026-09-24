@@ -1,9 +1,10 @@
 # CloudBridge - Rclone for Android
-[![license: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/thies2005/CloudBridge/blob/master/LICENSE) [![Latest Downloads](https://img.shields.io/github/downloads/thies2005/CloudBridge/latest/total)](https://github.com/thies2005/CloudBridge/releases) [![GitHub release](https://img.shields.io/github/v/release/thies2005/CloudBridge?include_prereleases)](https://github.com/thies2005/CloudBridge/releases/latest)
-[![Documentation](https://img.shields.io/badge/Documentation-GitHub_Pages-4aad4e)](https://thies2005.github.io/CloudBridge/)
-[![Android Lint](https://github.com/thies2005/CloudBridge/actions/workflows/lint.yml/badge.svg)](https://github.com/thies2005/CloudBridge/actions/workflows/lint.yml)
-A cloud file manager, powered by rclone.
-Visit [https://thies2005.github.io/CloudBridge/](https://thies2005.github.io/CloudBridge/) for more information!
+[![license: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/Rareities/CloudBridge/blob/master/LICENSE)
+[![Android CI](https://github.com/Rareities/CloudBridge/actions/workflows/android.yml/badge.svg)](https://github.com/Rareities/CloudBridge/actions/workflows/android.yml)
+
+A cloud file manager for Android, powered by rclone.
+
+> This is the Rareities fork of CloudBridge. As checked on 2026-09-25, this fork has no published releases and no downloadable APK artifacts. The [upstream documentation](https://thies2005.github.io/CloudBridge/) may describe older behavior or releases; use the build guides in this repository for the fork.
 
 
 ## Screenshots
@@ -23,57 +24,51 @@ Visit [https://thies2005.github.io/CloudBridge/](https://thies2005.github.io/Clo
 
 
 ## Features
-|                                                            Cloud Access                                                             |                                    256 Bit Encryption<sup>[1](https://rclone.org/crypt/#file-encryption)</sup>                                     |                                                         Integrated Experience                                                         |
+The bullets below describe source-level capabilities, not completed WP12 or device/provider acceptance. See [FEATURE_SURVIVAL_MATRIX.md](FEATURE_SURVIVAL_MATRIX.md) for current verification gaps.
+|                                                            Cloud Access                                                             |                                             rclone crypt content encryption                                             |                                                         Integrated Experience                                                         |
 |:-----------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------:|
-| <img src="https://github.com/thies2005/CloudBridge/blob/master/docs/cloud-computing.png?raw=true" alt="Cloud Access" width="144" />  | <img src="https://github.com/thies2005/CloudBridge/blob/master/docs/locked-padlock.png?raw=true" alt="256 Bit End-to-End Encryption" width="108" /> | <img src="https://github.com/thies2005/CloudBridge/blob/master/docs/smartphone.png?raw=true" alt="Integrated Experience" width="132"/> |
-|                                             Use your cloud storage like a local folder.                                             |                                         Keep your files private on any cloud provider with crypt remotes.                                          |                                  Don't give up features or comfort just because it runs on a phone.                                   |
+| <img src="https://github.com/Rareities/CloudBridge/blob/master/docs/cloud-computing.png?raw=true" alt="Cloud Access" width="144" />  | <img src="https://github.com/Rareities/CloudBridge/blob/master/docs/locked-padlock.png?raw=true" alt="Crypt encryption" width="108" /> | <img src="https://github.com/Rareities/CloudBridge/blob/master/docs/smartphone.png?raw=true" alt="Integrated Experience" width="132"/> |
+|                                             Use your cloud storage like a local folder.                                             |                                         rclone crypt can encrypt configured content before upload; setup and recovery keys are your responsibility.                                          |                                  Source capabilities do not imply completed device/provider acceptance.                                   |
 
 - **File Management** (list, view, download, upload, move, rename, delete files and folders)
-- **Streaming** (Stream media files, serve files and directories over FTP, HTTP, WebDAV or DLNA)
+- **Streaming and serving source paths** include FTP, HTTP, WebDAV and DLNA; protocol security, lifecycle, device compatibility and runtime acceptance are still under review.
 - **Integration** (Access local storage devices and share files with the application to store them on a remote)
-- **Many cloud storage providers** (all via rclone config import, some without ui-setup)
+- **Provider options** through rclone; CloudBridge setup and provider compatibility vary and are not all acceptance-tested in this fork
 - **Material 3 Design** (Dark theme)
-- **All architectures** (runs on ARM, ARM64, x86 and x64 devices, Android 6+)
-- **Storage Access Framework (SAF)** ([see docs](https://thies2005.github.io/CloudBridge/internals.html#storage-access-framework)) for SD card and USB device access.
-- **Intentservice** to start tasks via third party apps!
-- **Task Management** to allow regular runs of your important tasks!
+- **Configured Android ABIs** include ARM, ARM64, x86 and x64; this build configuration does not prove a packaged artifact or runtime compatibility.
+- **Declared API floor** is Android API 23 (Android 6); device compatibility and acceptance are not established by the manifest alone.
+- **Storage Access Framework (SAF)** ([fork-specific notes](docs/internals.html#saf)) for user-granted document-tree access; SD/USB behavior remains device/provider dependent.
+- **Task management and schedule-trigger source paths** are present; timing, background lifecycle, and device acceptance remain incomplete.
 
 
 ## Installation
 
-Grab the [latest version](https://github.com/thies2005/CloudBridge/releases/latest) of the signed APK and install it on your phone.
-| CPU architecture | Where to find | APK identifier |
+There is currently no published Rareities/CloudBridge release or downloadable APK artifact. Do not install an upstream APK expecting it to contain this fork's changes. See [BUILD_GUIDE.md](BUILD_GUIDE.md) for a local development build; debug APKs are not production releases.
+
+> **Bisync safety:** the current fork has a read-only preview/review path, but safe initialization, apply, and recovery are not available. Do not use this build for two-way Bisync mutations or treat a preview as permission to run one.
+
+The architecture table below names configured build variants; it is not a list of downloadable files. No Rareities APK is currently published.
+| CPU architecture | Notes | Configured ABI (not a download) |
 |:---|:--|:---:|
 |ARM 32 Bit | older devices | ```armeabi-v7a``` |
 |**ARM 64 Bit** | **most devices** | ```arm64-v8a``` |
 |Intel/AMD 32 Bit | some TV boxes and tablets | ```x86``` |
 |Intel/AMD 64 Bit | some emulators | ```x86_64``` |
 
-If you don't know which version to pick use ```cloudbridge_v<version>-oss-universal-release.apk```. Most devices run ARM 64 Bit, and 64 Bit devices often can also run the respective 32 bit version at lower performance. The app runs on any phone, tablet or TV with Android 6 or newer, as long as you have a touchscreen or mouse.
+The source currently declares Android API 23 as its minimum, but that does not establish device compatibility or acceptance. Use the build guides only for development; there is no released APK to select.
 
-[<img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png"
-    alt="Get it on Google Play"
-    height="80">](https://play.google.com/store/apps/details?id=de.schuelken.cloudbridge)
+The existing Google Play listing, if available in your region, is not evidence that this fork has been released or that its signing identity is continuous.
 
 ## Usage
-[See the documentation](https://thies2005.github.io/CloudBridge/).
+Start with the fork-specific [user guide](USER_GUIDE.md). Some inherited upstream documentation may describe behavior or releases that do not apply to this fork. Build details are in [BUILD_GUIDE.md](BUILD_GUIDE.md) and [WINDOWS_BUILD_GUIDE.md](WINDOWS_BUILD_GUIDE.md).
 
 
 ## Intents
-This app includes the ability to launch an intent! Create a task to sync to a remote, and copy it's id (via the treedot-menu)
-The intent needs the following:
-
-| Intent          |                   Content                   |                 |
-|:----------------|:-------------------------------------------:|----------------:|
-| packageName     |           de.schuelken.cloudbridge            |                 |
-| className       | ca.pkay.rcloneexplorer.Services.SyncService |                 |
-| Action          |                 START_TASK                  |                 |
-| Integer Extra   |                    task                     |        idOfTask |
-| Boolean Extra   |                notification                 |   true or false |
+The legacy external-intent recipe that directly starts `Services.SyncService` is not currently supported: the service is declared non-exported in the manifest. Do not configure Tasker or another app to call it. A secure, documented external automation contract remains to be audited before this integration can be claimed as preserved.
 
 
 ## Libraries
-- [rclone](https://github.com/rclone/rclone) - Calling this a library is an understatement. Without rclone, there would not be CloudBridge. See https://rclone.org/donate/ to support rclone.
+- [Rareities/rclone](https://github.com/Rareities/rclone) is the engine repository configured for this fork; [upstream rclone](https://github.com/rclone/rclone) is the upstream project. See https://rclone.org/donate/ to support rclone.
 - [Jetpack AndroidX](https://developer.android.com/license) - AppCompat, RecyclerView, ConstraintLayout, WorkManager, DataStore, Lifecycle, SplashScreen and more.
 - [Material Components](https://github.com/material-components/material-components-android) - Material 3 widgets and theming.
 - [Kotlin Coroutines](https://github.com/Kotlin/kotlinx.coroutines) and [kotlinx.serialization](https://github.com/Kotlin/kotlinx.serialization) - Async work and JSON serialization.
@@ -87,13 +82,14 @@ The intent needs the following:
 - [Toasty](https://github.com/GrenderG/Toasty) - The usual Toast, but with steroids.
 - [AppIntro](https://github.com/AppIntro/AppIntro) - Onboarding introduction screens.
 - [RFC 3339 Date Parser](https://github.com/x0b/rfc3339parser) - Timestamp parsing.
-- [App Update Checker](https://github.com/Sharkaboi/AppUpdateChecker) - Checks GitHub for new app versions.
 - [android-retrofuture / android-retrostreams](https://github.com/streamsupport/streamsupport) - Java 8+ streams and CompletableFuture backports.
 - Icons from [Flaticon](https://www.flaticon.com) courtesy of [Smashicons](https://www.flaticon.com/authors/smashicons) and [Freepik](https://www.flaticon.com/authors/freepik)
 
 
 ## Contact & Contributions
-Whether you have a question, found a bug, or have an idea for a new feature — you are welcome to write me at [136268370+thies2005@users.noreply.github.com](mailto:136268370+thies2005@users.noreply.github.com). Pull requests and feature requests are always welcome!
+The upstream contact below is inherited attribution, not a confirmed security or support contact for this fork. The Rareities fork currently has GitHub issues disabled; focused pull requests can be opened against the repository. Never include credentials, live configuration, or unredacted logs.
+
+Upstream contact: [136268370+thies2005@users.noreply.github.com](mailto:136268370+thies2005@users.noreply.github.com).
 
 ## Developing
 
@@ -110,25 +106,24 @@ You can then build the app normally from Android Studio or from CLI by running:
 # Debug build
 ./gradlew assembleOssDebug
 
-# or release build
-./gradlew assembleOssRelease
 ```
+
+For a local OSS debug build and its tests, see [BUILD_GUIDE.md](BUILD_GUIDE.md). Release variants require the production signing key and do not authorize publication by themselves.
 
 
 ## License
-This app is released under the terms of the [GPLv3 license](https://github.com/thies2005/CloudBridge/blob/master/LICENSE). By submitting a pull request, you agree that your contributions are licensed under the GPLv3 as well.
+This app is licensed under the [GPLv3](https://github.com/Rareities/CloudBridge/blob/master/LICENSE). By submitting a pull request, you agree that your contributions are licensed under the GPLv3 as well.
 
 
 ## About this app
 CloudBridge is a fork of [**Round-Sync**](https://github.com/newhinton/Round-Sync) by **Felix Nüsse**<sup>[newhinton](https://github.com/newhinton)</sup>, which is a fork of [**RCX**](https://github.com/x0b/rcx) by **x0b**<sup>[x0b](https://github.com/x0b)</sup>, which is itself a fork of [**rcloneExplorer**](https://github.com/patrykcoding/rcloneExplorer) by **Patryk Kaczmarkiewicz**<sup>[patrykcoding](https://github.com/patrykcoding)</sup>.
 
-CloudBridge was created to provide active maintenance, regular rclone updates, easy accessibility via releases on GitHub and Google Play, and extra features such as robust Internxt support.
+This repository is a maintained fork. Release cadence, signing identity, and feature compatibility are tracked independently; the fork currently has no published release. See [requirements](REQUIREMENTS_MATRIX.md), [test evidence](TEST_REPORT.md), [security review](SECURITY_REVIEW.md), and [release readiness](RELEASE_READINESS.md) for verified status and open gates.
+
+The inherited update notification currently targets upstream thies2005/CloudBridge rather than this fork; do not use it to check for Rareities releases. Correcting the release target and its tests remains an open fork-integration task.
 
 If you want to convey a modified version (fork), we ask you to use a different name, app icon and package id as well as proper attribution to avoid user confusion.
 
 
 ## New Features in this Fork
-This fork adds explicit support and fixes for the following providers:
-- **Internxt**: Decentralized cloud storage. Included is a robust integration with automatic token renewal and state persistence to ensure the remote connection does not expire.
-- **Drime**: Cloud storage provider.
-- **Always up to date**: CloudBridge is regularly updated to the newest rclone version, so new providers, features and fixes arrive quickly.
+Source paths for additional providers such as Internxt and Drime are present, but their compatibility and acceptance in this fork are not established by this statement. CloudBridge uses a separately pinned rclone revision; update cadence and provider parity are not guaranteed.

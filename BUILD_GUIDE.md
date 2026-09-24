@@ -1,90 +1,45 @@
-# GitHub Actions Build Trigger Script
+# CloudBridge build guide
 
-## Option 1: Use GitHub Actions (RECOMMENDED)
-The repository already has a working GitHub Actions workflow (.github/workflows/android.yml) that:
-- Runs on Ubuntu Linux (proper build environment)
-- Uses JDK 17, Go 1.26+, Android SDK/NDK
-- Builds APKs for all architectures (arm, arm64, x86, x64, universal)
-- Uploads artifacts to GitHub
+Status checked 2026-09-25. These instructions describe the checked-in fork; a local build is not release or device-acceptance evidence.
 
-### How to Build via GitHub Actions:
-```bash
-# Trigger the workflow
-gh workflow run android.yml -f
+## Prerequisites
 
-# Or push a trigger commit
-git commit --allow-empty -m "Trigger build"
-git push origin master
+- JDK 17 (the checked-in Android CI uses Temurin 17).
+- Go 1.26.0 or newer; the current minimum is in `gradle.properties`.
+- Android SDK platform/build tools for API 36 and the NDK version pinned in `gradle.properties`.
+- Git with HTTPS transport. Gradle checks out the exact immutable Rareities/rclone commit listed by `de.schuelken.cloudbridge.rCloneRef`.
+- Network access for uncached Gradle, Go, Android SDK/NDK, rclone source, and Go module dependencies.
 
-# Or use the web interface:
-# Visit: https://github.com/thies2005/CloudBridge/actions
-# Click "Run workflow" on the "android-ci" workflow
+Check `gradle.properties` before upgrading or changing any toolchain. Do not edit fetched/generated files under `rclone/cache/` or bypass the immutable engine ref.
+
+## Local test and debug APK
+
+On Linux/macOS:
+
+```sh
+./gradlew :app:testOssDebugUnitTest :app:assembleOssDebug
 ```
 
-### How to Download the APK:
-After the build completes (~5-10 minutes), download from Actions artifacts:
-```bash
-# List recent workflow runs
-gh run list --workflow=android.yml
+On Windows PowerShell:
 
-# Download latest build
-gh run download <run-id>
+```powershell
+.\gradlew.bat :app:testOssDebugUnitTest :app:assembleOssDebug
 ```
 
-## Option 2: Local Build with MinGW (Advanced)
+The normal app build checks out and compiles the pinned native rclone source. Do not exclude `:rclone:checkoutRclone` or `:rclone:buildAll` for a full integration build. Those exclusions are acceptable only for a clearly labeled, isolated app-JVM diagnostic; such a run is not native integration or APK evidence.
 
-Install MinGW-w64 to provide C compiler for CGO on Windows:
+Debug APKs are written under `app/build/outputs/apk/oss/debug/`. The build may create per-ABI and universal variants. Debug signing is for development only.
 
-```bash
-# Using Chocolatey
-choco install mingw
+## GitHub Actions
 
-# Using Scoop
-scoop install mingw
+`.github/workflows/android.yml` runs on pushes and pull requests targeting `master` and supports manual dispatch. It runs the OSS debug unit tests and assembles an OSS debug APK. It does **not** upload an artifact or publish a release. Do not create an empty commit or push directly to `master` merely to trigger a build.
 
-# Using manual download
-# Download from: https://www.mingw-w64.org/
+The latest read-only GitHub refresh on 2026-09-25 found zero Actions runs for either Rareities repository, no open PRs, no releases, and unprotected default branches. Refresh these facts before relying on CI or opening a PR. A workflow definition is not evidence that it ran or passed.
 
-# Then build
-./gradlew assembleOssDebug
-```
+## Release and signing gate
 
-## Option 3: Docker Build (Cross-Platform)
+There is no published Rareities/CloudBridge release and no release-publishing workflow in the checked-in Android workflow. Release package/sign/bundle tasks fail closed unless a readable production keystore and all four signing values are configured through ignored local `keystore.properties` or the documented `CB_*` environment variables. Never commit signing material. Passing a release Gradle task is not authorization to publish: certificate continuity, provenance, compatibility, security, device/provider acceptance, and the master handoff gates must also pass.
 
-Build in Docker with Windows SDK and NDK:
-```bash
-docker run -it --rm -v ${PWD}:/workspace -w /tmp \
-  -e ANDROID_HOME=/opt/android-sdk \
-  -e ANDROID_NDK_HOME=/opt/android-sdk/ndk/29.0.14206865 \
-  ghcr.io/android-actions/sdk:latest \
-  ./gradlew assembleOssDebug
-```
+## Current limits
 
----
-
-## Current Status
-
-✅ Session Guardian code: Pushed to GitHub (ready for build)
-✅ Windows build fixes: Pushed to GitHub
-✅ GitHub Actions workflow: Exists and working
-
-## Recommended Next Steps
-
-1. **Use Option 1** (GitHub Actions) - Easiest and most reliable
-2. Download APK from GitHub Actions artifacts when complete
-3. The APK will work on your Pixel 9 (arm64-v8a)
-
-## Files to Download After Build
-
-Once GitHub Actions completes, download:
-- `app/build/outputs/apk/oss/debug/*-oss-arm64-v8a-debug.apk` ← For your Pixel 9
-- Other architectures are also available if needed
-
----
-
-**To trigger a GitHub Actions build now, run:**
-```bash
-gh workflow run android.yml -f
-```
-
-**Or visit:** https://github.com/thies2005/CloudBridge/actions
+The host verification recorded in `EXECUTION_LEDGER.md` is JVM-only unless a row explicitly says otherwise. Android instrumentation, a Galaxy S26 on One UI 8.5/9 with actual API and firmware recorded, live Proton, and release signing remain separate gates. A debug APK, emulator, compile-only result, or GitHub workflow file does not substitute for them.

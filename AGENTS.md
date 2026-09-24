@@ -43,27 +43,26 @@ Keep this repository easy to upgrade from upstream rclone.
 Prerequisites: Go 1.26+, JDK 17, Android SDK with NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
 
 ```sh
-./gradlew assembleOssDebug
-./gradlew assembleOssRelease
+./gradlew :app:testOssDebugUnitTest :app:assembleOssDebug
 ```
 
-- `app:preBuild` depends on `:rclone:buildAll`, so app builds trigger rclone cross-compilation.
-- First build downloads and caches rclone source in `rclone/cache/`.
+- The normal app build checks out the immutable Rareities/rclone ref from `gradle.properties` and builds its native libraries for the configured ABIs. Network access and Git HTTPS support are required unless the exact source and dependencies are already cached.
 - APK output is under `app/build/outputs/apk/oss/debug/`.
 - ABI splits: `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`, `universal`.
+- Release variants never fall back to the Android debug key. Release packaging requires all production signing values and a readable keystore; that is a build gate, not permission to publish a release.
+- The current GitHub Android workflow tests and packages an OSS debug APK only. It does not upload artifacts or publish a release.
 
 ## Verification
 
 Run the checks that match the change. Before any commit or push, required checks must pass or the failure must be explained to the user.
 
 ```sh
-./gradlew testOssDebugUnitTest
-./gradlew lint -x :rclone:buildAll
-./gradlew assembleOssDebug
+./gradlew :app:testOssDebugUnitTest
+./gradlew :app:assembleOssDebug
 ```
 
-- Unit test coverage is minimal and lives in `app/src/test/`.
-- No instrumented/androidTest runner is wired in CI.
+- JVM tests live in `app/src/test/`; instrumentation tests live separately and are not executed by the current `android.yml` workflow.
+- For an isolated app-JVM diagnostic only, it may be necessary to exclude `:rclone:checkoutRclone` and `:rclone:buildAll`. Such a run does not validate native integration or produce a complete APK; record those exclusions with the test result.
 - Lint baselines exist in `app/` and `safdav/`; `abortOnError` is enabled and `MissingTranslation` is a warning.
 - Skip `assembleOssDebug` only for docs-only changes that cannot affect the build.
 
@@ -85,10 +84,9 @@ Run the checks that match the change. Before any commit or push, required checks
 
 ## CI Workflows
 
-- `android.yml`: Builds **release** APKs on push to `master`; uploads per-ABI beta-release artifacts.
-- `lint.yml`: Runs unit tests + lint on every PR, not on `master`.
-- `dependencies.yml`: Rebuilds on `build.gradle` changes and runs FOSS library scan.
-- `translations.yml`: Profanity-checks translated `strings.xml` on PRs.
+- `android.yml`: runs on pushes and pull requests targeting `master`, and supports manual dispatch. It runs `:app:testOssDebugUnitTest` and `:app:assembleOssDebug`; it does not upload an APK artifact or publish a release.
+- Other workflow files have separate triggers and scopes. Read the checked-in YAML before relying on them; do not infer that a workflow ran or passed without current GitHub Actions evidence.
+- The 2026-09-25 GitHub refresh found no default-branch protection. Refresh this before publication, and use a reviewed pull request rather than pushing directly to `master` regardless of server-side settings.
 
 ## Gotchas
 

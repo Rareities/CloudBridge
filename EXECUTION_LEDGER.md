@@ -1,12 +1,12 @@
 # CloudBridge + rclone execution ledger
 
 This ledger records implementation evidence for `CloudBridge-rclone-Luna-Master-Handoff.md`.
-The repository copy is committed alongside CloudBridge changes; the task-level global ledger at
-`work/EXECUTION_LEDGER.md` retains cross-repository and environment-wide evidence.
+This tracked copy is the app-specific evidence ledger. The current task workspace also keeps a
+separate cross-repository ledger outside this repository; it is not a portable repository file.
 
 ## Standing instructions
 
-- The complete handoff at `work/CloudBridge-rclone-Luna-Master-Handoff.md` is authoritative.
+- The user-attached complete master handoff, revision 2026-09-22 (SHA-256 recorded in the cross-repository task ledger), is authoritative.
 - Work one bounded package at a time and follow the current package dependencies in section 7.
   WP08 and WP09 remain partial; WP10 has a partial app implementation and is not accepted.
 - Preserve Bisync, Proton Drive, scheduling, Obsidian and useful CloudBridge functionality.
@@ -884,14 +884,14 @@ scope remain pending. No PR was created during this refresh.
 Rareities/rclone local source commit `81ac481705944ac125e2f8eeab823d78f6b1cfdb` (tree
 `ada7e7df6b8c196957afd0da77142dfe64227327`), parent `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`.
 The separate native patch-ledger commit is `4cb77955699445ea16ea44aac6041169cb895192`.
-These commits are local to `work/rclone-preview-state`; they are not yet published to GitHub and
+These commits are local to a separate task-owned rclone preview-state worktree; they are not yet published to GitHub and
 CloudBridge intentionally remains pinned to the last published immutable engine SHA `fe775a8…`.
 
 1. **Objective:** provide a native-safe way for an app-owned preview to use compatible accepted
    Bisync state in a fresh isolated workdir without updating the live profile listings.
 2. **Scope:** rclone `CopyCompatibleState`, source-guarded byte-exact clone, CLI-only
    `--preview-state-from`, strict validation/docs/tests. The change is prepared independently from
-   the archival `work/rclone-history` and its unrelated generated files.
+   a separate archival rclone-history checkout and its unrelated generated files.
 3. **Out of scope:** CloudBridge worker/UI/persistence, initialization or mutation authorization,
    durable backups/restore/recovery, Proton/Samsung acceptance, GitHub PR publication, and release.
 4. **Preconditions:** native state inspector and versioned path-free dry-run summary were reviewed;
@@ -1599,3 +1599,19 @@ until the compatible-state native feature has an independently reviewed/publicat
 11. **Tests:** full offline `:app:testOssDebugUnitTest` **PASS**: 24 suites, 130 tests, 1 platform-capability skip, 0 failures/errors. The run compiled app Kotlin, app Java (including `TriggerService.java`), and unit-test Java/Kotlin. Focused `EndpointSnapshotCodecTest` also **PASS**. `git diff --check` **PASS**. JDK 21.0.8 / Gradle 8.13 / SDK 36 task-local override; native rclone checkout/build excluded. APK, lint, instrumentation and GitHub Actions **NOT RUN**.
 12. **Acceptance:** this closes two narrow compile/test defects only. WP08, WP09 and WP10 remain **PARTIAL**; native engine integration, single persisted scheduler policy, Samsung actual model/API/firmware, and live Proton remain **NOT RUN**. No release gate is satisfied by JVM tests alone.
 13. **Rollback/next:** revert only `70b2375f6d8cce4d65433b9658f7e0a6dcbf1809` if later tests demonstrate a real regression; do not remove the explicit Java import while its call remains. Resume WP08 path-specific backup placement/manifest/restart/restore and WP09 independent Proton closure before full WP10. No pin, remote, PR, APK, signature, or release changed; preserve `.android/`.
+
+## 2026-09-25 - WP13 documentation/source-claim correction slice (PARTIAL)
+
+1. **Objective:** align the current fork's docs with verified source behavior and stop implying untested ABI/device/provider/release support.
+2. **Scope:** CloudBridge contributor/user/security/build documentation and one updater comment; no runtime updater behavior or URL changes.
+3. **Out of scope:** completing WP13 production delivery, updating the updater owner, publishing a PR/release/APK, changing signing identity, Samsung/Proton testing, or claiming WP12/WP14 acceptance.
+4. **Preconditions:** read the complete 2026-09-22 master through Appendix D and the separate WP14 addendum; verify relevant updater, manifest, engine launch, config storage and current docs in source; obtain an independent read-only documentation review. The reviewer made no changes.
+5. **Design:** prefer explicit source status, accurate ownership and local/fork-specific links; keep unsupported behaviors marked partial/not run and keep init/apply/recovery unavailable.
+6. **Safety invariants:** no unsupported privacy/security promise; no debug APK presented as release; no live-provider/device claim; `.android/` is user-owned and excluded from staging; updater remains notification-only and defaults off.
+7. **Implementation:** correct the JNI claim to subprocess execution via `Runtime.exec`; rename “Privacy policy” to “Privacy review status”; fix WP00/WP01 status granularity and sibling-worktree references; qualify ABI/API and serving claims; point SAF docs to the fork; align README/feature matrix and Rareities/rclone links; add updater finding SR-08; correct the worker's stale weekly comment to 14 days. Edited docs include README, REQUIREMENTS_MATRIX, FEATURE_SURVIVAL_MATRIX, EXECUTION_LEDGER, TEST_REPORT, SECURITY_REVIEW, internals/privacy/index/build/security/contribution/audit docs and related status files.
+8. **Reuse:** existing source evidence for `Runtime.exec`, manifest export settings, updater preference/work interval/URLs, credential-storage ADR and preview-only Bisync behavior.
+9. **Retired/decision:** retired stale claims/links only; did not remove supported user features or retarget the updater prematurely. Master handoff defines WP00-WP15; the addendum's WP00-WP16 phrase is recorded as a numbering inconsistency, not a new package.
+10. **Failure behavior:** unsupported or unverified features remain clearly marked; update notifications still target upstream and are explicitly not to be relied on for Rareities releases until the tested WP13 retargeting change.
+11. **Tests:** read-only source/doc cross-check completed; stale-pattern `rg` checks show no remaining JNI description, “Privacy policy” nav label, WP00-WP16 package claim outside the explanatory mismatch note, false Tasker claim, unsupported “runs on all ABIs” statement, or upstream SAF link. Every enumerated local Markdown/HTML target exists. `git diff --check` remains the final formatting gate after staging; no app/runtime tests were required for prose/comment-only changes. Samsung/Proton/runtime/release **NOT RUN**.
+12. **Acceptance:** bounded documentation corrections implemented locally; WP13 remains **PARTIAL**, and WP12 feature regressions plus WP14 migration/device/provider acceptance remain open. The optional updater is still misdirected to upstream until a separate tested change.
+13. **Rollback/next:** revert only the documentation/source-comment correction commit if a verified source fact changes; preserve the prior evidence history. Finish link/status verification, commit exact app-owned files excluding `.android/`, record commit SHA, then continue WP08 endpoint-specific placement and restore work in package order. No PR/APK/signing/release was produced.

@@ -28,7 +28,7 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
 
         FLog.e(tag(), "Try to check updates...")
 
-        // this is supposed to only run on startup and once a week.
+        // This worker can run at startup and on the 14-day connected-network periodic schedule.
         if(!checkForUpdates) {
             return Result.success()
         }

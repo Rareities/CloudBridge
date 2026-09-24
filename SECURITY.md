@@ -1,24 +1,22 @@
-# Security Policy
+# Security policy
 
-Please contact us directly about security issues: [136268370+thies2005@users.noreply.github.com](mailto:136268370+thies2005@users.noreply.github.com). Please give appropriate time to respond.
+## Reporting a vulnerability
 
-This is a community project without 24/7 operations or formal security review. While we try to make the app as secure as possible, we cannot offer any guarantees. Do not rely on the encryption for your safety.
+This file is inherited from upstream and the fork-specific disclosure route has not yet been confirmed. As checked on 2026-09-25, the Rareities/CloudBridge repository has its public issue tracker disabled; private vulnerability reporting was not verified. Do not post exploit details, credentials, or proof-of-concept data in a public issue or pull request. The inherited upstream contact is [136268370+thies2005@users.noreply.github.com](mailto:136268370+thies2005@users.noreply.github.com), but it is not a confirmed contact for the Rareities fork. Maintainers must establish a fork-specific private reporting route before a release.
 
-## Supported Versions
+There is no published Rareities/CloudBridge release as of this date, so no fork release version is currently supported. Upstream releases are not releases of this fork.
 
-We only support the latest release version. Of course, we still like to hear about vulnerabilities in pre-release versions and older still-in-use versions.
+## Security scope
 
-## Security Model
-Since the app is a file browser with the keys to your cloud storage as well as local storage, we consider anything a security issue that...
-- allows unauthorized access to oauth tokens, passwords and other secrets,
-- allows unintended read/write access to cloud content,
-- allows access to private app storage, code or otherwise compromises the functionality.
+CloudBridge handles credentials for remote storage and can read or modify local files that the user grants it access to. Treat unauthorized credential access, unintended local/cloud file access, unsafe native-process handling, and disclosure through logs or temporary files as security issues. The app relies on Android's app sandbox and does not claim protection against rooted devices or a compromised operating system.
 
+## Current implementation facts and limits
 
-The app relies on the platform for protecting its private directories and executables. We therefore explicitly do not support rooted devices or devices with unpatched vulnerabilities. If it is technically feasable to add mitigations against platform vulnerabilites, we will consider it.
+- The manifest sets `android:allowBackup="false"`. This is a backup-policy control, not encryption and not protection from root or forensic access.
+- The rclone config is stored in app-private storage. The app does not encrypt the entire config file at rest; rclone's per-value `obscure` encoding is reversible and is not cryptographic protection. A user-encrypted rclone config is a separate mode.
+- When a config passphrase is stored, `ConfigSecretStore` wraps that passphrase with Android Keystore AES-GCM and stores ciphertext in app-private preferences. This does **not** encrypt an otherwise unencrypted `rclone.conf`, and this code path has not received Galaxy S26/device acceptance in the current handoff.
+- The config passphrase is supplied to the native rclone process through `RCLONE_CONFIG_PASS`; process lifecycle, memory lifetime, import/export, and all log/output paths require continued review. Do not assume all secrets or app state are encrypted because this passphrase is.
+- The SAF/WebDAV bridge exists. Access is based on Android document-tree grants; give those grants only to apps you trust. The complete cross-app and temporary-file threat surface remains under audit.
+- Exported configuration files and logs may contain secrets or identifying data. Never share raw exports or logs. Create synthetic test data or redact and manually inspect every line before sharing.
 
-## Current state of security
-_While we do not consider those things security vulnerabilities, they are on our "security" todo list for new/improved protections._
-- The rclone configuration file is stored without additional encryption in app-private storage ([issue](https://github.com/x0b/rcx/issues/12)).
-- Some operations may use your flash storage as temporary storage location, if they are too large for app-internal storage. Depending on your Android version, those files may temporarily be available to other apps that you have granted external storage or storage manager permissions.
-- The upcoming SAF provider offers other apps direct access to your files. It is vital you do not install apps you do not trust 100%, since they may be able to impersonate apps you have previously granted file access to.
+The credential-storage design record is [`docs/ADR-001-credential-storage-at-rest.md`](docs/ADR-001-credential-storage-at-rest.md). It records implemented scope and open decisions; it is not an assertion of complete at-rest encryption.
