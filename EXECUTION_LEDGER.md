@@ -1,14 +1,14 @@
 # CloudBridge + rclone execution ledger
 
 This ledger records implementation evidence for `CloudBridge-rclone-Luna-Master-Handoff.md`.
-It is maintained separately from the source checkout while the projectless task is being
-bootstrapped, and is intended to move into the reviewed repository documentation once a
-real Git checkout is available.
+The repository copy is committed alongside CloudBridge changes; the task-level global ledger at
+`work/EXECUTION_LEDGER.md` retains cross-repository and environment-wide evidence.
 
 ## Standing instructions
 
 - The complete handoff at `work/CloudBridge-rclone-Luna-Master-Handoff.md` is authoritative.
-- Work one bounded package at a time; WP05 is the next package after the completed WP04 entry.
+- Work one bounded package at a time and follow the current package dependencies in section 7.
+  WP08 and WP09 remain partial; WP10 has a partial app implementation and is not accepted.
 - Preserve Bisync, Proton Drive, scheduling, Obsidian and useful CloudBridge functionality.
 - Fix defects at their owning layer and test rclone independently before app integration.
 - Missing device or live Proton access is `NOT RUN`, never a pass.
@@ -1396,3 +1396,62 @@ until the compatible-state native feature has an independently reviewed/publicat
 13. **Rollback/next:** revert the source commit recorded by the follow-up if this gate regresses;
     no user or native Bisync data was touched. Continue WP08 preservation/restore and mutation-boundary
     proof without exposing initialization or apply; keep Samsung/Proton NOT RUN and release gates shut.
+
+## 2026-09-24 - CloudBridge WP10 schedule and session-guardian slice (PARTIAL)
+
+1. **Objective:** correct local schedule occurrence selection after the configured time, and stop
+   the session guardian from treating arbitrary non-network provider failures as proof of expired
+   credentials.
+2. **Scope:** pure next-enabled-weekday calculation; schedule re-arming after wall-clock/time-zone
+   changes; receiver null/action safety; explicit credential-provider eligibility; typed and
+   sanitized probe failure categories; focused regression coverage.
+3. **Out of scope:** replacing the full trigger/AlarmManager architecture; durable requested/actual
+   run-time state, global dispatch ownership, bounded coalescing, foreground promotion, missed-run
+   policy, Android quota/permission behavior, notification-denial behavior, or device acceptance.
+4. **Preconditions:** existing trigger storage remains authoritative; weekday bits are Monday=0 to
+   Sunday=6; schedule `time` is minutes after midnight; interval triggers remain unchanged by
+   wall-clock/time-zone re-arming.
+5. **Design:** compute the first strictly-future occurrence on an enabled local weekday; cancel the
+   prior schedule alarm before replacing it; requeue schedule triggers only on time/time-zone
+   changes; admit OAuth providers or explicit Proton Drive/Internxt capabilities only when the
+   corresponding stored credential exists; classify native stderr into bounded categories without
+   persisting provider text.
+6. **Safety invariants:** no alarm is scheduled for an invalid minute or empty/invalid weekday mask;
+   time changes do not restart interval timers; an unknown failure never requests re-authentication;
+   raw provider output and credentials are not surfaced in the probe result; no claim is made that
+   Android delivered an alarm or background execution on time.
+7. **Implementation:** CloudBridge source commit
+   `34a23eb3631ee47fd63cb1321d9f72620a609cc5` (`fix(android): correct schedules and guardian
+   classification`), parent `d1290cd`. It updates trigger scheduling and broadcast
+   handling, adds `ScheduleTimeCalculator`, provider gating and typed failure classification, and
+   adds JVM regression source. The user-owned untracked `.android/` directory was not staged or
+   modified.
+8. **Reuse:** current trigger DB and PendingIntent identity, AlarmManager mode preference, existing
+   remote OAuth capability mapping, `launchClaimed` native process ownership, and existing guardian
+   notification path. No schema migration or dependency change.
+9. **Retired:** same-minute/every-day scheduling shortcut; re-arming interval triggers on a wall-clock
+   update; token-shaped config alone as authorization to probe an arbitrary provider; raw/generic
+   non-network probe failure as an expired-session notification.
+10. **Failure behavior:** invalid schedule configuration cancels the previous alarm and stops;
+    network/rate-limit/integrity/unknown probe results are non-auth failures; only positively
+    classified authentication errors send the existing session-expired notification. Classification
+    is bounded string evidence from rclone stderr, not a structured backend API guarantee.
+11. **Tests:** `:app:compileOssDebugKotlin` passed on JDK 21.0.8 / Gradle 8.13 / Android SDK 36
+    offline with `-Pkotlin.compiler.execution.strategy=in-process -x :rclone:buildAll
+    -x :safdav:compileDebugJavaWithJavac`. The new Java classifier compiled independently with
+    JDK 21; a temporary JVM smoke run passed 20 schedule/provider/classification scenarios, and
+    its temporary source scripts were removed. `git diff --cached --check` passed before commit.
+    The full `:app:testOssDebugUnitTest` task was attempted but is **BLOCKED/NOT PASSED** by
+    `AccessDeniedException` while closing Android SDK/cached JAR zip files (also reproduced under
+    JDK 17 and JDK 21); Android Java compilation is consequently unverified. Samsung alarm/doze/
+    force-stop/time-zone behavior and live provider round trips are **NOT RUN**.
+12. **Acceptance:** this schedule-calculation and guardian-notification slice is implemented and
+    source/Kotlin/smoke checked. WP10 remains **PARTIAL** until authoritative dispatch, unique run
+    claims, coalescing, requested-vs-actual timestamps, foreground/permission/quota handling,
+    missed-run behavior, and runtime evidence are audited and verified. WP08/WP09 remain PARTIAL;
+    Galaxy S26 / One UI 8.5/9 with actual API/firmware and live Proton remain NOT RUN. No APK,
+    PR, signing, or release evidence.
+13. **Rollback/next:** revert only `34a23eb` to `d1290cd`; no schedules, task data, remote data,
+    or native Bisync state were modified by tests. Resume the earliest incomplete prerequisite
+    package from the global ledger; continue the remaining WP08 state-preservation/mutation-boundary
+    work and WP09 dependency decision before treating WP10 as accepted. Keep release gates closed.
