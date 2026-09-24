@@ -10,8 +10,14 @@ public class BootReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        if (intent.getAction().equals("android.intent.action.BOOT_COMPLETED")) {
+        if (intent == null || intent.getAction() == null) {
+            return;
+        }
+        if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
             new TriggerService(context).queueTrigger();
+        } else if (Intent.ACTION_TIME_CHANGED.equals(intent.getAction())
+                || Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction())) {
+            new TriggerService(context).queueScheduleTriggers();
         }
     }
 }

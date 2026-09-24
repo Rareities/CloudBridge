@@ -91,6 +91,7 @@ import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.LogRedactor;
 import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import ca.pkay.rcloneexplorer.util.SyncLog;
+import ca.pkay.rcloneexplorer.workmanager.SessionProbeFailureClassifier;
 import es.dmoral.toasty.Toasty;
 import io.github.x0b.safdav.SafAccessProvider;
 import io.github.x0b.safdav.SafDAVServer;
@@ -2230,11 +2231,18 @@ public class Rclone {
         String[] command = createCommand("lsd", "--max-depth", String.valueOf(maxDepth), remoteName + ":");
         try {
             AtomicBoolean networkError = new AtomicBoolean(false);
+            AtomicBoolean authenticationError = new AtomicBoolean(false);
+            AtomicBoolean rateLimited = new AtomicBoolean(false);
+            AtomicBoolean integrityError = new AtomicBoolean(false);
             NativeExecutionHandle handle = launchClaimed(command, getRcloneEnv(), "lsd");
             NativeExecutionHandle.Outcome outcome = handle.await(METADATA_COMMAND_TIMEOUT_MILLIS,
                     null, line -> {
-                        if (DirectoryProbeResult.looksLikeNetworkError(line)) {
-                            networkError.set(true);
+                        switch (DirectoryProbeResult.classifyFailureLine(line)) {
+                            case NETWORK: networkError.set(true); break;
+                            case AUTHENTICATION: authenticationError.set(true); break;
+                            case RATE_LIMITED: rateLimited.set(true); break;
+                            case INTEGRITY: integrityError.set(true); break;
+                            default: break;
                         }
                     });
             int exitCode = outcome.getExitCode() == null ? -1 : outcome.getExitCode();
@@ -2242,8 +2250,13 @@ public class Rclone {
                 exitCode = -1;
             }
             // Do not expose raw, potentially secret-bearing stderr to the guardian worker.
-            String category = networkError.get() || outcome.getState() == NativeExecutionHandle.TerminalState.TIMED_OUT
-                    ? "network is unreachable" : exitCode == 0 ? "" : "rclone probe failed";
+            String category = exitCode == 0 ? ""
+                    : networkError.get() || outcome.getState() == NativeExecutionHandle.TerminalState.TIMED_OUT
+                    ? "network is unreachable"
+                    : authenticationError.get() ? "authentication required"
+                    : rateLimited.get() ? "provider rate limited"
+                    : integrityError.get() ? "integrity check failed"
+                    : "rclone probe failed";
             return new DirectoryProbeResult(exitCode, category);
         } catch (IOException e) {
             FLog.e(TAG, "listDirectories: native command failed to start", e);
@@ -2256,12 +2269,23 @@ public class Rclone {
      * sanitized category, never raw provider output or credentials.
      */
     public static class DirectoryProbeResult {
+        public enum FailureCategory {
+            NONE,
+            NETWORK,
+            AUTHENTICATION,
+            RATE_LIMITED,
+            INTEGRITY,
+            OTHER
+        }
+
         private final int exitCode;
         private final String stderr;
+        private final FailureCategory failureCategory;
 
         public DirectoryProbeResult(int exitCode, String stderr) {
             this.exitCode = exitCode;
-            this.stderr = stderr != null ? stderr : "";
+            this.failureCategory = categoryFromSanitizedLabel(exitCode, stderr);
+            this.stderr = labelFor(this.failureCategory);
         }
 
         public int getExitCode() {
@@ -2276,27 +2300,60 @@ public class Rclone {
             return exitCode == 0;
         }
 
+        public FailureCategory getFailureCategory() {
+            return failureCategory;
+        }
+
         /**
          * Returns true if the error is a transient network issue (DNS failure,
          * connection refused, timeout) rather than an authentication problem.
          */
         public boolean isNetworkError() {
-            if (exitCode == 0) return false;
-            return looksLikeNetworkError(stderr);
+            return failureCategory == FailureCategory.NETWORK;
         }
 
-        private static boolean looksLikeNetworkError(String text) {
-            String lower = text.toLowerCase(Locale.ROOT);
-            return lower.contains("dial tcp")
-                || lower.contains("connection refused")
-                || lower.contains("no such host")
-                || lower.contains("i/o timeout")
-                || lower.contains("network is unreachable")
-                || lower.contains("tls handshake timeout")
-                || lower.contains("dns")
-                || lower.contains("lookup")
-                || lower.contains("no address associated");
+        public boolean isAuthenticationError() {
+            return failureCategory == FailureCategory.AUTHENTICATION;
         }
+
+        public boolean isRateLimited() {
+            return failureCategory == FailureCategory.RATE_LIMITED;
+        }
+
+        public boolean isIntegrityError() {
+            return failureCategory == FailureCategory.INTEGRITY;
+        }
+
+        static FailureCategory classifyFailureLine(String text) {
+            switch (SessionProbeFailureClassifier.classifyLine(text)) {
+                case NETWORK: return FailureCategory.NETWORK;
+                case AUTHENTICATION: return FailureCategory.AUTHENTICATION;
+                case RATE_LIMITED: return FailureCategory.RATE_LIMITED;
+                case INTEGRITY: return FailureCategory.INTEGRITY;
+                default: return FailureCategory.OTHER;
+            }
+        }
+
+        private static FailureCategory categoryFromSanitizedLabel(int exitCode, String label) {
+            if (exitCode == 0) return FailureCategory.NONE;
+            if ("network is unreachable".equals(label)) return FailureCategory.NETWORK;
+            if ("authentication required".equals(label)) return FailureCategory.AUTHENTICATION;
+            if ("provider rate limited".equals(label)) return FailureCategory.RATE_LIMITED;
+            if ("integrity check failed".equals(label)) return FailureCategory.INTEGRITY;
+            return FailureCategory.OTHER;
+        }
+
+        private static String labelFor(FailureCategory category) {
+            switch (category) {
+                case NONE: return "";
+                case NETWORK: return "network is unreachable";
+                case AUTHENTICATION: return "authentication required";
+                case RATE_LIMITED: return "provider rate limited";
+                case INTEGRITY: return "integrity check failed";
+                default: return "rclone probe failed";
+            }
+        }
+
     }
 
     public class AboutResult {

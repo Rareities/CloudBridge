@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Session Guardian Worker - Proactively checks session health for OAuth-enabled remotes.
+ * Session Guardian Worker - Proactively checks session health for credential-capable remotes.
  *
  * This worker runs periodically to detect expired tokens before the user needs them.
  * It uses rclone config dump to identify remotes with token or totp_secret fields,
@@ -41,10 +41,10 @@ class SessionGuardianWorker(
                 return@withContext Result.success()
             }
 
-            var oauthRemotesChecked = 0
+            var credentialRemotesChecked = 0
             var failedHealthChecks = 0
 
-            // Dump config to find OAuth-enabled remotes
+            // Dump config to inspect stored credentials after provider capability is checked.
             val configDump = rclone.configDump()
             if (configDump == null || configDump.isEmpty()) {
                 FLog.e(TAG, "Failed to dump rclone config")
@@ -62,17 +62,20 @@ class SessionGuardianWorker(
                         continue
                     }
 
-                    // Check if remote has OAuth token or TOTP secret
-                    val hasToken = remoteConfig.has("token") ||
-                                  remoteConfig.has("access_token") ||
-                                  remoteConfig.has("totp_secret")
-
-                    if (!hasToken) {
-                        // Not an OAuth/2FA remote, skip health check
+                    // Use the app's provider capability list, with explicit custom-provider
+                    // exceptions for Proton Drive and Internxt. A token-shaped field alone is
+                    // not enough to make an arbitrary backend eligible for background probing.
+                    if (!SessionProbePolicy.shouldProbe(
+                            remote.typeReadable,
+                            remote.isOAuth(),
+                            remoteConfig.has("token"),
+                            remoteConfig.has("access_token"),
+                            remoteConfig.has("totp_secret")
+                        )) {
                         continue
                     }
 
-                    oauthRemotesChecked++
+                    credentialRemotesChecked++
                     FLog.d(TAG, "Checking session health for remote: $remoteName")
 
                     // Probe health using lsd with max-depth 1
@@ -82,16 +85,25 @@ class SessionGuardianWorker(
                     if (result.isSuccess) {
                         FLog.d(TAG, "Session healthy for remote: $remoteName")
                     } else if (result.isNetworkError) {
-                        // DNS failure, timeout, connection refused — NOT an auth problem.
+                        // DNS failure, timeout, connection refused - NOT an auth problem.
                         // Don't alarm the user; the next periodic run will retry.
-                        FLog.w(TAG, "Network error checking remote: $remoteName (exit code: ${result.exitCode}), skipping notification. stderr: ${result.stderr.take(200)}")
-                    } else {
-                        // rclone returns process exit codes (0/1/...) rather than HTTP status codes.
-                        // A non-zero, non-network result means the probe failed after backend retry/re-auth attempts.
-                        FLog.w(TAG, "Health check failed for remote: $remoteName (exit code: ${result.exitCode}). Manual reconnect may be required. stderr: ${result.stderr.take(200)}")
+                        FLog.w(TAG, "Network error checking remote: $remoteName (exit code: ${result.exitCode}), skipping notification")
+                    } else if (result.isAuthenticationError) {
+                        // This notification opens the app's explicit re-auth path. Emit it only
+                        // when the sanitized native error classifier positively identifies auth.
+                        FLog.w(TAG, "Authentication failure checking remote: $remoteName (exit code: ${result.exitCode})")
                         failedHealthChecks++
-                        val notifyManager = AppErrorNotificationManager(mContext)
-                        notifyManager.showSessionExpiredNotification(remoteName)
+                        AppErrorNotificationManager(mContext).showSessionExpiredNotification(remoteName)
+                    } else if (result.isRateLimited) {
+                        FLog.w(TAG, "Provider rate-limited health probe for remote: $remoteName; skipping notification")
+                        failedHealthChecks++
+                    } else if (result.isIntegrityError) {
+                        FLog.e(TAG, "Integrity failure checking remote: $remoteName; skipping re-auth notification")
+                        failedHealthChecks++
+                    } else {
+                        // Unknown provider errors are not evidence that a session expired.
+                        FLog.w(TAG, "Health probe failed for remote: $remoteName (exit code: ${result.exitCode}, category: ${result.failureCategory}); skipping re-auth notification")
+                        failedHealthChecks++
                     }
 
                 } catch (e: Exception) {
@@ -99,7 +111,7 @@ class SessionGuardianWorker(
                 }
             }
 
-            FLog.d(TAG, "Session Guardian completed. Checked: $oauthRemotesChecked, Failed: $failedHealthChecks")
+            FLog.d(TAG, "Session Guardian completed. Checked: $credentialRemotesChecked, Failed: $failedHealthChecks")
 
         } catch (e: Exception) {
             FLog.e(TAG, "Session Guardian failed", e)

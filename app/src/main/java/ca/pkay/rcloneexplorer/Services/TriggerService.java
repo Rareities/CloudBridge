@@ -53,6 +53,14 @@ public class TriggerService extends Service {
         }
     }
 
+    public void queueScheduleTriggers(){
+        for(Trigger t : dbHandler.getAllTrigger()){
+            if(t.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
+                queueSingleTrigger(t);
+            }
+        }
+    }
+
     public void queueSingleTrigger(Trigger trigger){
         if(trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
             queueSingleScheduleTrigger(trigger);
@@ -64,31 +72,19 @@ public class TriggerService extends Service {
 
     @SuppressLint("ScheduleExactAlarm") // this is caught by the PermissionManager itself
     private void queueSingleScheduleTrigger(Trigger trigger){
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        PendingIntent pi = getIntent(trigger.getId());
+        am.cancel(pi);
         if(trigger.isEnabled()){
-            Calendar calendar = Calendar.getInstance();
-            calendar.setTimeInMillis(System.currentTimeMillis());
-
-            int seconds = trigger.getTime();
-            calendar.set(Calendar.HOUR_OF_DAY, seconds/60);
-            calendar.set(Calendar.MINUTE, seconds%60);
-
-            long difference = calendar.getTimeInMillis()-System.currentTimeMillis();
-            //Properly schedule past events
-            if(difference<0){
-                difference = (24*60*60*1000) + difference;
+            long now = System.currentTimeMillis();
+            Long nextOccurrence = ScheduleTimeCalculator.nextOccurrence(
+                    now,
+                    trigger.getTime(),
+                    trigger.getWeekdays()
+            );
+            if(nextOccurrence == null) {
+                return;
             }
-
-            // If a triggered event schedules the next occurence, we need to make sure that it does not create an endless loop for 60 seconds.
-            // If it is "now", do it in 24h
-            if(Calendar.getInstance().get(Calendar.MINUTE) == seconds%60){
-                difference = (24*60*60*1000);
-            }
-
-            long timeToTrigger = System.currentTimeMillis() + difference;
-
-            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId());
-            am.cancel(pi);
 
             SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
             boolean allowWhileIdle = sharedPreferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
@@ -97,13 +93,13 @@ public class TriggerService extends Service {
                 if (allowWhileIdle) {
                     am.setExactAndAllowWhileIdle(
                             AlarmManager.RTC_WAKEUP,
-                            timeToTrigger,
+                            nextOccurrence,
                             pi
                     );
                 } else {
                     am.setExact(
                             AlarmManager.RTC_WAKEUP,
-                            timeToTrigger,
+                            nextOccurrence,
                             pi
                     );
                 }
@@ -162,7 +158,7 @@ public class TriggerService extends Service {
         i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         i.putExtra(TRIGGER_ID, triggerId);
 
-        // Todo: Beacause of the long to int cast, this may fail when the user has more than Integer.MAX tasks.
+        // Todo: Because of the long to int cast, this may fail when the user has more than Integer.MAX tasks.
         return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT ^ PendingIntent.FLAG_IMMUTABLE);
     }
 

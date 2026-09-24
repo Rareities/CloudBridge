@@ -12,7 +12,7 @@ data class Trigger(var id: Long) {
     var title = ""
     @JsonNames("enabled") var isEnabled = true
     private var weekdays: Byte = 0b01111111 //treat as binary, so that each digit represents an boolean.
-    var time = 0 //in seconds since 00:00
+    var time = 0 // minutes since midnight for schedules; minutes for interval triggers
     @JsonNames("target", "whatToTrigger") var triggerTarget = 0L
     var type = TRIGGER_TYPE_SCHEDULE
 
