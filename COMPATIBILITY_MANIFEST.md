@@ -7,14 +7,14 @@
 | Field | Current value | Evidence / limitation |
 |---|---|---|
 | CloudBridge repository | `https://github.com/Rareities/CloudBridge` | Public fork; default branch `master` was `c492876258ca841232229249519abe92ff77c3a4` at refresh. |
-| Current local app branch | `codex/luna-implementation` | Current source commit `21eb807` (including updater commits `d715e16`/`d9e130a` and the WP12 locale-format fix); documentation/evidence commits may advance HEAD without source changes. This is not a published commit or APK. The last full Android JVM pass is older source `70b2375`; current-source JVM/JUnit acceptance has not been established. |
+| Current local app branch | `codex/luna-implementation` | Current HEAD `d38f6a3` is a WP08 instrumentation-test follow-up to production source `193d972` (which includes WP08 `2c302158`, WP12 `af638f3`, prior updater commits `d715e16`/`d9e130a`, and the WP12 locale-format fix); documentation/evidence commits may advance HEAD without source changes. This is not a published commit or APK. The last full Android JVM pass is older source `70b2375`; current-source JVM/JUnit acceptance has not been established. |
 | Application ID | `de.schuelken.cloudbridge` | Debug variants append `.debug`. Existing signing continuity is not established. |
 | App version defaults | `1.0.1`, versionCode `20` before ABI offsets | `app/build.gradle`; environment overrides exist. Not approved as a release version. |
 | Minimum / compile / target SDK | 23 / 36 / 36 | `app/build.gradle`; API support does not imply device acceptance. |
 | Flavors / ABIs | `oss`, `rs`; armeabi-v7a, arm64-v8a, x86, x86_64, universal | Gradle config; this turn did not build an APK. |
 | Gradle / CI Java | Gradle wrapper 8.13; CI Temurin JDK 17 | Local JVM evidence this turn used Temurin JDK 21.0.8. |
 | Go / NDK | Minimum Go 1.26.0; NDK 29.0.14206865 | `gradle.properties`; local rclone tests used Go 1.26.8 Windows/amd64. |
-| Database schema | SQLite version 15 | `DatabaseInfo.DATABASE_VERSION`; a full supported source-to-target migration/rollback matrix is pending WP14. |
+| Database schema | SQLite version 16 in the current worktree | `DatabaseInfo.DATABASE_VERSION`; v16 adds only the partial WP08 backup-manifest foundation. A full supported source-to-target migration/rollback matrix and on-device migration test remain pending WP14; migration test source is authored but **NOT RUN**. |
 
 ## rclone engine pin and Proton dependency decision
 
@@ -32,7 +32,7 @@ The application pin is intentionally distinct from both local rclone worktrees. 
 
 | Area | Current status |
 |---|---|
-| Android JVM | Last full pass: 130 tests across 24 suites, 1 platform-capability skip, on source `70b2375`; native checkout/build excluded. The active source at `21eb807` is newer and has not passed a full JVM/JUnit rerun; latest compile/test retries were blocked before JUnit by local Gradle/Javac cache filesystem errors. |
+| Android JVM | Last full pass: 130 tests across 24 suites, 1 platform-capability skip, on source `70b2375`; native checkout/build excluded. Current Kotlin production compilation passes on source `193d972`; the later `d38f6a3` change only strengthens an instrumentation test. Focused JVM and Android-test compilation fail during main Java compilation before JUnit/test compilation because javac cannot access the cached transformed `viewbinding-8.13.2-api.jar`; current-source JVM/JUnit acceptance is not established. |
 | Android instrumentation | **NOT RUN** in this verification. |
 | Actual acceptance device | **NOT RUN**. Required target: Galaxy S26 on One UI 8.5/9, with actual Android API and firmware recorded. |
 | Proton Drive | **NOT RUN** live; only local library tests on separate candidate checkouts are recorded. |

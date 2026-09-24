@@ -35,8 +35,8 @@ Keep this repository easy to upgrade from upstream rclone.
 - Do not reintroduce the deprecated `rclone/patches/` flow. Keep backend changes in the
   selected Rareities/rclone repository and verify provider behavior before carrying forward
   any app-specific behavior from an older engine fork.
-- Prefer Android-side integration changes in `app/` over Go-side changes in rclone.
-- If a Go-side rclone change is unavoidable, keep it in the Rareities rclone fork at `https://github.com/Rareities/rclone`; do not vendor local source patches here.
+- Fix defects at the layer that owns their behavior: CloudBridge for Android orchestration, UI, lifecycle and scheduling; Rareities/rclone or its responsible dependency for backend, protocol, filesystem, persisted-engine-state and library-concurrency behavior. Use an app-side mitigation only when it is genuinely an integration concern or a lower-layer fix cannot be made safely, and record that reason.
+- Keep Go-side rclone changes in the Rareities fork at `https://github.com/Rareities/rclone`; do not vendor local source patches here. Independently test the engine/library change before app integration.
 
 ## Build
 
