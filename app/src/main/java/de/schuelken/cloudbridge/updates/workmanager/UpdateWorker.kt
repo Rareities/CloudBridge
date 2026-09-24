@@ -9,27 +9,38 @@ import ca.pkay.rcloneexplorer.R
 import de.schuelken.cloudbridge.extensions.tag
 import de.schuelken.cloudbridge.notifications.AppUpdateNotification
 import ca.pkay.rcloneexplorer.util.FLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.json.JSONArray
+import okhttp3.Response
+import okhttp3.ResponseBody
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class UpdateWorker (private var mContext: Context, workerParams: WorkerParameters): CoroutineWorker(mContext, workerParams) {
 
     private val preferenceManager = PreferenceManager.getDefaultSharedPreferences(mContext)
 
-    private var checkForUpdates = preferenceManager.getBoolean(mContext.getString(R.string.pref_key_app_updates), false)
     private val ignoredVersion = preferenceManager.getString(mContext.getString(R.string.pref_key_app_update_dismiss_current_update), "")
     private var lastFoundVersion = preferenceManager.getString(mContext.getString(R.string.pref_key_app_updates_found_update_for_version), BuildConfig.VERSION_NAME)?:BuildConfig.VERSION_NAME
 
 
     override suspend fun doWork(): Result {
 
+        currentCoroutineContext().ensureActive()
+
         FLog.e(tag(), "Try to check updates...")
 
         // This worker can run at startup and on the 14-day connected-network periodic schedule.
-        if(!checkForUpdates) {
+        if (!preferenceManager.getBoolean(mContext.getString(R.string.pref_key_app_updates), false)) {
             return Result.success()
         }
 
@@ -42,14 +53,14 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
             }
         }
 
-        try {
+        return try {
             checkGithubReleases()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
-            FLog.e(tag(), "Error checking updates", e)
+            FLog.e(tag(), "Update check failed unexpectedly; previous update state was retained")
+            Result.retry()
         }
-
-        // Indicate whether the work finished successfully with the Result
-        return Result.success()
     }
 
     /**
@@ -57,74 +68,88 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
      * semantic versions with stable/prerelease channel metadata. Inlined to replace the
      * AppUpdateChecker library (flagged NonFreeNet by the FOSS scan).
      */
-    private suspend fun checkGithubReleases() = withContext(Dispatchers.IO) {
-        val client = OkHttpClient()
-        val candidates = mutableListOf<UpdateReleasePolicy.ReleaseCandidate>()
-        var releaseListComplete = false
+    private suspend fun checkGithubReleases(): Result = withContext(Dispatchers.IO) {
+        val client = OkHttpClient.Builder()
+            .callTimeout(30, TimeUnit.SECONDS)
+            .build()
+        val workerContext = currentCoroutineContext()
+        val outcome = UpdateReleaseScanner.scanAndApply(
+            BuildConfig.VERSION_NAME,
+            fetchPage = { page ->
+                val request = Request.Builder()
+                    .url(UpdateReleasePolicy.releasesApiUrl(page))
+                    .header("Accept", "application/vnd.github+json")
+                    .header("User-Agent", "CloudBridge-Updater")
+                    .build()
+                val call = client.newCall(request)
+                suspendCancellableCoroutine { continuation ->
+                    continuation.invokeOnCancellation { call.cancel() }
+                    call.enqueue(object : Callback {
+                        override fun onFailure(call: Call, e: IOException) {
+                            if (continuation.isActive) continuation.resumeWith(kotlin.Result.failure(e))
+                        }
 
-        for (page in 1..UpdateReleasePolicy.MAX_RELEASE_PAGES) {
-            val request = Request.Builder()
-                .url(UpdateReleasePolicy.releasesApiUrl(page))
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "CloudBridge-Updater")
-                .build()
-
-            var continuePaging = true
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    FLog.e(tag(), "Release API returned HTTP ${response.code} on page $page")
-                    return@withContext
+                        override fun onResponse(call: Call, response: Response) {
+                            try {
+                                val httpPage = response.use {
+                                    val boundedBody = readBoundedBody(it.body)
+                                    UpdateReleaseScanner.HttpPage(
+                                        it.code,
+                                        boundedBody.text,
+                                        boundedBody.exceededLimit
+                                    )
+                                }
+                                if (continuation.isActive) continuation.resumeWith(kotlin.Result.success(httpPage))
+                            } catch (error: Exception) {
+                                if (continuation.isActive) continuation.resumeWith(kotlin.Result.failure(error))
+                            }
+                        }
+                    })
                 }
-                val body = response.body?.string()
-                if (body.isNullOrEmpty()) {
-                    FLog.e(tag(), "Release API returned an empty response body on page $page")
-                    return@withContext
-                }
-                val releases = try {
-                    JSONArray(body)
-                } catch (_: Exception) {
-                    FLog.e(tag(), "Release API returned malformed JSON on page $page")
-                    return@withContext
-                }
-
-                if (releases.length() == 0) {
-                    releaseListComplete = true
-                    continuePaging = false
+            },
+            onComplete = { newest ->
+                if (newest != null) {
+                    FLog.e(tag(), "Update found: ${newest.tagName}")
+                    setReleaseState(newest.tagName, newest.changelog)
+                    notifyIfRequired()
                 } else {
-                    for (index in 0 until releases.length()) {
-                        val release = releases.optJSONObject(index) ?: continue
-                        candidates += UpdateReleasePolicy.ReleaseCandidate(
-                            release.optString("tag_name").takeIf { it.isNotBlank() },
-                            release.optBoolean("prerelease"),
-                            release.optBoolean("draft"),
-                            release.optString("body")
-                        )
-                    }
-                    if (releases.length() < UpdateReleasePolicy.RELEASES_PER_PAGE) {
-                        releaseListComplete = true
-                        continuePaging = false
-                    }
+                    setFoundVersion(BuildConfig.VERSION_NAME)
                 }
+            },
+            checkCancelled = { workerContext.ensureActive() }
+        )
+        when (outcome) {
+            is UpdateReleaseScanner.Outcome.Complete -> Result.success()
+            is UpdateReleaseScanner.Outcome.Incomplete -> {
+                FLog.e(tag(), "Release scan incomplete (${outcome.reason}); leaving stored update state unchanged")
+                if (outcome.retryable) Result.retry() else Result.failure()
             }
-
-            if (!continuePaging) break
         }
+    }
 
-        if (!releaseListComplete) {
-            FLog.e(tag(), "Release scan reached its page limit; leaving the stored update state unchanged")
-            return@withContext
-        }
+    private data class BoundedBody(val text: String?, val exceededLimit: Boolean)
 
-        val newest = UpdateReleasePolicy.newestEligibleRelease(BuildConfig.VERSION_NAME, candidates)
-        if (newest != null) {
-            val tagName = newest.tagName
-            FLog.e(tag(), "Update found: $tagName")
-            setFoundVersion(tagName)
-            setChangelog(newest.changelog)
-            notifyIfRequired()
-        } else {
-            setFoundVersion(BuildConfig.VERSION_NAME)
+    /** Reads at most the configured page limit plus one byte; never calls ResponseBody.string(). */
+    private fun readBoundedBody(body: ResponseBody?): BoundedBody {
+        if (body == null) return BoundedBody(null, false)
+        val limit = UpdateReleaseScanner.MAX_RESPONSE_BYTES
+        if (body.contentLength() > limit) return BoundedBody(null, true)
+
+        val bytes = body.byteStream().use { input ->
+            ByteArrayOutputStream(minOf(limit + 1, 32 * 1024)).use { output ->
+                val buffer = ByteArray(8 * 1024)
+                var remaining = limit + 1
+                while (remaining > 0) {
+                    val count = input.read(buffer, 0, minOf(buffer.size, remaining))
+                    if (count < 0) break
+                    output.write(buffer, 0, count)
+                    remaining -= count
+                }
+                output.toByteArray()
+            }
         }
+        if (bytes.size > limit) return BoundedBody(null, true)
+        return BoundedBody(String(bytes, Charsets.UTF_8), false)
     }
 
     /**
@@ -138,9 +163,15 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
         }
     }
 
-    private fun setChangelog(changelog: String){
-        val key = mContext.getString(R.string.pref_key_app_updates_changelog)
-        preferenceManager.edit().putString(key, changelog).apply()
+    /** Stores version and its changelog in one preferences transaction after a complete scan. */
+    private fun setReleaseState(version: String, changelog: String) {
+        val versionKey = mContext.getString(R.string.pref_key_app_updates_found_update_for_version)
+        val changelogKey = mContext.getString(R.string.pref_key_app_updates_changelog)
+        preferenceManager.edit()
+            .putString(versionKey, version)
+            .putString(changelogKey, changelog)
+            .apply()
+        lastFoundVersion = version
     }
 
     fun getChangelog(): String{
@@ -149,7 +180,11 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
 
     private fun setFoundVersion(version: String){
         lastFoundVersion = version
-        val key = mContext.getString(R.string.pref_key_app_updates_found_update_for_version)
-        preferenceManager.edit().putString(key, version).apply()
+        val versionKey = mContext.getString(R.string.pref_key_app_updates_found_update_for_version)
+        val changelogKey = mContext.getString(R.string.pref_key_app_updates_changelog)
+        preferenceManager.edit()
+            .putString(versionKey, version)
+            .putString(changelogKey, "")
+            .apply()
     }
 }
