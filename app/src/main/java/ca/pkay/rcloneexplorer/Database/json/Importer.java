@@ -12,9 +12,11 @@ import java.util.List;
 import java.util.Set;
 
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
+import ca.pkay.rcloneexplorer.Database.TriggerStateLock;
 import ca.pkay.rcloneexplorer.Items.Filter;
 import ca.pkay.rcloneexplorer.Items.Task;
 import ca.pkay.rcloneexplorer.Items.Trigger;
+import ca.pkay.rcloneexplorer.Services.TriggerService;
 
 public class Importer {
 
@@ -53,7 +55,19 @@ public class Importer {
     public static void importJson(String json, Context context) throws JSONException {
         ParsedImport parsed = parse(json);
         DatabaseHandler dbHandler = new DatabaseHandler(context);
-        dbHandler.replaceAll(parsed.triggers, parsed.filters, parsed.tasks);
+        synchronized (TriggerStateLock.MONITOR) {
+            ArrayList<Long> previousTriggerIds = new ArrayList<>();
+            for (Trigger trigger : dbHandler.getAllTrigger()) {
+                previousTriggerIds.add(trigger.getId());
+            }
+            dbHandler.replaceAll(parsed.triggers, parsed.filters, parsed.tasks);
+
+            TriggerService triggerService = new TriggerService(context);
+            for (Long previousTriggerId : previousTriggerIds) {
+                triggerService.cancelTrigger(previousTriggerId);
+            }
+            triggerService.queueTrigger();
+        }
     }
 
     public static ArrayList<Trigger> createTriggerlist(String content) throws JSONException {

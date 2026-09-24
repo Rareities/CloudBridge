@@ -147,14 +147,21 @@ public class TriggerRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerVie
     }
 
     private void copyTrigger(Trigger trigger){
-        trigger.setTitle(trigger.getTitle() + context.getString(R.string.trigger_copy_suffix));
-        Trigger newTrigger = (new DatabaseHandler(context)).createTrigger(trigger, false);
+        Trigger newTrigger = trigger.duplicate(
+                trigger.getTitle() + context.getString(R.string.trigger_copy_suffix));
+        newTrigger = (new DatabaseHandler(context)).createTrigger(newTrigger, false);
+        if (newTrigger.getId() < 0) {
+            Toasty.error(context, context.getString(R.string.trigger_copy_failed)).show();
+            return;
+        }
+        new TriggerService(context).queueSingleTrigger(newTrigger);
         triggers.add(newTrigger);
         notifyItemInserted(triggers.size() - 1);
     }
 
     public void deleteTrigger(Trigger trigger) {
         new DatabaseHandler(context).deleteTrigger(trigger.getId());
+        new TriggerService(context).cancelTrigger(trigger.getId());
         int index = triggers.indexOf(trigger);
         if (index >= 0) {
             triggers.remove(index);

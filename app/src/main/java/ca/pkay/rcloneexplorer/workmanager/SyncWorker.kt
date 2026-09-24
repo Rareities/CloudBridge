@@ -18,6 +18,7 @@ import ca.pkay.rcloneexplorer.Database.DatabaseHandler
 import ca.pkay.rcloneexplorer.Database.RunRejectedException
 import ca.pkay.rcloneexplorer.Database.RunRepository
 import ca.pkay.rcloneexplorer.Database.RunState
+import ca.pkay.rcloneexplorer.Database.TriggerStateLock
 import ca.pkay.rcloneexplorer.Items.RemoteItem
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.Items.Task
@@ -41,6 +42,7 @@ import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
 import java.io.InterruptedIOException
+import java.util.Calendar
 import java.util.Random
 import java.util.concurrent.TimeUnit
 
@@ -49,6 +51,11 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     companion object {
         const val TASK_ID = "TASK_ID"
         const val TASK_EPHEMERAL = "TASK_EPHEMERAL"
+        const val TRIGGER_ID = "TRIGGER_ID"
+        const val TRIGGER_TARGET_ID = "TRIGGER_TARGET_ID"
+        const val TRIGGER_TYPE = "TRIGGER_TYPE"
+        const val TRIGGER_TIME = "TRIGGER_TIME"
+        const val TRIGGER_WEEKDAYS = "TRIGGER_WEEKDAYS"
         const val RUN_ID = "RUN_ID"
         const val RUN_OWNER_TOKEN = "RUN_OWNER_TOKEN"
         private const val TAG = "SyncWorker"
@@ -67,7 +74,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
     internal enum class FAILURE_REASON {
         NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED,
-        CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION, RUN_NOT_ADMITTED, FOREGROUND_UNAVAILABLE
+        CANCELLED, TRIGGER_DISABLED, NO_TASK, UNSUPPORTED_DIRECTION, RUN_NOT_ADMITTED, FOREGROUND_UNAVAILABLE
     }
 
     // Objects
@@ -102,6 +109,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private var durableRunFinished = false
     private var nativeExitCode: Int? = null
     private var nativeCompletionUnconfirmed = false
+    private var nativeLaunchAttempted = false
 
 
     // Task
@@ -243,14 +251,49 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 failureReason = FAILURE_REASON.CANCELLED
                 return null
             }
-            val started = launch()
-            sRcloneProcess = started
-            if (stopRequested || isStopped) {
-                started?.cancel()
-                failureReason = FAILURE_REASON.CANCELLED
+            synchronized(TriggerStateLock.MONITOR) {
+                if (!scheduledTriggerAllowsNativeLaunch()) {
+                    failureReason = FAILURE_REASON.TRIGGER_DISABLED
+                    log("Scheduled trigger is no longer eligible; native launch was blocked")
+                    return null
+                }
+                nativeLaunchAttempted = true
+                val started = launch()
+                sRcloneProcess = started
+                if (stopRequested || isStopped) {
+                    started?.cancel()
+                    failureReason = FAILURE_REASON.CANCELLED
+                }
+                return started
             }
-            return started
         }
+    }
+
+    private fun scheduledTriggerAllowsNativeLaunch(): Boolean {
+        if (!inputData.keyValueMap.containsKey(TRIGGER_ID)) return true
+        val triggerId = inputData.getLong(TRIGGER_ID, Long.MIN_VALUE)
+        if (triggerId == Long.MIN_VALUE) return false
+        val trigger = try {
+            mDatabase.getTrigger(triggerId)
+        } catch (error: Exception) {
+            FLog.e(TAG, "Unable to verify scheduled trigger before execution", error)
+            null
+        }
+        val queuedConfigurationMatches = trigger != null &&
+            trigger.triggerTarget == inputData.getLong(TRIGGER_TARGET_ID, Long.MIN_VALUE) &&
+            trigger.type == inputData.getInt(TRIGGER_TYPE, Int.MIN_VALUE) &&
+            trigger.time == inputData.getInt(TRIGGER_TIME, Int.MIN_VALUE) &&
+            trigger.getWeekdays() == inputData.getInt(TRIGGER_WEEKDAYS, Int.MIN_VALUE)
+        val weekday = ScheduledTriggerExecutionPolicy.weekdayFromCalendar(
+            Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
+        )
+        val currentDayEnabled = trigger != null && weekday >= 0 && trigger.isEnabledAtDay(weekday)
+        return ScheduledTriggerExecutionPolicy.shouldLaunch(
+            triggerId,
+            trigger?.isEnabled,
+            queuedConfigurationMatches,
+            currentDayEnabled
+        )
     }
 
     private fun handleTask() {
@@ -310,10 +353,13 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                     )
                 } }
                 if (sRcloneProcess == null) {
-                    if (failureReason != FAILURE_REASON.CANCELLED) {
+                    if (failureReason != FAILURE_REASON.CANCELLED &&
+                        failureReason != FAILURE_REASON.TRIGGER_DISABLED) {
                         failureReason = FAILURE_REASON.RCLONE_ERROR
                     }
-                    log("Sync: Rclone process could not be started for direction ${mTask.direction}")
+                    if (failureReason != FAILURE_REASON.TRIGGER_DISABLED) {
+                        log("Sync: Rclone process could not be started for direction ${mTask.direction}")
+                    }
                     return
                 }
                 if (transferLocks != null) {
@@ -396,9 +442,24 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         if (endNotificationAlreadyPosted) {
             return
         }
+        if (!nativeLaunchAttempted &&
+            inputData.keyValueMap.containsKey(TRIGGER_ID) &&
+            failureReason != FAILURE_REASON.TRIGGER_DISABLED) {
+            synchronized(TriggerStateLock.MONITOR) {
+                if (!scheduledTriggerAllowsNativeLaunch()) {
+                    failureReason = FAILURE_REASON.TRIGGER_DISABLED
+                    log("Scheduled trigger is no longer eligible; pending follow-up was suppressed")
+                }
+            }
+        }
         recordDurableRunOutcome()
         if (durableRunClaimed && durableRunId != null && durableRunOwnerToken != null && !durableRunFinished) {
-            failureReason = FAILURE_REASON.RCLONE_ERROR
+            if (failureReason != FAILURE_REASON.TRIGGER_DISABLED &&
+                failureReason != FAILURE_REASON.CANCELLED) {
+                failureReason = FAILURE_REASON.RCLONE_ERROR
+            } else {
+                log("Unable to persist the terminal run state")
+            }
         }
         if (!::mTask.isInitialized) {
             endNotificationAlreadyPosted = true
@@ -420,6 +481,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             }
             FAILURE_REASON.CANCELLED -> {
                 showCancelledNotification(notificationId)
+                endNotificationAlreadyPosted = true
+                return
+            }
+            FAILURE_REASON.TRIGGER_DISABLED -> {
                 endNotificationAlreadyPosted = true
                 return
             }
@@ -462,6 +527,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 if (nativeExitCode == 0) RunState.SUCCESS else RunState.FAILED
             }
             FAILURE_REASON.CANCELLED -> RunState.CANCELLED
+            FAILURE_REASON.TRIGGER_DISABLED -> RunState.CANCELLED
             FAILURE_REASON.NO_UNMETERED,
             FAILURE_REASON.NO_CONNECTION,
             FAILURE_REASON.CONNECTIVITY_CHANGED,
@@ -473,6 +539,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         val reason = if (nativeCompletionUnconfirmed) "Native exit was not confirmed; profile requires recovery" else when (failureReason) {
             FAILURE_REASON.NO_FAILURE -> if (state == RunState.SUCCESS) null else "Native completion was not confirmed"
             FAILURE_REASON.CANCELLED -> "Cancellation requested"
+            FAILURE_REASON.TRIGGER_DISABLED -> "Scheduled trigger was disabled, removed, edited, or could not be verified before native execution"
             FAILURE_REASON.NO_UNMETERED -> "Unmetered network is required"
             FAILURE_REASON.NO_CONNECTION -> "No usable network connection"
             FAILURE_REASON.CONNECTIVITY_CHANGED -> "Connectivity changed during execution"
@@ -716,6 +783,28 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             return
         }
         Thread.sleep(1000)
-        SyncManager(mContext).queue(followUpTaskID)
+        if (!inputData.keyValueMap.containsKey(TRIGGER_ID)) {
+            SyncManager(mContext).queue(followUpTaskID)
+            return
+        }
+        synchronized(TriggerStateLock.MONITOR) {
+            val triggerId = inputData.getLong(TRIGGER_ID, Long.MIN_VALUE)
+            val trigger = try {
+                if (triggerId == Long.MIN_VALUE) null else mDatabase.getTrigger(triggerId)
+            } catch (error: Exception) {
+                FLog.e(TAG, "Unable to verify trigger before scheduling follow-up", error)
+                null
+            }
+            if (trigger == null || !scheduledTriggerAllowsNativeLaunch()) {
+                log("Scheduled follow-up was suppressed because its trigger is no longer eligible")
+                return
+            }
+            val scheduledTargetId = inputData.getLong(TRIGGER_TARGET_ID, Long.MIN_VALUE)
+            if (scheduledTargetId == Long.MIN_VALUE) {
+                log("Scheduled follow-up was suppressed because trigger metadata was incomplete")
+                return
+            }
+            SyncManager(mContext).queueScheduledFollowup(followUpTaskID, trigger, scheduledTargetId)
+        }
     }
 }

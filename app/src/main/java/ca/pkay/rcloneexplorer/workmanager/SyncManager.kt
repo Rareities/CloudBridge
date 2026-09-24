@@ -18,7 +18,7 @@ class SyncManager(private var mContext: Context) {
     }
 
     fun queue(trigger: Trigger) {
-        queue(trigger.triggerTarget)
+        queue(trigger.triggerTarget, trigger, trigger.triggerTarget)
     }
 
     fun queue(task: Task) {
@@ -26,6 +26,14 @@ class SyncManager(private var mContext: Context) {
     }
 
     fun queue(taskID: Long) {
+        queue(taskID, null, null)
+    }
+
+    internal fun queueScheduledFollowup(taskID: Long, trigger: Trigger, scheduledTargetId: Long) {
+        queue(taskID, trigger, scheduledTargetId)
+    }
+
+    private fun queue(taskID: Long, trigger: Trigger?, scheduledTargetId: Long?) {
         val run = try {
             RunRepository(mContext).queueLegacyTask(taskID)
         } catch (e: RunRejectedException) {
@@ -37,11 +45,19 @@ class SyncManager(private var mContext: Context) {
         }
 
         try {
-            val data = Data.Builder()
+            val dataBuilder = Data.Builder()
                 .putLong(SyncWorker.TASK_ID, taskID)
                 .putString(SyncWorker.RUN_ID, run.runId)
                 .putString(SyncWorker.RUN_OWNER_TOKEN, run.ownerToken)
-                .build()
+            if (trigger != null) {
+                dataBuilder
+                    .putLong(SyncWorker.TRIGGER_ID, trigger.id)
+                    .putLong(SyncWorker.TRIGGER_TARGET_ID, scheduledTargetId ?: trigger.triggerTarget)
+                    .putInt(SyncWorker.TRIGGER_TYPE, trigger.type)
+                    .putInt(SyncWorker.TRIGGER_TIME, trigger.time)
+                    .putInt(SyncWorker.TRIGGER_WEEKDAYS, trigger.getWeekdays())
+            }
+            val data = dataBuilder.build()
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
                 .setInputData(data)
                 .addTag(taskID.toString())

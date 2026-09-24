@@ -22,11 +22,13 @@ import java.util.Calendar;
 
 import ca.pkay.rcloneexplorer.BroadcastReceivers.TriggerReceiver;
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
+import ca.pkay.rcloneexplorer.Database.TriggerStateLock;
 import ca.pkay.rcloneexplorer.Items.Trigger;
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.notifications.AppErrorNotificationManager;
 import ca.pkay.rcloneexplorer.util.PermissionManager;
 import ca.pkay.rcloneexplorer.workmanager.ScheduleTimeCalculator;
+import ca.pkay.rcloneexplorer.workmanager.ScheduledTriggerExecutionPolicy;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
 
 public class TriggerService extends Service {
@@ -36,6 +38,10 @@ public class TriggerService extends Service {
 
     public static String TRIGGER_RECIEVE = "TRIGGER_RECIEVE";
     public static String TRIGGER_ID = "TRIGGER_ID";
+    public static String ALARM_TARGET_ID = "TRIGGER_ALARM_TARGET_ID";
+    public static String ALARM_TYPE = "TRIGGER_ALARM_TYPE";
+    public static String ALARM_TIME = "TRIGGER_ALARM_TIME";
+    public static String ALARM_WEEKDAYS = "TRIGGER_ALARM_WEEKDAYS";
 
     public static String CHANNEL_ID = "CHANNEL_ID";
     public static int SERVICE_NOTIFICATION_ID = 42;
@@ -63,10 +69,17 @@ public class TriggerService extends Service {
     }
 
     public void queueSingleTrigger(Trigger trigger){
-        if(trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
-            queueSingleScheduleTrigger(trigger);
-        } else {
-            queueSingleIntervalTrigger(trigger);
+        synchronized (TriggerStateLock.MONITOR) {
+            Trigger current = dbHandler.getTrigger(trigger.getId());
+            if (current == null || !current.isEnabled()) {
+                cancelTrigger(trigger.getId());
+                return;
+            }
+            if(current.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
+                queueSingleScheduleTrigger(current);
+            } else {
+                queueSingleIntervalTrigger(current);
+            }
         }
 
     }
@@ -74,7 +87,7 @@ public class TriggerService extends Service {
     @SuppressLint("ScheduleExactAlarm") // this is caught by the PermissionManager itself
     private void queueSingleScheduleTrigger(Trigger trigger){
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        PendingIntent pi = getIntent(trigger.getId());
+        PendingIntent pi = getIntent(trigger);
         am.cancel(pi);
         if(trigger.isEnabled()){
             long now = System.currentTimeMillis();
@@ -111,46 +124,65 @@ public class TriggerService extends Service {
     }
 
     private void queueSingleIntervalTrigger(Trigger trigger){
-        if(trigger.isEnabled()){
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        PendingIntent pi = getIntent(trigger);
+        // Reconciliation must remove a previously queued alarm even when the trigger was disabled.
+        am.cancel(pi);
 
-            int intervalMillis = trigger.getTime() * 60 * 1000;
-            long timeToTrigger = System.currentTimeMillis();
+        Long intervalMillis = TriggerDispatchPolicy.intervalMillisIfEnabled(
+                trigger.isEnabled(), trigger.getTime());
+        if (intervalMillis == null) return;
 
-            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId());
-            am.cancel(pi);
-            am.setInexactRepeating(
-                    AlarmManager.RTC_WAKEUP,
-                    timeToTrigger+intervalMillis,
-                    intervalMillis,
-                    pi
-            );
-        }
+        long timeToTrigger = System.currentTimeMillis();
+        am.setInexactRepeating(
+                AlarmManager.RTC_WAKEUP,
+                timeToTrigger + intervalMillis,
+                intervalMillis,
+                pi
+        );
     }
 
     public void cancelTrigger(long triggerID){
-        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        am.cancel(getIntent(triggerID));
+        synchronized (TriggerStateLock.MONITOR) {
+            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            am.cancel(getIntent(triggerID));
+        }
     }
 
     private void startTask(Trigger trigger){
-        boolean skipBecauseOfWeekday;
-        //account for monday beeing 1 and sunday beeing 0. Therefor we need to offset by 2
-        int day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)-2;
+        synchronized (TriggerStateLock.MONITOR) {
+            Trigger current = dbHandler.getTrigger(trigger.getId());
+            if (current == null || !current.isEnabled()) {
+                cancelTrigger(trigger.getId());
+                return;
+            }
+            // The trigger model uses Monday=0 through Sunday=6; Calendar numbers Sunday first.
+            int calendarDay = Calendar.getInstance().get(Calendar.DAY_OF_WEEK);
+            int weekday = ScheduledTriggerExecutionPolicy.weekdayFromCalendar(calendarDay);
+            boolean dayEnabled = current.isEnabledAtDay(weekday);
+            if (!TriggerDispatchPolicy.shouldDispatch(current.isEnabled(), dayEnabled)) {
+                return;
+            }
 
-        //check for sundays. Calendar starts with sunday.
-        if(day==-1){
-            skipBecauseOfWeekday = !trigger.isEnabledAtDay(6);
-        }else{
-            skipBecauseOfWeekday = !trigger.isEnabledAtDay(day);
+            SyncManager sm = new SyncManager(this.context);
+            sm.queue(current);
         }
+    }
 
-        if(skipBecauseOfWeekday){
-            return;
-        }
+    private PendingIntent getIntent(Trigger trigger){
+        long triggerId = trigger.getId();
+        Intent i = new Intent(context, TriggerReceiver.class);
+        i.setAction(TRIGGER_RECIEVE);
+        i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        i.putExtra(TRIGGER_ID, triggerId);
+        // A broadcast already delivered before an edit must not run the newly edited task.
+        i.putExtra(ALARM_TARGET_ID, trigger.getTriggerTarget());
+        i.putExtra(ALARM_TYPE, trigger.getType());
+        i.putExtra(ALARM_TIME, trigger.getTime());
+        i.putExtra(ALARM_WEEKDAYS, trigger.getWeekdays());
 
-        SyncManager sm = new SyncManager(this.context);
-        sm.queue(trigger);
+        // Known WP10 blocker: narrowing a long ID can collide with another PendingIntent identity.
+        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private PendingIntent getIntent(long triggerId){
@@ -158,27 +190,61 @@ public class TriggerService extends Service {
         i.setAction(TRIGGER_RECIEVE);
         i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         i.putExtra(TRIGGER_ID, triggerId);
-
-        // Todo: Because of the long to int cast, this may fail when the user has more than Integer.MAX tasks.
-        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT ^ PendingIntent.FLAG_IMMUTABLE);
+        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         createNotification();
-        long id = intent.getLongExtra(TRIGGER_ID, -1);
-        this.dbHandler = new DatabaseHandler(getBaseContext());
-        this.context = getBaseContext();
-        Trigger t = dbHandler.getTrigger(id);
-
-        // this can happen if the trigger was scheduled, but then deleted.
-        if(t == null) {
+        if (intent == null) {
             stopForeground(true);
             return Service.START_NOT_STICKY;
         }
+        long id = intent.getLongExtra(TRIGGER_ID, -1);
+        this.dbHandler = new DatabaseHandler(getBaseContext());
+        this.context = getBaseContext();
+        synchronized (TriggerStateLock.MONITOR) {
+            Trigger t = dbHandler.getTrigger(id);
 
-        startTask(t);
-        queueSingleTrigger(t);
+            // this can happen if the trigger was scheduled, but then deleted.
+            if(t == null) {
+                cancelTrigger(id);
+                stopForeground(true);
+                return Service.START_NOT_STICKY;
+            }
+
+            // An alarm may already have been delivered when the user disables its trigger.
+            if (!t.isEnabled()) {
+                cancelTrigger(id);
+                stopForeground(true);
+                return Service.START_NOT_STICKY;
+            }
+
+            boolean hasSnapshot = intent.hasExtra(ALARM_TARGET_ID)
+                    && intent.hasExtra(ALARM_TYPE)
+                    && intent.hasExtra(ALARM_TIME)
+                    && intent.hasExtra(ALARM_WEEKDAYS);
+            boolean snapshotMatches = TriggerDispatchPolicy.alarmConfigurationMatches(
+                    hasSnapshot,
+                    intent.getLongExtra(ALARM_TARGET_ID, Long.MIN_VALUE),
+                    intent.getIntExtra(ALARM_TYPE, Integer.MIN_VALUE),
+                    intent.getIntExtra(ALARM_TIME, Integer.MIN_VALUE),
+                    intent.getIntExtra(ALARM_WEEKDAYS, Integer.MIN_VALUE),
+                    t.getTriggerTarget(),
+                    t.getType(),
+                    t.getTime(),
+                    t.getWeekdays()
+            );
+            if (!snapshotMatches) {
+                // This also upgrades a pending pre-snapshot alarm without launching it.
+                queueSingleTrigger(t);
+                stopForeground(true);
+                return Service.START_NOT_STICKY;
+            }
+
+            startTask(t);
+            queueSingleTrigger(t);
+        }
         stopForeground(true);
         return Service.START_NOT_STICKY;
     }

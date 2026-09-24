@@ -50,6 +50,18 @@ data class Trigger(var id: Long) {
         this.weekdays = weekdays
     }
 
+    /** Copies the configuration without reusing its persisted row identity. */
+    fun duplicate(newTitle: String): Trigger {
+        return Trigger(TRIGGER_ID_DOESNTEXIST).also { copy ->
+            copy.title = newTitle
+            copy.isEnabled = isEnabled
+            copy.setWeekdays(getWeekdays().toByte())
+            copy.time = time
+            copy.triggerTarget = triggerTarget
+            copy.type = type
+        }
+    }
+
     override fun toString(): String {
         return "Trigger{" +
                 "id=" + id +

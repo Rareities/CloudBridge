@@ -435,6 +435,7 @@
     <string name="shortcut_missing_id">无法启动同步</string>
     <string name="task_copy_suffix">(Copy)</string>
     <string name="trigger_copy_suffix">(Copy)</string>
+    <string name="trigger_copy_failed">无法保存复制的触发器。</string>
     <string name="trigger_label_weekdays">星期</string>
     <string name="sync_service_notification_channel_title">同步服务</string>
     <string name="sync_service_notification_channel_success_title">同步成功</string>

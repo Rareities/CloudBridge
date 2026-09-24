@@ -6,6 +6,7 @@ import androidx.work.WorkerParameters
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.notifications.AppErrorNotificationManager
 import ca.pkay.rcloneexplorer.util.FLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -106,6 +107,8 @@ class SessionGuardianWorker(
                         failedHealthChecks++
                     }
 
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     FLog.e(TAG, "Error checking remote ${remote.name}", e)
                 }
@@ -113,6 +116,8 @@ class SessionGuardianWorker(
 
             FLog.d(TAG, "Session Guardian completed. Checked: $credentialRemotesChecked, Failed: $failedHealthChecks")
 
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             FLog.e(TAG, "Session Guardian failed", e)
             // Don't return failure - we want the worker to continue scheduling

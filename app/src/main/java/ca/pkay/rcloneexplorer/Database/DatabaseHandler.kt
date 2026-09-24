@@ -437,31 +437,49 @@ class DatabaseHandler(context: Context?) :
     }
 
     fun createTrigger(triggerToStore: Trigger, withId: Boolean = false): Trigger {
-        val db = writableDatabase
-        val newRowId = db.insert(Trigger.TABLE_NAME, null, if(withId) getTriggerContentValuesWithID(triggerToStore) else getTriggerContentValues(triggerToStore))
-        db.close()
-        triggerToStore.id = newRowId
-        return triggerToStore
+        synchronized(TriggerStateLock.MONITOR) {
+            val db = writableDatabase
+            try {
+                val newRowId = db.insert(
+                    Trigger.TABLE_NAME,
+                    null,
+                    if (withId) getTriggerContentValuesWithID(triggerToStore) else getTriggerContentValues(triggerToStore)
+                )
+                triggerToStore.id = newRowId
+                return triggerToStore
+            } finally {
+                db.close()
+            }
+        }
     }
 
     fun updateTrigger(triggerToUpdate: Trigger) {
-        val db = writableDatabase
-        db.update(
-                Trigger.TABLE_NAME,
-                getTriggerContentValuesWithID(triggerToUpdate),
-                Trigger.COLUMN_NAME_ID + " = ?",
-                arrayOf(triggerToUpdate.id.toString())
-        )
-        db.close()
+        synchronized(TriggerStateLock.MONITOR) {
+            val db = writableDatabase
+            try {
+                db.update(
+                    Trigger.TABLE_NAME,
+                    getTriggerContentValuesWithID(triggerToUpdate),
+                    Trigger.COLUMN_NAME_ID + " = ?",
+                    arrayOf(triggerToUpdate.id.toString())
+                )
+            } finally {
+                db.close()
+            }
+        }
     }
 
     fun deleteTrigger(id: Long): Int {
-        val db = writableDatabase
-        val selection = Trigger.COLUMN_NAME_ID + " LIKE ?"
-        val selectionArgs = arrayOf(id.toString())
-        val retcode = db.delete(Trigger.TABLE_NAME, selection, selectionArgs)
-        db.close()
-        return retcode
+        synchronized(TriggerStateLock.MONITOR) {
+            val db = writableDatabase
+            try {
+                val selection = Trigger.COLUMN_NAME_ID + " LIKE ?"
+                val selectionArgs = arrayOf(id.toString())
+                return db.delete(Trigger.TABLE_NAME, selection, selectionArgs)
+            } finally {
+                db.close()
+            }
+        }
     }
 
     private fun getTriggerContentValuesWithID(t: Trigger): ContentValues {
@@ -625,6 +643,16 @@ class DatabaseHandler(context: Context?) :
      * have been validated by the importer.
      */
     fun replaceAll(
+        importedTriggers: List<Trigger>,
+        importedFilters: List<Filter>,
+        importedTasks: List<Task>
+    ) {
+        synchronized(TriggerStateLock.MONITOR) {
+            replaceAllUnderTriggerLock(importedTriggers, importedFilters, importedTasks)
+        }
+    }
+
+    private fun replaceAllUnderTriggerLock(
         importedTriggers: List<Trigger>,
         importedFilters: List<Filter>,
         importedTasks: List<Task>

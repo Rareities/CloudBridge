@@ -573,6 +573,7 @@
     <string name="shortcut_missing_id">Could not start Sync</string>
     <string name="task_copy_suffix">(Copy)</string>
     <string name="trigger_copy_suffix">(Copy)</string>
+    <string name="trigger_copy_failed">Could not save the copied trigger.</string>
     <string name="trigger_label_weekdays">Weekdays</string>
     <string name="sync_service_notification_channel_title">Sync service</string>
     <string name="sync_service_notification_channel_success_title">Sync service success</string>
