@@ -102,7 +102,7 @@ workspace.
 
 ### WP00 acceptance status
 
-Baseline identity, current app pin, repository instructions, CI/PR refresh and gap list are
+WP00 is **PARTIAL**. Baseline identity, current app pin, repository instructions, CI/PR refresh and gap list are
 recorded in the local evidence commits above. Standalone engine build and focused safety,
 Proton and Internxt tests now have evidence, and the Gradle configuration resolves the exact
 Rareities URL/ref/version under JDK 17. WP00 build/test acceptance remains incomplete because
@@ -197,8 +197,9 @@ boundary.
 
 ### WP02 acceptance status
 
-WP02 is **COMPLETE for the audited CloudBridge shortcut and diagnostic sinks**. The unit and
-lint gates pass, and the source commit is persisted. This does not claim that every process
+WP02 is **PARTIAL for the master package**: the bounded CloudBridge shortcut and diagnostic
+sink implementation is present, and its available unit/lint gates passed. The source commit
+is persisted. This does not claim that every process
 launch/input path has been audited or that process lifetime, cancellation, output draining
 and result truth are complete; those broader execution concerns remain owned by WP05 and the
 later scheduling/result packages. Native compilation, device acceptance and live Proton
@@ -239,8 +240,8 @@ backup JSON or diagnostics.
 
 ### WP03 acceptance status
 
-WP03 is **COMPLETE for the bounded import/rollback and production secret-storage
-implementation**. The source and tests are persisted, but full crash/disk-full fault injection,
+WP03 is **PARTIAL for the master package**. The bounded import/rollback and production
+secret-storage implementation is present, but full crash/disk-full fault injection,
 live Android Keystore behavior, native compilation, device acceptance and live Proton workflow
 remain `NOT RUN`. Importing an encrypted config whose password differs from the currently
 cached password remains an explicit unlock/recovery boundary, not a silent downgrade.
@@ -282,8 +283,8 @@ run before claiming it.
 
 ### WP04 residuals and acceptance status
 
-WP04 is **COMPLETE for the bounded profile/run ownership implementation**, but not full
-application acceptance. Ephemeral file-explorer work still uses its compatibility path, UI
+WP04 is **PARTIAL for the master package**. The bounded profile/run ownership implementation
+is present, but this is not full application acceptance. Ephemeral file-explorer work still uses its compatibility path, UI
 readiness presentation is not yet migrated, and the complete native lifetime/stream/cancel
 boundary remains WP05. Android database migration, process-death, duplicate-dispatch and
 terminal-write fault tests require instrumentation or a device. Bisync execution remains
@@ -442,7 +443,8 @@ credentials or data were used. An unconfirmed RCD exit intentionally remains gua
 post-app-process-death recovery is still open.
 
 WP05 implementation is sufficiently migrated to proceed to WP06, while lifecycle/recovery
-and real-device acceptance remain explicit open gates. Do not treat Gradle `UP-TO-DATE` as a
+and real-device acceptance remain explicit open gates; master WP05 acceptance remains
+**PARTIAL** until all retained lifecycle and failure-boundary tests are evidenced. Do not treat Gradle `UP-TO-DATE` as a
 fresh test execution; 53/53 is from the last executed full test result.
 
 ## 2026-09-23 — WP06 endpoint identity and durable conflict ownership
@@ -1826,7 +1828,7 @@ until the compatible-state native feature has an independently reviewed/publicat
 6. **Safety invariants:** stale/missing alarm snapshots fail closed and reconcile current alarm; deleted/disabled/stale newly tagged scheduled work must not start a native child; manual requests remain distinct in new payloads; trigger-copy persistence failure must not enqueue/display an unsaved row; cancellation propagates rather than becoming success.
 7. **Implementation:** synchronized `DatabaseHandler` create/update/delete/replace operations; importer alarm reconciliation; current-row checks in trigger service; disabled interval cancellation and long interval arithmetic; alarm snapshot validation; worker current-state checks and metadata propagation to children; `CancellationException` propagation in guardian worker; fresh unsaved trigger copy plus insert-result check and localized error. Source review confirmed existing `BootReceiver` requeues all persisted trigger types on `BOOT_COMPLETED`; after boot an interval is anchored at current time plus its configured period. This behavior was not instrumented/device-tested.
 8. **Reuse:** existing trigger rows, `TriggerStateLock`, `ScheduleTimeCalculator`, WorkManager task IDs, `SyncWorker` run/native ownership, existing localized resources and current tests; no database schema or rclone pin change.
-9. **Retired/decision:** replaced the old copy path that mutated the original trigger and reused its persisted ID; added snapshot rejection for already-delivered alarms. Independent reviewer confirmed the snapshot path and lock order by inspection. Do not blanket-cancel old requests: legacy scheduled requests carry the same old payload as manual requests.
+9. **Retired/decision:** replaced the old copy path that mutated the original trigger and reused its persisted ID; added snapshot rejection for already-delivered alarms. Independent reviewers confirmed the snapshot path and lock order by inspection. A historical enqueue/query audit found legacy manual and scheduled requests share WorkManager input/tag identity, durable run rows do not retain origin, and WorkInfo queries cannot recover absent trigger metadata. Do not blanket-cancel or reject ambiguous old requests: that could cancel pending manual work, while leaving them preserves stale-scheduled-run risk; product policy is required.
 10. **Failure behavior:** trigger DB read failure, absent/deleted row, disabled row, stale/missing alarm snapshot or mismatched queued configuration prevents the newly tagged native launch; old ambiguous WorkManager requests remain a compatibility risk pending a safe migration design.
 11. **Tests:** JDK 21.0.8 / Gradle 8.13 / SDK 36, offline and workspace-local Gradle/Android/temp state: `:app:mergeOssDebugResources` **PASS**; `:app:compileOssDebugKotlin` **PASS**; standalone JUnitCore `TriggerDispatchPolicyTest` **4/4 PASS** and `ScheduledTriggerExecutionPolicyTest` **4/4 PASS** (each javac run printed a ZipFS `AccessDeniedException` while closing the cached JUnit archive, exited 0, and JUnit executed all four). `:app:testOssDebugUnitTest` **BLOCKED / NOT PASSED before JUnit** on transformed `viewbinding-8.13.2-api.jar` `AccessDeniedException`; subsequent missing-symbol diagnostics are dependent. `TriggerTest` **NOT RUN**. `git diff --cached --check` **PASS**. Android instrumentation, Galaxy S26 and live Proton **NOT RUN**; native Gradle tasks excluded; no APK.
 12. **Acceptance:** partial WP10 guards only, not package completion. Still open: legacy scheduled-work ambiguity; reusable trigger IDs without generation tokens; `long` PendingIntent ID narrowing/collision; single durable dispatcher/coalescing/missed-run behavior; verified boot/time-change/force-stop and missed-interval semantics; cross-process races; duplicate DB failure/UI test; alarm/edit/import/delete/worker barrier tests; Android lifecycle/quota/permission and Galaxy acceptance.
@@ -1863,3 +1865,107 @@ until the compatible-state native feature has an independently reviewed/publicat
 11. **Tests:** documentation consistency and diff hygiene are checked; no new application test is implied by this plan. Current WP10 Kotlin/resource/policy results and Java/JUnit blocker are recorded above; Galaxy, Proton, instrumentation, PR/CI, signing and artifact provenance remain **NOT RUN/UNKNOWN**.
 12. **Acceptance:** WP15 **NOT COMPLETE**. Final requirements/finding closure, independent PR/CI review, exact integrated build and provenance/rollback record, repository refresh and human release recommendation remain outstanding until WP14 evidence exists.
 13. **Rollback/next:** keep the plan as current working evidence; revise each section after package changes and finalize only after master gates and all 13-field package records are reconciled. Maintain NO-GO and continue safe independent work.
+
+## 2026-09-25 - WP14 exact app-pin lock regressions (PARTIAL EVIDENCE)
+
+1. **Objective:** add repeated separate-OS-process evidence for the exact rclone revision configured by CloudBridge, without implying full WP14 acceptance.
+2. **Scope:** clean detached worktree `work/rclone-app-pin-wp08` at immutable pin `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; all 11 existing `TestLockfile*` functions in `cmd/bisync/lockfile_test.go`, repeated 100 times each. Two named tests create independent OS processes.
+3. **Out of scope:** rclone source edits; separate-process renewal/expiry, stale release, corrupt metadata and clock matrix; app/native barriers; migration/rollback; data matrix; soak; Android/Linux runtime; Galaxy S26; Proton; PR/APK/signing/release.
+4. **Preconditions:** verified exact app pin and clean checkout; read the selected test implementations and `TestMain`; both tests create all lock profiles under Go `t.TempDir()` and invoke only a local helper process. No configured remotes were used.
+5. **Design:** repeat the complete existing lockfile test group 100 times. This checks local acquisition/release, dry-run, same-process duplicate owner, legacy/unreadable metadata preservation, stale heartbeat, renewal/release serialization, delayed former-owner behavior, independent-process exclusion/release and crash recovery.
+6. **Safety invariants:** module proxy and checksum network access disabled; test temp, config path and fresh Go build cache isolated under workspace `work/tmp`; `RCLONE_CONFIG` points to a unique nonexistent task-local file; password/config-command overrides unset; no remote/provider operation or user data access.
+7. **Implementation:** no source changes. Added bounded evidence to `TEST_REPORT.md`, requirements/compatibility/release tables and this ledger; retained WP14 as **ACCEPTANCE NOT RUN / BLOCKING**.
+8. **Reuse:** exact app-pin lock implementation, existing helper-process tests, Go 1.26.8, `-mod=readonly`, and task-local temp/cache paths.
+9. **Retired/decision:** all 11 test functions passed, but only `TestLockfileSerializesIndependentProcesses` and `TestLockfileReclaimsAfterOwnerProcessCrash` exercise separate OS processes. The run does not prove app integration, Linux/Android semantics, separate-process renewal/expiry, stale release, corrupt metadata, clock behavior or any other WP14 gate.
+10. **Failure behavior:** any test failure would retain its output and stop promotion/acceptance; no remote/provider state was available for mutation. Both selected tests completed with zero failures.
+11. **Tests:** command `go test -mod=readonly -run '^TestLockfile' -count=100 -timeout=20m ./cmd/bisync`; Go 1.26.8 Windows/amd64; `GOPROXY=off`, `GOSUMDB=off`, `GOWORK=off`, `CGO_ENABLED=0`; `GOMODCACHE=work/go-mod-cache`; fresh `GOCACHE` and `TEMP`/`TMP` under `work/tmp/wp14-locksuite-94bcb85137914698bb330ecc85bc03bd`. Result: **PASS**, `ok github.com/rclone/rclone/cmd/bisync 178.236s`; all 11 matching top-level test functions ran 100 times. `RCLONE_CONFIG` pointed to a unique nonexistent task-local file. The exact rclone checkout remained unchanged.
+12. **Acceptance:** local lockfile regressions have broad repeated evidence; only active-owner exclusion/release and process-crash recovery were tested across OS processes. Separate-process expiry/renewal, stale-owner release, corrupt metadata and clock tests remain **NOT RUN**; Android/Linux and integrated app/native acceptance remain **NOT RUN**. WP14 **NOT ACCEPTED / BLOCKING** because prerequisites and other gates remain open.
+13. **Rollback/next:** no source rollback needed; leave app pin unchanged. Continue independent disposable local cases and current-source app tests; do not infer device/provider acceptance or release readiness from this slice.
+
+## 2026-09-25 - Retrospective 13-field ledger normalization (WP00, WP02-WP05)
+
+The following records normalize the earlier narrative entries to the master template. They
+do not add tests or upgrade any earlier package to complete; the original evidence and
+limitations remain in the dated sections above. Package-level status below is checked
+against the master acceptance criteria, not the narrower historical “bounded implementation”
+phrasing.
+
+### WP00 - Freeze evidence and reproduce baseline
+
+1. **Objective:** freeze both-repository identity, toolchain, test inventory and baseline failures before further implementation.
+2. **Scope:** Rareities/CloudBridge and Rareities/rclone snapshots, dependency/build configuration, app pin, GitHub PR/CI evidence and workspace toolchains.
+3. **Out of scope:** product-feature changes or replacing either repository history.
+4. **Preconditions:** read the master handoff and both repository instructions; refresh the supplied snapshot through the 2026-09-22/23 GitHub evidence.
+5. **Design:** record immutable branch SHAs, archive hashes, app configuration, dependency/toolchain versions, exact commands and per-gate PASS/FAIL/NOT RUN results.
+6. **Safety invariants:** preserve dirty/user files; never push archive-import history as upstream ancestry; missing NDK, device/provider or signing access stays NOT RUN.
+7. **Implementation:** created evidence-only source imports and history-preserving local branches, captured the baseline test/gap inventory, and added requirements/patch ledgers; WP01 later established the current immutable rclone app pin `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`.
+8. **Reuse:** repository build scripts, existing tests, Go 1.26.8, Gradle 8.13, JDK 17/21 evidence and Android project configuration.
+9. **Retired/decision:** old Round Sync identity/status and absent Git history in downloaded archives are not current remote evidence; do not blindly fast-forward the 170-commit upstream gap or rewrite/push history.
+10. **Failure behavior:** broad rclone tests remain incomplete after Windows server-script, symlink-privilege and WebDAV failures; Android native baseline is blocked by unavailable NDK/`local.properties`; none is presented as a pass.
+11. **Tests:** standalone rclone build and focused sync/operations/ProtonDrive/Internxt tests passed; broad `go test ./...` was not clean; Gradle pin/config tasks and an older 36-test JVM/lint run passed; native APK, reproducibility/inspection, Galaxy and live Proton were **NOT RUN**.
+12. **Acceptance:** **PARTIAL.** Immutable identity, evidence/gap report and current candidate are recorded, but clean integrated native build/APK inspection and environmental acceptance gates are not established.
+13. **Rollback/next:** keep archive imports as local evidence, retain known baseline commits and do not push; continue with WP01 independent engine review and refresh GitHub state before any PR/release.
+
+### WP02 - Secure execution inputs and diagnostics
+
+1. **Objective:** harden externally reachable command inputs, shortcut authorization and diagnostic sinks.
+2. **Scope:** CloudBridge command construction, exported shortcut route, centralized logging/redaction and error text; bounded source commit `f3bd473`.
+3. **Out of scope:** Bisync transfer semantics and complete native-process lifetime ownership.
+4. **Preconditions:** WP00 baseline and inventory of the affected app routes/sinks.
+5. **Design:** typed/validated requests, per-task shortcut capability and common redaction/bounds before data reaches log or user-facing sinks.
+6. **Safety invariants:** no shell interpolation, raw secret-bearing diagnostics, unbounded log output or implicit destructive defaults; invalid shortcut authorization fails closed.
+7. **Implementation:** centralized redaction covers formatted/file/sync logs and rclone stderr, bounds diagnostics and sync-log growth, and validates shortcut action, task ID and capability token.
+8. **Reuse:** private components, URI checks, scoped work tags and existing shortcut creation flow.
+9. **Retired/decision:** legacy shortcuts without a capability token require recreation; this is an explicit safe-compatibility boundary.
+10. **Failure behavior:** malformed/unauthorized requests are rejected with sanitized errors; broader process execution/lifecycle findings stay assigned to WP05 and later packages.
+11. **Tests:** recorded `:app:testOssDebugUnitTest` **PASS** (22 tests) and `:app:lintOssDebug` **PASS** with pre-existing findings; native artifact, Samsung and live Proton were **NOT RUN**.
+12. **Acceptance:** **PARTIAL.** The bounded shortcut/diagnostic slice is implemented, but the master all-public-routes and no-secret-sink audit is not complete; do not call WP02 package acceptance closed.
+13. **Rollback/next:** revert only the isolated boundary commit if its regressions require it; enumerate every public/Runtime.exec/RC path, retain safe adapters and continue WP03-WP05 tests.
+
+### WP03 - Make config and database changes recoverable
+
+1. **Objective:** make imports, database replacement and credential storage recoverable on validation/write/key failure.
+2. **Scope:** CloudBridge import/export, SQLite replacement, staged config backup and passphrase storage; bounded source commit `3ab1d6b`.
+3. **Out of scope:** unrelated schema/style cleanup or whole-config encryption redesign without migration evidence.
+4. **Preconditions:** WP02 redaction and WP00 migration/baseline fixtures.
+5. **Design:** bound and validate the complete payload, stage config changes, transact database replacement and preserve snapshots for rollback.
+6. **Safety invariants:** never discard the prior valid database/config before validation; never clear ciphertext on Keystore/key loss; do not log imported secrets.
+7. **Implementation:** validates schema/references/legacy arrays, remaps imported IDs transactionally, stages ZIP config entries, restores prior stores on later failure, and wraps the stored rclone passphrase with AES-GCM/Android Keystore.
+8. **Reuse:** existing importer, database/preferences stores, encrypted native-config support and import UI.
+9. **Retired/decision:** removed destructive importer ordering and plaintext decrypt-over-config behavior; the config file itself is not claimed to be whole-file encrypted.
+10. **Failure behavior:** failed insert rolls back DB replacement; staged config errors restore prior stores; Keystore loss retains ciphertext and requires explicit recovery.
+11. **Tests:** recorded unit suite **PASS** (30 tests), lint task **PASS** with 91 warnings/6 baseline-filtered errors, and bounded import validation tests pass; crash/disk-full injection, live Keystore, native APK, Galaxy and Proton are **NOT RUN**.
+12. **Acceptance:** **PARTIAL.** Bounded recoverability implementation exists, but master crash-atomic migration/key-loss/concurrency tests and live device proof are missing; earlier “complete for bounded scope” wording does not mean WP03 package closure.
+13. **Rollback/next:** restore only from verified snapshots/transaction rollback; do not downgrade DB blindly; run crash/disk-full/rename/key-loss and supported migration tests before claiming acceptance.
+
+### WP04 - Create authoritative profiles and run state
+
+1. **Objective:** establish durable profile identity and one persisted owner/result for each run.
+2. **Scope:** CloudBridge profile/run repositories, schema migration, legacy task adapter and worker claim/finish paths; bounded source commit `acc4f5c`.
+3. **Out of scope:** transfer-algorithm reimplementation or silently coercing unsupported legacy modes.
+4. **Preconditions:** WP03 transactional import/config foundation.
+5. **Design:** stable UUID, semantic revision, mode/readiness, endpoint/settings fingerprint and engine pin, with one durable active owner and explicit terminal result.
+6. **Safety invariants:** queued work cannot retarget after profile edit/delete; unknown counters remain unknown; old Bisync/unknown directions require repair rather than conversion.
+7. **Implementation:** deterministic legacy mapping, active-run uniqueness, transactional task/import updates, claim revalidation and startup recovery for uncertain rows.
+8. **Reuse:** existing task/trigger model through a compatibility adapter and WorkManager ownership.
+9. **Retired/decision:** numeric task IDs are not the durable authority; compatibility work remains for legacy requests and ephemeral file-explorer flows.
+10. **Failure behavior:** stale/repair-required claims are refused; interrupted or uncertain ownership moves to explicit recovery state, not success.
+11. **Tests:** recorded model/JVM suite **PASS** (36 tests), lint **PASS** with 98 warnings/6 baseline-filtered errors; migration, process-death, duplicate-dispatch and terminal-write instrumentation were **NOT RUN**.
+12. **Acceptance:** **PARTIAL.** Durable profile/run ownership is present, but UI readiness/ephemeral adapters and instrumented migration/process-death behavior are not closed; the master one-source-of-truth gate remains open.
+13. **Rollback/next:** preserve the schema checkpoint and explicit compatibility adapter; add migration/terminal-write/process-death coverage and keep Bisync mutation blocked until WP08 gates pass.
+
+### WP05 - Own the complete native lifetime
+
+1. **Objective:** ensure one owner controls native launch, pipe drain, cancellation, timeout, exit/reap and resource release.
+2. **Scope:** CloudBridge workers, metadata/config commands, listing, serving/streaming and RCD process families across commits `a3c87f0` through `0337d85` and recorded follow-ups.
+3. **Out of scope:** a new generic service framework or changing rclone transfer algorithms.
+4. **Preconditions:** WP02 safe inputs/diagnostics and WP03-WP04 durable run ownership.
+5. **Design:** `NativeExecutionHandle` owns process lifetime and bounded dual-pipe drains; terminal outcomes are single-assignment and attached resources remain leased until confirmed reap.
+6. **Safety invariants:** no lock/resource release while native mutation might continue; unconfirmed exit cannot report success or admit conflict work; cancellation and interruption propagate.
+7. **Implementation:** migrated operation families to the handle, drained stdout/stderr concurrently with caps, serialized stop-before-launch, and retained an RCD unconfirmed-exit guard across service recreation; raw process construction/lifecycle was consolidated in launch plumbing/handle.
+8. **Reuse:** existing `Rclone` launch/config APIs, scoped transfer locks, coroutines, worker/result model and streaming adapters.
+9. **Retired/decision:** removed scattered caller ownership and wait-before-drain deadlock patterns; preserve interactive pipe semantics and do not create dual owners for one operation.
+10. **Failure behavior:** failed/unconfirmed exits remain failure/recovery-required; RCD guard intentionally stays blocked after process-death until a verified recovery path exists.
+11. **Tests:** at the WP05 milestone, JVM suite reported 53 tests/11 suites pass; Go build/focused tests and prior four-ABI native build passed; a historical universal debug APK hash `CA9DD6D6B413359A5A4E0CBA1F64DA2BD4993CD6FECA2BE3288ADBDDC9FC6A27` was debug-signed with old engine pin `1583cce1e28340e5d064ed955179f5f2b31e7757`, not the current source/pin. Process-death/lifecycle instrumentation, Galaxy, live Proton and current-code APK/provenance remain **NOT RUN**.
+12. **Acceptance:** **PARTIAL.** Most retained process callers were migrated, but master process/resource leak and Android lifecycle/recovery evidence is incomplete; the historical debug APK is not a current candidate or release artifact.
+13. **Rollback/next:** migrate/revert by operation family without dual ownership; retain the RCD guard on uncertain exit; finish lifecycle/process-death tests and inspect a fresh current-pin APK only after prerequisites.
