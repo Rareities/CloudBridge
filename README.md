@@ -4,7 +4,7 @@
 
 A cloud file manager for Android, powered by rclone.
 
-> This is the Rareities fork of CloudBridge. As checked on 2026-09-25, this fork has no published releases and no downloadable APK artifacts. The [upstream documentation](https://thies2005.github.io/CloudBridge/) may describe older behavior or releases; use the build guides in this repository for the fork.
+> This is the Rareities fork of CloudBridge. The 2026-09-25 status snapshot did not verify a complete release inventory, and this README provides no verified APK download. The [upstream documentation](https://thies2005.github.io/CloudBridge/) may describe older behavior or releases; use the build guides in this repository for the fork.
 
 
 ## Screenshots
@@ -43,7 +43,7 @@ The bullets below describe source-level capabilities, not completed WP12 or devi
 
 ## Installation
 
-There is currently no published Rareities/CloudBridge release or downloadable APK artifact. Do not install an upstream APK expecting it to contain this fork's changes. See [BUILD_GUIDE.md](BUILD_GUIDE.md) for a local development build; debug APKs are not production releases.
+No verified Rareities/CloudBridge release or downloadable APK artifact is identified in this documentation snapshot. Do not install an upstream APK expecting it to contain this fork's changes. See [BUILD_GUIDE.md](BUILD_GUIDE.md) for a local development build; debug APKs are not production releases.
 
 > **Bisync safety:** the current fork has a read-only preview/review path, but safe initialization, apply, and recovery are not available. Do not use this build for two-way Bisync mutations or treat a preview as permission to run one.
 
@@ -118,7 +118,7 @@ This app is licensed under the [GPLv3](https://github.com/Rareities/CloudBridge/
 ## About this app
 CloudBridge is a fork of [**Round-Sync**](https://github.com/newhinton/Round-Sync) by **Felix Nüsse**<sup>[newhinton](https://github.com/newhinton)</sup>, which is a fork of [**RCX**](https://github.com/x0b/rcx) by **x0b**<sup>[x0b](https://github.com/x0b)</sup>, which is itself a fork of [**rcloneExplorer**](https://github.com/patrykcoding/rcloneExplorer) by **Patryk Kaczmarkiewicz**<sup>[patrykcoding](https://github.com/patrykcoding)</sup>.
 
-This repository is a maintained fork. Release cadence, signing identity, and feature compatibility are tracked independently; the fork currently has no published release. See [requirements](REQUIREMENTS_MATRIX.md), [test evidence](TEST_REPORT.md), [security review](SECURITY_REVIEW.md), and [release readiness](RELEASE_READINESS.md) for verified status and open gates.
+This repository is a maintained fork. Release cadence, signing identity, and feature compatibility are tracked independently; no verified fork release artifact was identified in the current status snapshot. See [requirements](REQUIREMENTS_MATRIX.md), [test evidence](TEST_REPORT.md), [security review](SECURITY_REVIEW.md), and [release readiness](RELEASE_READINESS.md) for verified status and open gates.
 
 The optional update notification now checks Rareities/CloudBridge and opens this fork's release page. It is notification-only (no in-app download or install), defaults off, and stable builds ignore prereleases. The fork had no verified release candidate in the 2026-09-25 GitHub refresh; updater runtime, opt-out and notification behavior still need integrated/device validation before distribution.
 

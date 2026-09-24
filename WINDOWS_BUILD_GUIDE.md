@@ -48,7 +48,7 @@ Record these exclusions. This does not validate the app-pinned rclone integratio
 
 ## CI and release status
 
-The current `android.yml` workflow runs OSS debug unit tests and packages an OSS debug APK. It does not upload the APK or publish a release. The latest GitHub refresh recorded no workflow runs, open PRs, or releases for the Rareities repositories. Do not trigger a master push with an empty commit.
+The current `android.yml` workflow runs OSS debug unit tests and packages an OSS debug APK. It does not upload the APK or publish a release. The 2026-09-25 read-only refresh returned no open PRs or combined status checks, and no PR-triggered workflow runs; the connector query did not cover push/manual runs or provide a complete release inventory. Do not trigger a master push with an empty commit.
 
 Release variants require a readable production keystore plus `storeFile`, `keyAlias`, `storePassword`, and `keyPassword`, supplied in ignored local `keystore.properties` or the corresponding `CB_*` environment variables. Release tasks never fall back to the Android debug key. No fork release is available; do not distribute a release build until signing-certificate continuity, provenance, migration/rollback, security, provider, and device acceptance gates pass.
 

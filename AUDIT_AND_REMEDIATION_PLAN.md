@@ -59,7 +59,7 @@ This section records plan-quality issues found while auditing the audit. These a
 
 ---
 
-## 1. Deduplicated Remediation Backlog (41 root-cause items)
+## 1. Deduplicated Remediation Backlog (40 root-cause items; historical inventory)
 
 Each item below is one root-cause remediation item. Later phases group one or more items into implementation tracks. `Refs` = original finding IDs. Severity is post-review.
 
@@ -156,25 +156,15 @@ Verification commands (run at every gate):
 
 ## 3. The Plan
 
-### 🚪 PHASE 0 — Emergency Security Remediation (BLOCKING, serial, no parallelism)
+### PHASE 0 — WITHDRAWN historical emergency proposal (not a current blocking phase)
 
-> Rationale: RC-1 is an active, publicly-exploitable supply-chain compromise. It MUST be resolved and the key rotated before ANY other work merges, because every other fix ships under a possibly-counterfeit signature until this is done. Treat as an incident.
+> **WITHDRAWN / NOT ACTIONABLE.** The inherited description of an active public compromise is unverified and is not adopted as a current finding. Do not rotate signing identities, scrub history, force-push, remove prior releases, instruct users to uninstall, or publish a new-key release based on this historical section. Current release signing is fail-closed, but certificate identity and artifact provenance remain **UNKNOWN / NOT VERIFIED**; see `RELEASE_READINESS.md`. This ledger contains no independently verified evidence that establishes a signing-key compromise.
 
-**S0-T1 (RC-1)** — Rotate & scrub signing key  · **effort: M**
-- Generate a NEW release keystore outside the repository; store credentials in CI secrets and local developer properties only. Never place the keystore or passwords under `app/`, `.config/`, or any tracked path.
-- Rewrite `app/build.gradle:6-13` in Groovy-safe form: read `CB_RELEASE_STORE_FILE`, `CB_RELEASE_STORE_PASSWORD`, `CB_RELEASE_KEY_ALIAS`, and `CB_RELEASE_KEY_PASSWORD` from Gradle properties or `System.getenv(...)`; use `?:` or explicit presence checks, not invalid `?, ""` syntax. Only attach `signingConfig signingConfigs.release` when all required values are present, so debug and unsigned local release builds still work.
-- Update `.github/workflows/android.yml` in the same PR to provision the new keystore from secrets, e.g. base64 decode to a temporary file and pass only env/properties to Gradle. Without this, `assembleOssRelease` will fail after the tracked keystore is removed.
-- Scrub history: `git filter-repo --path app/.config/android/roundsync.keystore --invert-paths` (or BFG). Force-push only after maintainer coordination, branch protection planning, and contributor rebase instructions.
-- Treat old-key releases as compromised: remove old downloadable release artifacts where possible, publish old/new signing certificate fingerprints, and document that updates signed with the old key are no longer trusted. Existing side-loaded users cannot install a different signing key over the old app; they must uninstall/reinstall unless a store-controlled key-upgrade mechanism exists.
-- Publish a signed release with the **new** key and clear migration notes before resuming feature releases.
-- Also: `.gitignore` add `*.keystore`, `*.jks`, `.config/android/`.
+**S0-T1 (RC-1) — WITHDRAWN historical proposal; do not execute** — The inherited title “Rotate & scrub signing key” is retained only to locate obsolete text.
+- Withdrawn: all earlier key-rotation, CI-secret, history-rewrite, release-removal, user-uninstall, new-key publication and ignore-rule instructions in this inherited proposal. They are retained only as a historical summary, not approved actions.
 
-**🔒 Review Gate RG-0** (blocking):
-- Confirm `git ls-files | grep -iE 'keystore|\\.jks|\.config/android'` returns nothing.
-- Confirm no tracked file contains the old store/key password strings.
-- Confirm CI and a local clean checkout can build debug without signing secrets.
-- Confirm a release APK builds in CI and signs with the new key only; record the SHA-256 certificate fingerprint in release notes.
-- Sign-off required from maintainer before Phase 1.
+**Review Gate RG-0 — WITHDRAWN historical proposal; not a current blocking gate:**
+- Withdrawn. Do not use this historical gate to authorize history changes, key rotation, release signing or publication; current checks are governed by `RELEASE_READINESS.md` and the master handoff.
 
 ---
 

@@ -4,7 +4,7 @@
 
 This file is inherited from upstream and the fork-specific disclosure route has not yet been confirmed. As checked on 2026-09-25, the Rareities/CloudBridge repository has its public issue tracker disabled; private vulnerability reporting was not verified. Do not post exploit details, credentials, or proof-of-concept data in a public issue or pull request. The inherited upstream contact is [136268370+thies2005@users.noreply.github.com](mailto:136268370+thies2005@users.noreply.github.com), but it is not a confirmed contact for the Rareities fork. Maintainers must establish a fork-specific private reporting route before a release.
 
-There is no published Rareities/CloudBridge release as of this date, so no fork release version is currently supported. Upstream releases are not releases of this fork.
+No verified Rareities/CloudBridge release artifact was identified in the current status snapshot, so this policy does not establish a supported fork release version. Upstream releases are not releases of this fork.
 
 ## Security scope
 

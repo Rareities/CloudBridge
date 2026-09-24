@@ -22,7 +22,7 @@
 
 <main>
   <h2>Privacy review status for the Rareities fork</h2>
-  <p class="note"><strong>Important:</strong> this page is an interim transparency notice, not a complete or legally reviewed privacy policy for the Rareities fork. A source and data-flow audit is still required. The fork has no published release as of 2026-09-25. Do not rely on inherited upstream statements about collection, sharing, updates, Play distribution, or user rights as verified Rareities policy.</p>
+  <p class="note"><strong>Important:</strong> this page is an interim transparency notice, not a complete or legally reviewed privacy policy for the Rareities fork. A source and data-flow audit is still required. No release inventory was verified in the 2026-09-25 status snapshot. Do not rely on inherited upstream statements about collection, sharing, updates, Play distribution, or user rights as verified Rareities policy.</p>
 
   <p>
     The current source includes Android app code and the rclone engine for file and
@@ -65,9 +65,10 @@
     WorkManager check on a 14-day interval; Android may run periodic work later than
     requested. The worker requests the GitHub releases API for
     <code>Rareities/CloudBridge</code> (up to five pages of 100 published releases) and
-    notifications open that fork's latest-release page. If all five pages are full, the
+    notifications open the validated selected release tag, falling back to the fork's safe
+    releases index if a tag URL is unavailable. If all five pages are full, the
     worker leaves the stored update state unchanged. It does not download or install an update. The
-    preference defaults off in the inspected source; there is no verified Rareities release
+    preference defaults off in the inspected source; no verified Rareities release was identified in this snapshot
     candidate as of 2026-09-25.
     Runtime request behavior and device scheduling have not been tested here. Do not
     infer that the API request carries no network metadata.

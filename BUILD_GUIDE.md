@@ -34,11 +34,11 @@ Debug APKs are written under `app/build/outputs/apk/oss/debug/`. The build may c
 
 `.github/workflows/android.yml` runs on pushes and pull requests targeting `master` and supports manual dispatch. It runs the OSS debug unit tests and assembles an OSS debug APK. It does **not** upload an artifact or publish a release. Do not create an empty commit or push directly to `master` merely to trigger a build.
 
-The latest read-only GitHub refresh on 2026-09-25 found zero Actions runs for either Rareities repository, no open PRs, no releases, and unprotected default branches. Refresh these facts before relying on CI or opening a PR. A workflow definition is not evidence that it ran or passed.
+The read-only GitHub refresh on 2026-09-25 returned no open PRs, no combined status checks, and no PR-triggered workflow runs for the checked heads; the connector query was limited to PR-triggered runs. Push/manual workflow history and a complete release inventory were not verified. The refresh reported unprotected default branches. Recheck live status before relying on CI or opening a PR. A workflow definition is not evidence that it ran or passed.
 
 ## Release and signing gate
 
-There is no published Rareities/CloudBridge release and no release-publishing workflow in the checked-in Android workflow. Release package/sign/bundle tasks fail closed unless a readable production keystore and all four signing values are configured through ignored local `keystore.properties` or the documented `CB_*` environment variables. Never commit signing material. Passing a release Gradle task is not authorization to publish: certificate continuity, provenance, compatibility, security, device/provider acceptance, and the master handoff gates must also pass.
+No verified Rareities/CloudBridge release artifact was identified in this status snapshot, and the checked-in Android workflow contains no release-publishing job. Release package/sign/bundle tasks fail closed unless a readable production keystore and all four signing values are configured through ignored local `keystore.properties` or the documented `CB_*` environment variables. Never commit signing material. Passing a release Gradle task is not authorization to publish: certificate continuity, provenance, compatibility, security, device/provider acceptance, and the master handoff gates must also pass.
 
 ## Current limits
 

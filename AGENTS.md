@@ -16,7 +16,7 @@ Android cloud file manager wrapping [rclone](https://rclone.org). Fork of RCX / 
 | Module | Purpose |
 |---|---|
 | `app` | Main Android application |
-| `rclone` | Cross-compiles rclone (Go) into `librclone.so` per ABI |
+| `rclone` | Cross-compiles rclone into an ABI-specific executable named `librclone.so`; the app launches it as a subprocess, not through JNI |
 | `safdav` | SAF/WebDAV bridge library (`io.github.x0b.safdav`) |
 
 - Package namespace: `ca.pkay.rcloneexplorer` (legacy from rcloneExplorer fork).

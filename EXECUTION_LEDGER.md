@@ -15,6 +15,10 @@ separate cross-repository ledger outside this repository; it is not a portable r
 - Use disposable test data only. `Proton:RoundSync-Test` is not permission to delete an existing directory.
 - The final app integration must use Rareities/rclone at an immutable, reproducible revision;
   a moving branch or silent fallback to `thies2005/rclone` is not acceptable.
+- Older dated GitHub snapshots below retain their original observations. The 2026-09-25
+  refresh supersedes broad “no workflow runs/releases” wording: the connector returned no
+  combined status checks and no PR-triggered runs for checked heads; push/manual runs and a
+  complete release inventory were not verified.
 
 ## 2026-09-23 — WP00 baseline refresh
 
@@ -1969,3 +1973,51 @@ phrasing.
 11. **Tests:** at the WP05 milestone, JVM suite reported 53 tests/11 suites pass; Go build/focused tests and prior four-ABI native build passed; a historical universal debug APK hash `CA9DD6D6B413359A5A4E0CBA1F64DA2BD4993CD6FECA2BE3288ADBDDC9FC6A27` was debug-signed with old engine pin `1583cce1e28340e5d064ed955179f5f2b31e7757`, not the current source/pin. Process-death/lifecycle instrumentation, Galaxy, live Proton and current-code APK/provenance remain **NOT RUN**.
 12. **Acceptance:** **PARTIAL.** Most retained process callers were migrated, but master process/resource leak and Android lifecycle/recovery evidence is incomplete; the historical debug APK is not a current candidate or release artifact.
 13. **Rollback/next:** migrate/revert by operation family without dual ownership; retain the RCD guard on uncertain exit; finish lifecycle/process-death tests and inspect a fresh current-pin APK only after prerequisites.
+
+### WP11 - First-class Bisync and Obsidian UI (retrospective 13-field normalization)
+
+1. **Objective:** make Bisync setup, preview, progress, conflict/recovery and the optional Obsidian workflow understandable and safe for ordinary users.
+2. **Scope:** current preview request/review screen, durable preview status, feature-survival audit, user guidance and the missing Obsidian integration.
+3. **Out of scope:** authorizing native apply/initialization/recovery before WP08 preservation and restore are verified; promising exact Android background timing; adding unsupported background-launch or AccessibilityService behavior.
+4. **Preconditions:** stable WP07-WP10 identity, mutation, ownership and scheduling interfaces. WP08 and WP10 remain partial, so these prerequisites are unmet.
+5. **Design:** UI renders durable state and engine capabilities but does not make independent safety decisions; unknown foreground state remains deferred and manual use remains available without Usage Access.
+6. **Safety invariants:** preview completion is never represented as a successful sync; no launch follows cancellation/failure; no UI action bypasses freshness, run ownership or recovery gates.
+7. **Implementation:** a read-only Bisync preview request/review surface and durable status/freshness messaging exist. The source audit found no Obsidian foreground observation, vault fingerprinting, debounce/deferred scheduling, sync-before-open or launch workflow; the regular worker rejects unsupported Bisync directions.
+8. **Reuse:** existing Material UI/resources, preview repository/scheduler/workers, native preview protocol, run identity and localized error/status resources.
+9. **Retired/decision:** keep Apply, initialization, recovery and Obsidian launch unavailable until WP08 has a mandatory verified mutation/restore boundary and WP10 has durable deferral/cancellation. Do not reuse the legacy direct `SyncService` intent recipe; it conflicts with the current non-exported manifest boundary.
+10. **Failure behavior:** unsupported directions and stale/incomplete preview evidence fail closed and remain visibly distinct from applied work; unknown foreground is not treated as Obsidian being closed.
+11. **Tests:** no WP11 package-level UI/state-transition acceptance is recorded. Accessibility, process recreation, permission denial, repeat taps, launch races, custom-path/provider validation and foreground-unknown tests are **NOT RUN**; compile and standalone policy results belong to other packages and do not satisfy these tests.
+12. **Acceptance:** **PARTIAL / NOT COMPLETE.** The preview-only slice is truthful, but the master UI paths, Obsidian workflow, lifecycle/accessibility tests and Galaxy acceptance are open; no WP11 completion is claimed.
+13. **Rollback/next:** retain preview-only behavior and manual no-Usage-Access route. Design the remaining UI against verified WP08/WP10 contracts, add focused state/accessibility tests first, and keep apply/recovery/launch disabled until prerequisites pass.
+
+## 2026-09-25 - WP14 Bisync package test-isolation fix (PARTIAL LOCAL EVIDENCE)
+
+1. **Objective:** remove order-dependent state-test failures in the standalone Bisync package so the suite reports its own results deterministically.
+2. **Scope:** rclone candidate branch codex/wp14-stats-isolation, based on CloudBridge's exact app pin; cmd/bisync/state_test.go only.
+3. **Out of scope:** production engine behavior, changing CloudBridge's app pin, other packages, cross-process scenarios not already covered, provider/device acceptance, PR or release.
+4. **Preconditions:** exact-pin candidate had a six-test aggregate-only failure: the expected file/directory-collision error left an error in process-global accounting stats, and a later dry-run interpreted it as a listing failure. Tests passed alone; the interaction reproduced in the aggregate.
+5. **Design:** provide each state test a fresh rclone configuration and a unique accounting stats group; retain the existing data and expected-failure assertions.
+6. **Safety invariants:** no production logic change; no remote/config credentials; tests use disposable local fixtures; app pin remains fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0.
+7. **Implementation:** helper newStateTestContext uses fs.AddConfig and accounting.WithStatsGroup with a unique random identifier; all state tests in the file now use the helper. Commit 7045c79f9adcd769118977fd07e5ddaaa5bc51ee, tree c77c5da0003a7feebdaad538c27ffd17491674c2.
+8. **Reuse:** rclone accounting.WithStatsGroup, the existing state-test fixture constructors and Go testing temp directories.
+9. **Retired/decision:** retired shared default accounting-group state across these direct in-process test calls; this fixes test isolation, not a production Bisync defect.
+10. **Failure behavior:** a future test must not inherit prior test errors; the dry-run regression remains asserted to preserve root bytes and canonical listings.
+11. **Tests:** selected six preservation/guard tests passed together with count=10; complete go test -mod=readonly -timeout=20m ./cmd/bisync passed on Go 1.26.8 Windows/amd64, offline, exit 0 (41.105s). git diff --check passed. The run required a short task-local temp path because the default Windows temp and a long path were inaccessible to fixtures.
+12. **Acceptance:** **PARTIAL LOCAL ENGINE TEST EVIDENCE ONLY.** The complete cmd/bisync package passes on this test-only candidate; broader repository tests were not rerun and WP14 remains NOT RUN / NOT ACCEPTED because core prerequisites, other stress/fault/device/provider gates remain open.
+13. **Rollback/next:** revert only the test helper change if it introduces instability; keep this candidate isolated from the app pin. Review diff against refreshed Rareities/rclone master and establish a narrow reviewable base before any PR.
+
+## 2026-09-25 - WP13/WP15 documentation and audit crosswalk (PARTIAL)
+
+1. **Objective:** align repository-facing docs with the current master plan, source evidence and limits of the live-status snapshot.
+2. **Scope:** current C01-C12 finding register; feature survival, compatibility, requirements, security, test, release, build, user and static-site docs; historic audit warning.
+3. **Out of scope:** implementing remaining application features, accepting unresolved package gates, creating a PR, signing, building or publishing an APK.
+4. **Preconditions:** reread the authoritative WP00-WP15 attachment; review current source and existing docs/ledgers; refresh GitHub through the available read-only connector.
+5. **Design:** each C finding has eight required evidence fields; each of 16 feature rows has an explicit KEEP disposition and migration status; distinguish registered source from verified support; state workflow/release query limits.
+6. **Safety invariants:** no feature removal, no compromise inference, no actionable obsolete key-rotation directive, and no unavailable device/provider test represented as a pass.
+7. **Implementation:** added CURRENT_AUDIT_FINDINGS.md; updated FEATURE_SURVIVAL_MATRIX.md, COMPATIBILITY_MANIFEST.md and the related status guides/pages; corrected the historical Phase 0/RG-0 headings and current release/Actions wording.
+8. **Reuse:** current source paths, master §4 and §7-§9, existing SR findings, tests and release-readiness table.
+9. **Retired/decision:** withdrew inherited signing-emergency language; no key, history, release, feature or user data was changed.
+10. **Failure behavior:** unverified support remains partial/NOT RUN; Bisync initialization/apply/recovery and distribution remain blocked.
+11. **Tests:** crosswalk structural audit found 12 findings/96 field entries; local relative HTML href/src audit found no missing local targets; git diff --check passed. No app code tests or build were run.
+12. **Acceptance:** **DOCUMENTATION SLICE COMPLETE; WP13 PARTIAL; WP15 PREPARATORY ONLY.** This does not close any feature or release gate.
+13. **Rollback/next:** revert only documentation hunks if required. Continue remaining code/package work and rerun validation after later doc edits.

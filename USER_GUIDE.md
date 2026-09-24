@@ -5,9 +5,9 @@ does not imply that a release exists or that every source feature passed accepta
 
 ## Availability and support
 
-There is currently no published Rareities/CloudBridge APK or release. Do not install an
-upstream CloudBridge APK expecting it to contain this fork's changes. Development builds
-are for contributors; see [BUILD_GUIDE.md](BUILD_GUIDE.md) and
+No verified Rareities/CloudBridge APK download or release artifact is identified in this
+status snapshot. Do not install an upstream CloudBridge APK expecting it to contain this fork's
+changes. Development builds are for contributors; see [BUILD_GUIDE.md](BUILD_GUIDE.md) and
 [WINDOWS_BUILD_GUIDE.md](WINDOWS_BUILD_GUIDE.md). Neither a debug build nor a successful
 compile is a supported release.
 
@@ -75,8 +75,9 @@ Obsidian is closed.
 ## Update notifications
 
 The inspected source defaults update notifications off. If enabled, periodic work checks
-the Rareities/CloudBridge GitHub release API on a connected network and opens this fork's
-latest-release page; it does not install updates. Stable builds ignore prereleases. WorkManager
+the Rareities/CloudBridge GitHub release API on a connected network and opens the validated
+selected release tag (or the safe releases index when no tag URL is available); it does not
+install updates. Stable builds ignore prereleases. WorkManager
 timing is best-effort, and the retargeted updater still needs integrated/device validation.
 Check the release page directly when you need to confirm whether a fork release exists.
 
