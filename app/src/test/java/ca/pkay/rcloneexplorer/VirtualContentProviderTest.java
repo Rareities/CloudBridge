@@ -62,12 +62,72 @@ public class VirtualContentProviderTest {
                 VirtualContentProvider.getRootedDocumentId("remotes/remote:/"));
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void getTargetDocumentIdRejectsDotSegmentLeaf() {
+        VirtualContentProvider.getTargetDocumentId("remote:/folder/..", "remote:/target");
+    }
+
     @Test
     public void getTargetByChild() {
         assertEquals("remotes/remote:/child",
                 VirtualContentProvider.getTargetByChild("remotes/remote:/", "child"));
         assertEquals("remotes/remote:/child",
                 VirtualContentProvider.getTargetByChild("remotes/remote:", "child"));
+    }
+
+    @Test
+    public void createDocumentRejectsInvalidNameBeforeRemoteAccess() throws Exception {
+        try {
+            provider.createDocument("remote:/folder", null, "..");
+            fail("Expected invalid create name to fail before remote access");
+        } catch (java.io.FileNotFoundException expected) {
+            assertTrue(expected.getCause() instanceof IllegalArgumentException);
+        }
+    }
+
+    @Test
+    public void renameDocumentRejectsInvalidNameBeforeRemoteAccess() throws Exception {
+        try {
+            provider.renameDocument("remote:/folder/file", "");
+            fail("Expected empty rename name to fail before remote access");
+        } catch (java.io.FileNotFoundException expected) {
+            assertTrue(expected.getCause() instanceof IllegalArgumentException);
+        }
+    }
+
+    @Test
+    public void renameDocumentRejectsSeparatorBeforeRemoteAccess() throws Exception {
+        try {
+            provider.renameDocument("remote:/folder/file", "other/name");
+            fail("Expected multi-component rename name to fail before remote access");
+        } catch (java.io.FileNotFoundException expected) {
+            assertTrue(expected.getCause() instanceof IllegalArgumentException);
+        }
+    }
+
+    @Test
+    public void copyDocumentRejectsDotLeafBeforeSourceLookup() throws Exception {
+        String rootedSource = VirtualContentProvider.getRootedDocumentId("remote:/folder/..");
+        String rootedParent = VirtualContentProvider.getRootedDocumentId("remote:/target");
+        try {
+            provider.copyDocument(rootedSource, rootedParent);
+            fail("Expected invalid source leaf to fail before lookup");
+        } catch (java.io.FileNotFoundException expected) {
+            assertTrue(expected.getCause() instanceof IllegalArgumentException);
+        }
+    }
+
+    @Test
+    public void moveDocumentRejectsDotLeafBeforeSourceLookup() throws Exception {
+        String rootedSource = VirtualContentProvider.getRootedDocumentId("remote:/folder/..");
+        String rootedSourceParent = VirtualContentProvider.getRootedDocumentId("remote:/folder");
+        String rootedTargetParent = VirtualContentProvider.getRootedDocumentId("remote:/target");
+        try {
+            provider.moveDocument(rootedSource, rootedSourceParent, rootedTargetParent);
+            fail("Expected invalid source leaf to fail before lookup");
+        } catch (java.io.FileNotFoundException expected) {
+            assertTrue(expected.getCause() instanceof IllegalArgumentException);
+        }
     }
 
     @Test

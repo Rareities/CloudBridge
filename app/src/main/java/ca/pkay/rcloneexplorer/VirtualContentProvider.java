@@ -608,21 +608,13 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public String createDocument(String parentDocumentId, String mimeType, String displayName) throws FileNotFoundException {
-        if (displayName.contains("/")) {
-            char[] normalized = displayName.toCharArray();
-            for (int i = 0, charArrayLength = normalized.length; i < charArrayLength; i++) {
-                if (normalized[i] == '/') {
-                    normalized[i] = '_';
-                }
-            }
-            displayName = new String(normalized);
-        }
+        displayName = normalizeCreateDocumentName(displayName);
 
-        String documentId = parentDocumentId + "/" + displayName;
+        String documentId = getTargetByChild(parentDocumentId, displayName);
         ListItem existingItem = getFileItem(getNoRootId(documentId));
         int noConflictId = 2;
         while (existingItem != null) {
-            documentId = parentDocumentId + "/" + displayName + " (" + noConflictId++ + ")";
+            documentId = getTargetByChild(parentDocumentId, displayName + " (" + noConflictId++ + ")");
             existingItem = getFileItem(getNoRootId(documentId));
         }
 
@@ -669,7 +661,8 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public String renameDocument(final String documentId, final String displayName) throws FileNotFoundException {
-        FLog.v(TAG, "renameDocument: %s -> %s", documentId, displayName);
+        final String safeDisplayName = requireValidDocumentChildName(displayName);
+        FLog.v(TAG, "renameDocument: %s -> %s", documentId, safeDisplayName);
         if (isRemoteDocument(documentId)) {
             // todo: evaluate if this should be supported from the DocumentsProvider
             FLog.e(TAG, "renameDocument: renaming remotes not (yet) supported");
@@ -677,7 +670,7 @@ public class VirtualContentProvider extends SingleRootProvider {
         }
         final String remoteName = getRemoteName(getNoRootId(documentId));
         final String srcPath = getRclonePath(documentId);
-        final String targetDocId = getTargetByChild(getParent(documentId), displayName);
+        final String targetDocId = getTargetByChild(getParent(documentId), safeDisplayName);
         final String dstPath = getRclonePath(targetDocId);
         FLog.v(TAG, "remoteName: %s, srcPath: %s, targetDocId: %s, dstPath: %s", remoteName, srcPath, targetDocId, dstPath);
         if (!acquireRcd()) {
@@ -845,13 +838,13 @@ public class VirtualContentProvider extends SingleRootProvider {
         }
         String sourceDocumentId = getNoRootId(rootedSrcDocId);
         String targetParentDocumentId = getNoRootId(rootedTargetParentDocId);
+        final String targetDocumentId = requireTargetDocumentId(sourceDocumentId, targetParentDocumentId);
         ListItem document = getFileItem(sourceDocumentId);
         if (null == document) {
             throw new FileNotFoundException();
         }
         final String srcPath = getRcloneFullPath(sourceDocumentId);
         final String srcRemoteName = getRemoteName(sourceDocumentId);
-        final String targetDocumentId = getTargetDocumentId(sourceDocumentId, targetParentDocumentId);
         final String dstFullPath = getRcloneFullPath(targetDocumentId);
         final String dstPath = getRclonePath(targetDocumentId);
         final String dstRemoteName = getRemoteName(targetDocumentId);
@@ -898,13 +891,13 @@ public class VirtualContentProvider extends SingleRootProvider {
         }
         final String sourceDocumentId = getNoRootId(rootedSrcDocId);
         String targetParentDocumentId = getNoRootId(rootedTargetDocParentId);
+        final String targetDocumentId = requireTargetDocumentId(sourceDocumentId, targetParentDocumentId);
 
         ListItem document = getFileItem(sourceDocumentId);
         if (null == document) {
             throw new FileNotFoundException();
         }
 
-        final String targetDocumentId = getTargetDocumentId(sourceDocumentId, targetParentDocumentId);
         // moveDocument is a data-transfer operation; allow up to 30s for the rcd job.
         MaxWait lock = new MaxWait(30000);
         OnJobFinishListener listener = new OnJobFinishListener(lock) {
@@ -1078,20 +1071,42 @@ public class VirtualContentProvider extends SingleRootProvider {
         throwOnRootId(srcDocumentId);
         throwOnRootId(targetParentDocId);
         String childName = getChildName(srcDocumentId);
-        if ('/' == targetParentDocId.charAt(targetParentDocId.length() - 1)) {
-            return targetParentDocId + childName;
-        } else {
-            return targetParentDocId + '/' + childName;
-        }
+        return DocumentChildNamePolicy.targetDocumentId(targetParentDocId, childName);
     }
 
     @VisibleForTesting()
     static String getTargetByChild(String parentDocId, String childName) {
-        if ('/' == parentDocId.charAt(parentDocId.length() - 1)) {
-            return parentDocId + childName;
-        } else {
-            return parentDocId + '/' + childName;
+        return DocumentChildNamePolicy.targetDocumentId(parentDocId, childName);
+    }
+
+    private static String requireValidDocumentChildName(@Nullable String childName) throws FileNotFoundException {
+        try {
+            return DocumentChildNamePolicy.requireSingleComponent(childName);
+        } catch (IllegalArgumentException e) {
+            throw invalidDocumentInput(e);
         }
+    }
+
+    private static String normalizeCreateDocumentName(@Nullable String childName) throws FileNotFoundException {
+        try {
+            return DocumentChildNamePolicy.normalizeForCreate(childName);
+        } catch (IllegalArgumentException e) {
+            throw invalidDocumentInput(e);
+        }
+    }
+
+    private static String requireTargetDocumentId(String sourceDocumentId, String targetParentDocumentId) throws FileNotFoundException {
+        try {
+            return getTargetDocumentId(sourceDocumentId, targetParentDocumentId);
+        } catch (IllegalArgumentException e) {
+            throw invalidDocumentInput(e);
+        }
+    }
+
+    private static FileNotFoundException invalidDocumentInput(IllegalArgumentException cause) {
+        FileNotFoundException failure = new FileNotFoundException("Invalid document identifier or name");
+        failure.initCause(cause);
+        return failure;
     }
 
     // Extract the path within the remote, e.g.
