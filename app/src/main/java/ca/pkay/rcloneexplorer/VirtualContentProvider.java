@@ -224,19 +224,30 @@ public class VirtualContentProvider extends SingleRootProvider {
     // Required for OPEN_DOCUMENT_TREE
     @Override
     public boolean isChildDocument(String parentDocumentId, @NonNull String documentId) {
-        return documentId.startsWith(parentDocumentId);
+        return DocumentIdPolicy.isChildOf(
+                parentDocumentId, documentId, ROOT_DOC_ID, ROOT_DOC_PREFIX);
     }
 
     @Override
     public Cursor queryRecentDocuments(String rootId, String[] projection) throws FileNotFoundException {
         // TODO: Track recents (DB required)
-        return super.queryRecentDocuments(rootId, projection);
+        if (!isValidRecentRootId(rootId)) {
+            throw invalidDocumentInput(new IllegalArgumentException("Recent query root is not a provider root"));
+        }
+        return super.queryRecentDocuments(ROOT_ID, projection);
+    }
+
+    @VisibleForTesting()
+    static boolean isValidRecentRootId(String rootId) {
+        return ROOT_ID.equals(rootId);
     }
 
     @Override
     public IntentSender createWebLinkIntent(String documentId, @Nullable Bundle options) throws FileNotFoundException {
         // TODO: rclone link adapter
-        return super.createWebLinkIntent(documentId, options);
+        String validatedDocumentId = requireNonRootDocumentId(documentId);
+        requireConfiguredRemote(validatedDocumentId);
+        return super.createWebLinkIntent(getRootedDocumentId(validatedDocumentId), options);
     }
 
     // Called when documents-ui is launched
@@ -322,6 +333,9 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public Cursor queryDocument(@NonNull String documentId, String[] projection) throws FileNotFoundException {
+        String shortDocumentId = requireDocumentId(documentId);
+        documentId = ROOT_DOC_ID.equals(shortDocumentId)
+                ? ROOT_DOC_ID : getRootedDocumentId(shortDocumentId);
         if (rcdAvailable && rcdService != null) {
             rcdService.onNotifyUse();
         }
@@ -338,11 +352,15 @@ public class VirtualContentProvider extends SingleRootProvider {
             }
         // Return the level below, e.g. rclone/remotes/gdrive:
         } else if (isRemoteDocument(documentId)) {
-            String remoteName = getRemoteName(getShortId(documentId));
+            String remoteDocumentId = getShortId(documentId);
+            String remoteName = getRemoteName(remoteDocumentId);
+            requireConfiguredRemote(remoteDocumentId);
             return getRemotesAsCursor(projection, remoteName);
         // Return another level below, e.g. rclone/remotes/gdrive:/brochure.pdf
         } else {
-            ListItem cached = getFileItem(getShortId(documentId));
+            String fileDocumentId = requireNonRootDocumentId(documentId);
+            requireConfiguredRemote(fileDocumentId);
+            ListItem cached = getFileItem(fileDocumentId);
             MatrixCursor cursor;
             if (null != cached) {
                 cached.mimeType = FileItem.getMimeType(cached.mimeType, cached.path);
@@ -397,6 +415,9 @@ public class VirtualContentProvider extends SingleRootProvider {
      */
     @Override
     public Cursor querySearchDocuments(String rootId, String query, String[] projection) throws FileNotFoundException {
+        if (!ROOT_ID.equals(rootId)) {
+            throw new FileNotFoundException("Unknown virtual-provider root");
+        }
         MatrixCursor cursor = new MatrixCursor(null != projection ? projection : DEFAULT_DOCUMENT_PROJECTION);
         Map<String, FsStateNode> res = remoteState.search(query);
         for (Map.Entry<String, FsStateNode> result : res.entrySet()) {
@@ -417,16 +438,15 @@ public class VirtualContentProvider extends SingleRootProvider {
             }
             return getRemotesAsCursor(projection, null);
         } else {
+            final String validatedParentId = requireParentDocumentId(parentDocumentId);
+            final RemoteItem remoteItem = requireConfiguredRemote(validatedParentId);
             if (null == projection) {
                 projection = DEFAULT_DOCUMENT_PROJECTION;
             }
-            String originalParentDocId = parentDocumentId;
-            parentDocumentId = parentDocumentId.substring(ROOT_DOC_ID.length() + 1);
-            String remoteName = getRemoteName(getShortId(originalParentDocId));
-            // TODO: missing guard if remote name is garbage => IllegalArgumentException
-            RemoteItem remoteItem = getRemoteItem(remoteName);
-            int idx = parentDocumentId.indexOf("/");
-            String dirPath = -1 != idx ? parentDocumentId.substring(idx + 1) : "";
+            String originalParentDocId = getRootedDocumentId(validatedParentId);
+            parentDocumentId = validatedParentId;
+            String remoteName = getRemoteName(validatedParentId);
+            String dirPath = getRclonePath(parentDocumentId);
 
             // TODO: relies on legacyExternalStorage
             // Adjust remote-specific behaviors
@@ -609,6 +629,8 @@ public class VirtualContentProvider extends SingleRootProvider {
     @Override
     public String createDocument(String parentDocumentId, String mimeType, String displayName) throws FileNotFoundException {
         displayName = normalizeCreateDocumentName(displayName);
+        parentDocumentId = ROOT_DOC_PREFIX + requireParentDocumentId(parentDocumentId);
+        requireConfiguredRemote(getShortId(parentDocumentId));
 
         String documentId = getTargetByChild(parentDocumentId, displayName);
         ListItem existingItem = getFileItem(getNoRootId(documentId));
@@ -662,15 +684,13 @@ public class VirtualContentProvider extends SingleRootProvider {
     @Override
     public String renameDocument(final String documentId, final String displayName) throws FileNotFoundException {
         final String safeDisplayName = requireValidDocumentChildName(displayName);
-        FLog.v(TAG, "renameDocument: %s -> %s", documentId, safeDisplayName);
-        if (isRemoteDocument(documentId)) {
-            // todo: evaluate if this should be supported from the DocumentsProvider
-            FLog.e(TAG, "renameDocument: renaming remotes not (yet) supported");
-            throw new FileNotFoundException();
-        }
-        final String remoteName = getRemoteName(getNoRootId(documentId));
-        final String srcPath = getRclonePath(documentId);
-        final String targetDocId = getTargetByChild(getParent(documentId), safeDisplayName);
+        final String sourceDocumentId = requireNonRootDocumentId(documentId);
+        requireConfiguredRemote(sourceDocumentId);
+        final String rootedDocumentId = getRootedDocumentId(sourceDocumentId);
+        FLog.v(TAG, "renameDocument: %s -> %s", rootedDocumentId, safeDisplayName);
+        final String remoteName = getRemoteName(sourceDocumentId);
+        final String srcPath = getRclonePath(sourceDocumentId);
+        final String targetDocId = getTargetByChild(getParent(rootedDocumentId), safeDisplayName);
         final String dstPath = getRclonePath(targetDocId);
         FLog.v(TAG, "remoteName: %s, srcPath: %s, targetDocId: %s, dstPath: %s", remoteName, srcPath, targetDocId, dstPath);
         if (!acquireRcd()) {
@@ -685,10 +705,10 @@ public class VirtualContentProvider extends SingleRootProvider {
                 if (!status.success) {
                     FLog.w(TAG, "renameDocument: failed to rename %s to %s", srcPath, dstPath);
                 } else {
-                    String cacheId = getNoRootId(documentId);
+                    String cacheId = sourceDocumentId;
                     fsCache.remove(cacheId);
                     remoteState.remove(cacheId);
-                    notifyChange(documentId);
+                    notifyChange(rootedDocumentId);
                     notifyChange(targetDocId);
                 }
             }
@@ -782,15 +802,19 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public void deleteDocument(String rawDocumentId) throws FileNotFoundException {
-        FLog.v(TAG, "deleteDocument: %s", rawDocumentId);
-
-        final String rootedDocumentId = getRootedDocumentId(getShortId(rawDocumentId));
+        final String shortDocumentId = requireDocumentId(rawDocumentId);
+        if (ROOT_DOC_ID.equals(shortDocumentId)) {
+            throw invalidDocumentInput(new IllegalArgumentException("Provider root is not a document"));
+        }
+        final String rootedDocumentId = getRootedDocumentId(shortDocumentId);
+        FLog.v(TAG, "deleteDocument: %s", rootedDocumentId);
 
         if (isRemoteDocument(rootedDocumentId)) {
             FLog.e(TAG, "deleteDocument: deleting remotes not supported");
             throw new UnsupportedOperationException();
         }
         final String documentId = getNoRootId(rootedDocumentId);
+        requireConfiguredRemote(documentId);
         String remoteName = getRemoteName(documentId);
         ListItem document = getFileItem(documentId);
         if (null == document) {
@@ -831,13 +855,11 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public String copyDocument(final String rootedSrcDocId, String rootedTargetParentDocId) throws FileNotFoundException {
-        FLog.v(TAG, "copyDocument: %s -> %s", rootedSrcDocId, rootedTargetParentDocId);
-        if (isRemoteDocument(rootedSrcDocId)) {
-            FLog.e(TAG, "copyDocument: copying remotes not supported");
-            throw new FileNotFoundException();
-        }
-        String sourceDocumentId = getNoRootId(rootedSrcDocId);
-        String targetParentDocumentId = getNoRootId(rootedTargetParentDocId);
+        String targetParentDocumentId = requireParentDocumentId(rootedTargetParentDocId);
+        String sourceDocumentId = requireNonRootDocumentId(rootedSrcDocId);
+        String rootedSourceDocumentId = getRootedDocumentId(sourceDocumentId);
+        requireConfiguredRemote(sourceDocumentId);
+        FLog.v(TAG, "copyDocument: %s -> %s", rootedSourceDocumentId, rootedTargetParentDocId);
         final String targetDocumentId = requireTargetDocumentId(sourceDocumentId, targetParentDocumentId);
         ListItem document = getFileItem(sourceDocumentId);
         if (null == document) {
@@ -884,13 +906,16 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public String moveDocument(final String rootedSrcDocId, String sourceParentDocumentId, final String rootedTargetDocParentId) throws FileNotFoundException {
-        FLog.d(TAG, "moveDocument: %s -> %s", rootedSrcDocId, rootedTargetDocParentId);
-        if (isRemoteDocument(rootedSrcDocId)) {
-            FLog.e(TAG, "moveDocument: moving remotes not supported");
-            throw new FileNotFoundException();
+        String targetParentDocumentId = requireParentDocumentId(rootedTargetDocParentId);
+        final String sourceDocumentId = requireNonRootDocumentId(rootedSrcDocId);
+        final String rootedSourceDocumentId = getRootedDocumentId(sourceDocumentId);
+        String validatedSourceParent = requireParentDocumentId(sourceParentDocumentId);
+        String actualSourceParent = requireParentDocumentId(getParent(sourceDocumentId));
+        if (!validatedSourceParent.equals(actualSourceParent)) {
+            throw invalidDocumentInput(new IllegalArgumentException("Source parent does not match document ID"));
         }
-        final String sourceDocumentId = getNoRootId(rootedSrcDocId);
-        String targetParentDocumentId = getNoRootId(rootedTargetDocParentId);
+        requireConfiguredRemote(sourceDocumentId);
+        FLog.d(TAG, "moveDocument: %s -> %s", rootedSourceDocumentId, rootedTargetDocParentId);
         final String targetDocumentId = requireTargetDocumentId(sourceDocumentId, targetParentDocumentId);
 
         ListItem document = getFileItem(sourceDocumentId);
@@ -906,9 +931,9 @@ public class VirtualContentProvider extends SingleRootProvider {
                 FLog.v(TAG, "move finished with: %s at %d", status.success, status.endTime);
                 fsCache.remove(getNoRootId(sourceDocumentId));
                 remoteState.remove(getNoRootId(sourceDocumentId));
-                revokeDocumentPermission(rootedSrcDocId);
+                revokeDocumentPermission(rootedSourceDocumentId);
                 lock.release();
-                notifyChange(rootedSrcDocId);
+                notifyChange(rootedSourceDocumentId);
                 notifyChange(targetDocumentId);
             }
         };
@@ -943,15 +968,31 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public void removeDocument(String documentId, String parentDocumentId) throws FileNotFoundException {
-        deleteDocument(documentId);
+        String validatedDocumentId = requireNonRootDocumentId(documentId);
+        String validatedParentId = requireParentDocumentId(parentDocumentId);
+        String actualParentId = requireParentDocumentId(getParent(validatedDocumentId));
+        if (!validatedParentId.equals(actualParentId)) {
+            throw invalidDocumentInput(new IllegalArgumentException("Parent does not contain the document"));
+        }
+        requireConfiguredRemote(validatedDocumentId);
+        deleteDocument(validatedDocumentId);
     }
 
     @Override
     public String getDocumentType(String documentId) throws FileNotFoundException {
-        ListItem item = remoteState.get(getNoRootId(documentId)).item;
+        String shortDocumentId = requireDocumentId(documentId);
+        if (ROOT_DOC_ID.equals(shortDocumentId)) {
+            return MIME_TYPE_DIR;
+        }
+        String rootedDocumentId = getRootedDocumentId(shortDocumentId);
+        requireConfiguredRemote(shortDocumentId);
+        if (isRemoteDocument(rootedDocumentId)) {
+            return MIME_TYPE_DIR;
+        }
+        ListItem item = remoteState.get(shortDocumentId).item;
         if (null == item) {
-            int lastSlash = documentId.lastIndexOf('/');
-            String name = lastSlash >= 0 ? documentId.substring(lastSlash + 1) : documentId;
+            int lastSlash = rootedDocumentId.lastIndexOf('/');
+            String name = lastSlash >= 0 ? rootedDocumentId.substring(lastSlash + 1) : rootedDocumentId;
             int lastDot = name.lastIndexOf('.');
             if (lastDot < 0 || lastDot == name.length() - 1) {
                 return "application/octet-stream";
@@ -1107,6 +1148,47 @@ public class VirtualContentProvider extends SingleRootProvider {
         FileNotFoundException failure = new FileNotFoundException("Invalid document identifier or name");
         failure.initCause(cause);
         return failure;
+    }
+
+    private static String requireParentDocumentId(String documentId) throws FileNotFoundException {
+        try {
+            return DocumentIdPolicy.requireParent(documentId, ROOT_DOC_ID, ROOT_DOC_PREFIX);
+        } catch (IllegalArgumentException e) {
+            throw invalidDocumentInput(e);
+        }
+    }
+
+    private static String requireDocumentId(String documentId) throws FileNotFoundException {
+        try {
+            return DocumentIdPolicy.requireDocument(documentId, ROOT_DOC_ID, ROOT_DOC_PREFIX);
+        } catch (IllegalArgumentException e) {
+            throw invalidDocumentInput(e);
+        }
+    }
+
+    private static String requireNonRootDocumentId(String documentId) throws FileNotFoundException {
+        String shortId = requireDocumentId(documentId);
+        int separator = shortId.indexOf(':');
+        if (ROOT_DOC_ID.equals(shortId) || separator == shortId.length() - 1) {
+            throw invalidDocumentInput(new IllegalArgumentException("A provider or remote root is not a file document"));
+        }
+        return shortId;
+    }
+
+    private RemoteItem requireConfiguredRemote(String shortDocumentId) throws FileNotFoundException {
+        if (remotes == null) {
+            throw new FileNotFoundException("Remote configuration is not ready");
+        }
+        String remoteName = getRemoteName(shortDocumentId);
+        RemoteItem known = remotes.get(remoteName);
+        if (known != null) {
+            return known;
+        }
+        try {
+            return getRemoteItem(remoteName);
+        } catch (IllegalArgumentException e) {
+            throw invalidDocumentInput(e);
+        }
     }
 
     // Extract the path within the remote, e.g.
@@ -1302,20 +1384,10 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public ParcelFileDescriptor openDocument(String documentId, String mode, CancellationSignal signal) throws FileNotFoundException {
-        FLog.d(TAG, "openDocument: %s, mode=%s, package=%s", documentId, mode, getCallingPackage());
-        // Bug in Android File Manager (gitlab.com/axet/android-file-manager)
-        if (ROOT_DOC_ID.equals(documentId)) {
-            throw new FileNotFoundException();
-        }
-        documentId = getNoRootId(documentId);
-        // TODO: unknown bug - DocumentsUI sometimes supplies documentId with additional prepended root
-        if (documentId.startsWith(ROOT_DOC_PREFIX)) {
-            documentId = getNoRootId(documentId);
-        }
-        // Note 2020-06-07: Unclear why the remoteItem was retrieved here, commented out
-        // String remoteName = getRemoteName(documentId);
-        // TODO: missing guard if remote name is garbage => IllegalArgumentException
-        // RemoteItem remoteItem = getRemoteItem(remoteName);
+        documentId = requireNonRootDocumentId(documentId);
+        requireConfiguredRemote(documentId);
+        FLog.d(TAG, "openDocument: %s, mode=%s, package=%s",
+                getRootedDocumentId(documentId), mode, getCallingPackage());
         ListItem document = getFileItem(documentId);
         // Some misbehaved client apps just don't understand that openDocument() does not work on directories
         if (document == null || document.isDir) {
