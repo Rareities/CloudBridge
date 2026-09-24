@@ -1685,3 +1685,51 @@ until the compatible-state native feature has an independently reviewed/publicat
 11. **Tests:** the pure JDK 21.0.8/JUnitCore 4.13.2 URL/SemVer suite reports **9 PASS** on the unchanged policy/test snapshot; XML parsing for default/DE/CA/ZH strings and `content_about.xml`, fork-link/stale-upstream scans, and `git diff --check` passed. `:app:compileOssDebugKotlin` passed on JDK 21.0.8 / Gradle 8.13 / SDK 36 with native/rclone Java tasks excluded. The focused Gradle unit task was **BLOCKED/NOT PASSED** before JUnit at Java compilation with cached `viewbinding-8.13.2-api.jar` `AccessDeniedException`. A fresh standalone re-run for this checkpoint also failed before JUnit because javac could not write `UpdateReleasePolicy$ReleaseCandidate.class`; this is recorded as blocked, not a pass. Worker HTTP/preference/notification-intent tests, current full Android Java/JUnit, device behavior, Samsung actual API/firmware, and live Proton remain **NOT RUN**.
 12. **Acceptance:** fork URLs, strict release selection, bounded pagination, and About destination are implemented locally, but WP13 remains **PARTIAL / BLOCKING**. Integrated worker behavior, opt-out/managed-store paths, an actual fork release, CI, ABI/native artifact verification, dependency/security review, signer continuity, provenance, Galaxy, and Proton acceptance remain open.
 13. **Rollback/next:** revert only source commit `d715e16` if a later integrated review reveals regression; docs/evidence are tracked separately. Continue active WP08 fresh endpoint-specific backup reservation, durable run-owned manifest, restart reconciliation, exact restore, and mutation-boundary gates. No pin/remote/PR/APK/signing/release changed; keep init/apply/recovery disabled and preserve `.android/`.
+
+## 2026-09-25 - WP13 selected-release notification routing (PARTIAL)
+
+1. **Objective:** ensure a notification for a selected prerelease or stable release opens that exact tag, not GitHub's unrelated `/releases/latest` stable page.
+2. **Scope:** CloudBridge source commit `d9e130ac716b9d8a26486a4a6b8c2284848c84be`; validated release-tag URL policy, notification content/action intents, regression-test source, and status documentation. No updater scheduling, selection policy, engine pin, database, or provider state changed.
+3. **Out of scope:** HTTP paging/worker integration, installed-channel flows, device behavior, APK packaging, CI, signing, PR, or publication.
+4. **Preconditions:** Rareities/CloudBridge updater identity and strict SemVer parser are in `d715e16`; GitHub refresh found no verified fork release. The selected version value is checked by the existing SemVer parser before inclusion in a URL path.
+5. **Design:** route valid selected tags to `/releases/tag/<tag>` and invalid persisted values to the safe `/releases` index. Use the same target for notification body tap and the explicit view action.
+6. **Safety invariants:** do not construct a path from arbitrary stored text; invalid values cannot escape the GitHub release index; notifications remain informational and do not download/install APKs.
+7. **Implementation:** `UpdateReleasePolicy.releasePageUrl` centralizes safe routing; `AppUpdateNotification` receives the selected version and applies one exact URL to both PendingIntents. Regression source covers stable, prerelease/build metadata, traversal-like input, and empty input.
+8. **Reuse:** existing SemVer parser, notification channel, browser intent, and ignore-version action.
+9. **Retired/decision:** removed the misleading always-latest notification route; no update installation behavior was added.
+10. **Failure behavior:** malformed stored versions fall back to the release index; valid selected versions retain their exact tag page.
+11. **Tests:** `:app:mergeOssDebugResources` and `:app:compileOssDebugKotlin` were attempted offline on Temurin JDK 21.0.8 / Gradle 8.13 / SDK 36; resource merge **PASS**, Kotlin compilation **BLOCKED/NOT PASSED** while Gradle could not create a transformed cached dependency directory. Focused JUnit/standalone reruns remain **BLOCKED/NOT PASSED** before JUnit on cached dependency/Javac access errors. New selected-tag test is authored but has **NOT RUN**. Samsung, Proton and full Android integration remain **NOT RUN**.
+12. **Acceptance:** exact-tag routing is implemented locally, but WP13 remains partial; test execution, HTTP/notification integration, a real fork release, signer/artifact provenance, CI and acceptance-device gates remain open.
+13. **Rollback/next:** revert only `d9e130ac716b9d8a26486a4a6b8c2284848c84be` if integrated intent testing reveals a regression. Keep the Rareities repository route and safe index fallback; no PR/APK/signing/release changed.
+
+## 2026-09-25 - WP09 clean Proton API Bridge source recheck (PARTIAL)
+
+1. **Objective:** replace the earlier unpromotable partial/promisor candidate with a reproducible local checkout of the exact Proton API Bridge v1.0.5 source recorded by the rclone dependency checksum.
+2. **Scope:** isolated local repository `work/Proton-API-Bridge-wp09-clean`; base commit `259c687ee5bfaa08c38c42217d9d1e96bec37650`, implementation commit `646039439e70e47bd7566feae8ceedd636a37afd`, evidence HEAD `bad819c9f778114be7b3376b3e271dc9d4f29b92`. No Rareities/rclone or CloudBridge pin changed.
+3. **Out of scope:** upstream publication, dependency promotion, exact-pin inclusion, CloudBridge integration, live Proton operations, Galaxy acceptance, PR/APK/signing/release.
+4. **Preconditions:** materialized the v1.0.5 module from the local Go module cache with network disabled; module ZIP checksum `h1:K1++Qtk3PvgkiCCiv6Pahju1TMOzKY6VSwiwT7XLAVc=` and go.mod checksum `h1:vCeOPhlXzevN0AFojgh1zsjhetiShy/ArvJ/xkFUDWk=` match `work/rclone/go.sum`; cached tag metadata names source commit `9d772d08d663a66cedbcbef759dd764cce7c8def`.
+5. **Design:** correct the upload fan-out lifecycle at the responsible library layer, preserving the first error while canceling siblings, rechecking cancellation after semaphore acquisition, releasing only acquired permits, and joining all workers before returning.
+6. **Safety invariants:** no network/provider or credential access; no release or pin change; acquisition failure cannot release a permit or start a block; every acquired permit is released once; failed sibling work is canceled and joined.
+7. **Implementation:** `file_upload.go` and deterministic `file_upload_cancel_test.go` implement/test the worker lifecycle. The clean source checkout has no configured remote and is separate from the damaged earlier promisor candidate.
+8. **Reuse:** v1.0.5 API and existing weighted semaphore/upload callback; no protocol or persisted-state format changed.
+9. **Retired/decision:** the old “candidate has no reproducible source commit” status is superseded for this new clean local checkout only. It remains unpublished and unselected; exact rclone app-pin tests do not include this patch.
+10. **Failure behavior:** first worker error cancels the shared context, a concurrent successful acquire checks cancellation before upload, result collection drains all worker outcomes, and return waits for every worker.
+11. **Tests:** Go 1.26.8 offline (`GOPROXY=off`, `GOSUMDB=off`, `GOWORK=off`, `CGO_ENABLED=0`, credentials unset): `go test -run '^TestUploadBlocks' -count=100 -timeout=3m .` **PASS**; full `go test -timeout=10m ./...` **PASS** with provider credential tests skipped; `go vet ./...` and gofmt/diff checks **PASS**. Race test and live Proton **NOT RUN**.
+12. **Acceptance:** repeatable source and local library tests establish a candidate for review, not WP09 completion. App-pin compatibility, full rclone integration against the changed dependency, multi-account/session/revision behavior, live disposable-vault interoperability and device acceptance remain open.
+13. **Rollback/next:** keep the candidate isolated; do not update go.mod/go.sum or the app pin until independent review, exact rclone integration tests, and immutable upstream provenance are established. Samsung and Proton access remain **NOT RUN**.
+
+## 2026-09-25 - WP12 Simplified Chinese sync notification format (PARTIAL)
+
+1. **Objective:** make the Simplified Chinese three-value progress string use the same deterministic positional-format contract as the default locale.
+2. **Scope:** CloudBridge source commit `21eb807`; one resource string in `app/src/main/res/values-zh-rCN/strings.xml`.
+3. **Out of scope:** full locale/accessibility review, all-feature survival regressions, VCP authorization, device acceptance, or WP12 completion.
+4. **Preconditions:** resource-merger warning showed the Chinese translation used three unindexed `%s` placeholders while the default locale and call site format three ordered strings.
+5. **Design:** assign `%1$s`, `%2$s`, `%3$s` to the existing Chinese phrase without changing wording or argument order.
+6. **Safety invariants:** presentation-only; no task, transfer, persisted, network, or provider behavior changed.
+7. **Implementation:** changed `sync_notification_short` to positional placeholders.
+8. **Reuse:** existing `StatusObject` three-argument formatting contract and default resource format.
+9. **Retired/decision:** removed ambiguous locale-specific placeholder ordering; no feature removed.
+10. **Failure behavior:** preserves all three values in deterministic positions for locale formatting.
+11. **Tests:** offline JDK 21.0.8 / Gradle 8.13 / Android SDK 36 `:app:mergeOssDebugResources` **PASS**; the prior locale format warning no longer appeared. `:app:compileOssDebugKotlin` **BLOCKED/NOT PASSED** when Gradle could not create a transformed dependency-cache directory; no JUnit test was needed for this string-only change. `git diff --check` **PASS**. Device/font-scale/language-switch validation **NOT RUN**.
+12. **Acceptance:** this closes one resource-format defect only. WP12 remains partial; localization, accessibility and the full feature-survival matrix remain unaccepted.
+13. **Rollback/next:** revert only `21eb807` if locale QA identifies a wording/order regression; rerun resource merge after other localization changes. No APK or device acceptance is claimed.
