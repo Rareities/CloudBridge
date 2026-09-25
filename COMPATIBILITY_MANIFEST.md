@@ -16,6 +16,29 @@
 | Go / NDK | Minimum Go 1.26.0; NDK 29.0.14206865 | `gradle.properties`; local rclone checks used Go 1.26.8 on Windows/amd64. |
 | Database schema | SQLite version 16 | `Database/DatabaseInfo.kt`; checked-in v16 source includes app-side Bisync preflight/preview and partial backup-manifest records. A production mutation gate, complete restore/recovery contract, supported source-to-target migration/rollback matrix, and on-device migration result are absent; instrumentation is authored but **NOT RUN**. |
 
+## WP14 product identity, migration and rollback boundary
+
+The supplementary WP14 addendum was read in full (attachment SHA-256
+`9A2841F4C3818BBCA2C5248C247D96602AC18267F5B1933F79C5276D4A41C96C`). Its detailed
+identity/migration tests are carried under the master handoff's WP14. Its statement that the
+master is WP00-WP16 and its database-version-8 baseline are superseded: the authoritative master
+has WP00-WP15, and this checked-in source is schema v16. No release compatibility is inferred
+from that disagreement.
+
+| Installed source/state | Candidate target | Identity/signature relation | Migration evidence and preservation result | Status |
+|---|---|---|---|---|
+| No verified signed Rareities release artifact in the available snapshot; source version, package signer and released state are not established | Current production/release variant | Default application ID is de.schuelken.cloudbridge; production certificate continuity is UNKNOWN / NOT VERIFIED | No signed source artifact or prior-state manifest is available to exercise an in-place update | **NOT ESTABLISHED — do not claim an upgrade path** |
+| Current local OSS debug build | Another OSS debug build | Debug application ID has the .debug suffix; debug signer continuity across machines/build environments is not recorded | Current source uses schema v16; current-source instrumentation and app-data upgrade/rollback were **NOT RUN** | **NOT ACCEPTED — development-only** |
+| Existing database schema 15 | Current schema 16 | Same local app source family; app identity/signing not tested by this database-only fixture | Instrumented test source seeds a v15 row and asserts it survives v16 table creation, but the test did not run | **AUTHORED, NOT RUN — not a supported release migration claim** |
+| Schema 8 or another supported historical schema | Current schema 16 | No exact released source artifact or app identity is recorded | DatabaseHandler contains sequential onUpgrade steps. ResourceClaimRepositoryTest has a v8 test source, but it seeds only a synthetic preserved row and checks new-table creation; it is not a representative released-v8 database fixture and was **NOT RUN**. A full version-by-version fixture and interrupted-boundary matrix are absent. The addendum's v8 value is not the current schema baseline | **NOT ACCEPTED — compatibility not demonstrated** |
+| Unknown/newer database, app state, or native Bisync listing | Older app/engine | May be incompatible; signer relation unknown | No app-defined downgrade path or native listing rollback acceptance is recorded. Do not overwrite source state or auto-resync to mask incompatibility | **UNSUPPORTED / NOT TESTED — block downgrade and preserve source** |
+| Export/import to a new application ID | Side-by-side app | New-ID migration is not selected or implemented as an accepted product path | WP03 has bounded importer/config safeguards, but authenticated end-to-end export/import, app-ID isolation, post-import scheduling and recovery are **NOT RUN** | **NOT ESTABLISHED — retain the original app/data** |
+
+The table is a truthful gap record, not approval of a migration. A release path must name the exact
+source/target artifact, app ID, signer, database/config/native-state versions, and tested recovery
+boundary. Do not uninstall the old app, discard old data, or claim rollback until that path passes
+the master WP14 matrix.
+
 ## rclone engine pin and dependency evidence
 
 | Field | Current value | Evidence / limitation |

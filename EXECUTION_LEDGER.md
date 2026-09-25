@@ -7,6 +7,10 @@ separate cross-repository ledger outside this repository; it is not a portable r
 ## Standing instructions
 
 - The user-attached complete master handoff, revision 2026-09-22 (SHA-256 recorded in the cross-repository task ledger), is authoritative.
+- Supplementary addendum SHA-256 9A2841F4C3818BBCA2C5248C247D96602AC18267F5B1933F79C5276D4A41C96C
+  has been read in full. Carry its migration/signing/identity detail under master WP14 only;
+  master numbering is WP00-WP15 and current database schema is v16. The addendum's WP00-WP16
+  and schema-v8 baseline statements are stale/conflicting, not new governing facts.
 - Work one bounded package at a time and follow the current package dependencies in section 7.
   WP08 and WP09 remain partial; WP10 has a partial app implementation and is not accepted.
 - Preserve Bisync, Proton Drive, scheduling, Obsidian and useful CloudBridge functionality.
@@ -2002,7 +2006,7 @@ phrasing.
 8. **Reuse:** rclone accounting.WithStatsGroup, the existing state-test fixture constructors and Go testing temp directories.
 9. **Retired/decision:** retired shared default accounting-group state across these direct in-process test calls; this fixes test isolation, not a production Bisync defect.
 10. **Failure behavior:** a future test must not inherit prior test errors; the dry-run regression remains asserted to preserve root bytes and canonical listings.
-11. **Tests:** selected six preservation/guard tests passed together with count=10; complete go test -mod=readonly -timeout=20m ./cmd/bisync passed on Go 1.26.8 Windows/amd64, offline, exit 0 (41.105s). git diff --check passed. The run required a short task-local temp path because the default Windows temp and a long path were inaccessible to fixtures.
+11. **Tests:** selected six preservation/guard tests passed together with count=10; complete go test -mod=readonly -timeout=20m ./cmd/bisync passed on Go 1.26.8 Windows/amd64, offline, exit 0 (41.105s). A subsequent five-test preservation/guard subset (dry-run root-byte/listing preservation, same-size/same-mtime collision backup, unusable backup rejection, empty/populated initialization, and file/directory collision preservation) passed together at count=100 on candidate HEAD 97c9ac19a348aa096612457aff0ef131f399bfa6, with RCLONE_* inherited variables cleared, nonexistent task-local config, and short task-local temp path. This is targeted repeat evidence only. git diff --check passed; default/long Windows temp paths were inaccessible to fixtures.
 12. **Acceptance:** **PARTIAL LOCAL ENGINE TEST EVIDENCE ONLY.** The complete cmd/bisync package passes on this test-only candidate; broader repository tests were not rerun and WP14 remains NOT RUN / NOT ACCEPTED because core prerequisites, other stress/fault/device/provider gates remain open.
 13. **Rollback/next:** revert only the test helper change if it introduces instability; keep this candidate isolated from the app pin. Review diff against refreshed Rareities/rclone master and establish a narrow reviewable base before any PR.
 
@@ -2021,3 +2025,19 @@ phrasing.
 11. **Tests:** crosswalk structural audit found 12 findings/96 field entries; local relative HTML href/src audit found no missing local targets; git diff --check passed. No app code tests or build were run.
 12. **Acceptance:** **DOCUMENTATION SLICE COMPLETE; WP13 PARTIAL; WP15 PREPARATORY ONLY.** This does not close any feature or release gate.
 13. **Rollback/next:** revert only documentation hunks if required. Continue remaining code/package work and rerun validation after later doc edits.
+
+## 2026-09-25 - WP14 supplementary migration/identity requirements reconciled (PARTIAL)
+
+1. **Objective:** incorporate the addendum's valid migration, signing and app-identity acceptance detail without changing master package numbering or inventing a supported path.
+2. **Scope:** WP14 compatibility documentation, current database/app identity facts, cross-ledger provenance and release gate status.
+3. **Out of scope:** selecting a new package identity, producing a signer, migrating real user data, signing, building or publishing.
+4. **Preconditions:** read the complete addendum attachment and compare its claims with the authoritative master, current Gradle config, database source and authored migration tests.
+5. **Design:** map migration/rollback requirements under master WP14; document exact source/target status and keep unknown package/signature/source versions unaccepted.
+6. **Safety invariants:** master remains WP00-WP15; current schema remains v16; preserve old app/data until exact migration is tested; no real Proton/user data.
+7. **Implementation:** added a compatibility table covering signed-release identity, debug identity, schema 15-to-16 fixture, schema 8/other source versions, unknown downgrade and new-ID import; clarified that authored migration instrumentation has not run.
+8. **Reuse:** build.gradle identity/signing configuration, DatabaseInfo schema version, sequential DatabaseHandler upgrade code, existing v15-to-v16 instrumentation fixture, and release readiness gate.
+9. **Retired/decision:** treated addendum statements WP00-WP16 and current DB version 8 as stale conflicts; accepted no install/rollback compatibility path and created no WP16.
+10. **Failure behavior:** unknown signer/schema/state is not upgraded or downgraded by claim; release stays blocked until exact artifact migration passes.
+11. **Tests:** read-only source inspection and compatibility-doc/link/diff checks; instrumentation migration tests remain **NOT RUN**.
+12. **Acceptance:** **PARTIAL WP14 DOCUMENTATION ONLY.** The compatibility table is a gap record, not migration proof. Product signer, source-to-target tests, boundary interruption and rollback remain unestablished.
+13. **Rollback/next:** keep existing app ID config and fail-closed signing; after WP08/WP13 prerequisites, decide exact supported identity path and run sanitized fixtures for every claimed upgrade before release.
