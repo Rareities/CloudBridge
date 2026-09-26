@@ -14,7 +14,7 @@ class MoveWorkerNotification(var context: Context) : WorkerNotification(context)
     override val initialTitle = string(R.string.worker_move_initialtitle)
     override val serviceOngoingTitle = initialTitle
     override val serviceFailed = string(R.string.worker_move_failed)
-    override val serviceCancelled = "unused"
+    override val serviceCancelled = string(R.string.worker_move_cancelled)
     override val serviceSuccess = string(R.string.worker_move_success)
 
     // use only a single channel

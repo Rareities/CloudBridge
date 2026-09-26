@@ -1500,9 +1500,7 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         if (context == null) {
             return;
         }
-        for (FileItem deleteItem : deleteList) {
-            EphemeralTaskManager.Companion.queueDelete(this.context, remote, deleteItem, directoryObject.getCurrentPath());
-        }
+        EphemeralTaskManager.Companion.queueDelete(this.context, remote, deleteList);
     }
 
     private void renameFiles() {

@@ -63,7 +63,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
         const val MOVE_FILE = "MOVE_FILE"
         const val MOVE_TARGETPATH = "MOVE_TARGETPATH"
 
-        const val DELETE_FILE = "DELETE_FILE"
+        const val DELETE_MANIFEST = "DELETE_MANIFEST"
     }
 
     internal enum class FAILURE_REASON {
@@ -83,6 +83,12 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private var sConnectivityChanged = false
 
     private var sRcloneProcess: Process? = null
+
+    // A batch delete runs several rclone processes one after another; spawn thunks keep later
+    // processes from starting (and piling up on the remote) until the previous one is done.
+    private val sPendingProcesses = ArrayDeque<() -> Process?>()
+    private val sCleanupFiles = ArrayList<File>()
+    private var sDeleteEntries: List<DeleteEntry> = emptyList()
     private val statusObject = StatusObject(mContext)
     private var failureReason = FAILURE_REASON.NO_FAILURE
     private var endNotificationAlreadyPosted = false
@@ -96,14 +102,6 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
         registerBroadcastReceivers()
 
-        updateForegroundNotification(mNotificationManager?.updateNotification(
-            mTitle,
-            mTitle,
-            ArrayList(),
-            0,
-            ongoingNotificationID
-        ))
-
         if (inputData.keyValueMap.containsKey(EPHEMERAL_TYPE)){
             val type = Type.valueOf(inputData.getString(EPHEMERAL_TYPE) ?: "")
             mNotificationManager = prepareNotificationManager(type)
@@ -113,6 +111,18 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 log("$REMOTE: No valid remote was passed!")
                 return Result.failure()
             }
+
+            // The title and the first foreground promotion need the notification manager, which
+            // is still null earlier. Promoting here keeps short-lived jobs (deletes!) in the
+            // foreground instead of losing their slot to the background job time limit.
+            mTitle = mNotificationManager?.initialTitle ?: ""
+            updateForegroundNotification(mNotificationManager?.updateNotification(
+                mTitle,
+                mTitle,
+                ArrayList(),
+                0,
+                ongoingNotificationID
+            ))
 
             mNotificationManager?.setCancelId(id)
             if(preconditionsMet()) {
@@ -130,21 +140,21 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).downloadFile(
+                        sPendingProcesses.add { Rclone(mContext).downloadFile(
                             remoteItem,
                             fileItem,
                             target
-                        )
+                        ) }
                     }
                     Type.UPLOAD -> {
                         val target = inputData.getString(UPLOAD_TARGETPATH)
                         val file = inputData.getString(UPLOAD_FILE)
 
-                        sRcloneProcess = Rclone(mContext).uploadFile(
+                        sPendingProcesses.add { Rclone(mContext).uploadFile(
                             remoteItem,
                             target,
                             file
-                        )
+                        ) }
                     }
                     Type.MOVE -> {
                         val target = inputData.getString(MOVE_TARGETPATH)
@@ -155,29 +165,54 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                             return Result.failure()
                         }
 
-                        sRcloneProcess = Rclone(mContext).moveTo(
+                        sPendingProcesses.add { Rclone(mContext).moveTo(
                             remoteItem,
                             fileItem,
                             target
-                        )
+                        ) }
                     }
                     Type.DELETE -> {
-                        val fileItem = getFileitemFromParcel(DELETE_FILE)
-
-                        if(fileItem == null){
-                            log("$DELETE_FILE: No valid target was passed!")
+                        val manifestFile = File(inputData.getString(DELETE_MANIFEST) ?: "")
+                        if (!manifestFile.exists()) {
+                            log("$DELETE_MANIFEST: the delete manifest is missing!")
                             return Result.failure()
                         }
+                        val entries = DeleteManifest.decode(manifestFile.readText())
+                        // Keep the manifest until the batch finishes: if the process dies
+                        // mid-batch, WorkManager re-runs the worker and needs it again.
+                        sCleanupFiles.add(manifestFile)
+                        if (entries.isEmpty()) {
+                            log("$DELETE_MANIFEST: no deletable items were passed!")
+                            return Result.failure()
+                        }
+                        sDeleteEntries = entries
 
-                        sRcloneProcess = Rclone(mContext).deleteItems(
-                            remoteItem,
-                            fileItem
-                        )
+                        // Plain files go into one `rclone delete --files-from` run; directories
+                        // and names unusable in a line-based list get individual processes.
+                        val partition = DeleteManifest.partition(entries)
+                        val rclone = Rclone(mContext)
+                        if (partition.batchableFiles.isNotEmpty()) {
+                            val filesFrom = File(mContext.cacheDir, "delete-files-from-$id.txt")
+                            filesFrom.writeText(DeleteManifest.filesFromLines(partition.batchableFiles).joinToString("\n"))
+                            sCleanupFiles.add(filesFrom)
+                            sPendingProcesses.add { rclone.deleteFilesFrom(remoteItem, filesFrom) }
+                        }
+                        for (dir in partition.dirs) {
+                            sPendingProcesses.add { rclone.purgeItem(remoteItem, dir.path) }
+                        }
+                        for (file in partition.fallbackFiles) {
+                            sPendingProcesses.add { rclone.deleteItems(remoteItem, file.path) }
+                        }
+                        if (sPendingProcesses.isEmpty()) {
+                            failureReason = FAILURE_REASON.RCLONE_ERROR
+                            log("Delete: no rclone process could be started")
+                        }
                     }
                 }
                 handleSync(mTitle)
                 } finally {
                     transferLocks?.release()
+                    sCleanupFiles.forEach { it.delete() }
                 }
             } else {
                 log("Preconditions are not met!")
@@ -217,64 +252,78 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     private fun handleSync(title: String) {
-        if (sRcloneProcess != null) {
-            val localProcessReference = sRcloneProcess!!
-            try {
-                val reader = BufferedReader(InputStreamReader(localProcessReference.errorStream))
-                val iterator = reader.lineSequence().iterator()
-                // Throttle notification rebuilds: rclone emits a stats line roughly every second,
-                // but with -vvv there can be many more log lines. Rebuilding a Notification and
-                // calling setForegroundAsync() on every line wastes CPU that the transfer needs.
-                var lastNotifyMs = 0L
-                val minNotifyIntervalMs = 500L
-                while(iterator.hasNext()) {
-                    val line = iterator.next()
-                    try {
-                        val logline = JSONObject(line)
-                        //todo: migrate this to StatusObject, so that we can handle everything properly.
-                        if (logline.getString("level") == "error") {
-                            if (sIsLoggingEnabled) {
-                                log2File?.log(line)
-                            }
-                        }
-
-                        // Process all log lines so stats/progress advance the notification
-                        statusObject.parseLoglineToStatusObject(logline)
-
-                        // Only rebuild when there is content to show, and at most once per
-                        // minNotifyIntervalMs to avoid notification churn on busy logs.
-                        if (statusObject.notificationContent.isNotEmpty()) {
-                            val now = System.currentTimeMillis()
-                            if (now - lastNotifyMs >= minNotifyIntervalMs) {
-                                lastNotifyMs = now
-                                updateForegroundNotification(mNotificationManager?.updateNotification(
-                                    title,
-                                    statusObject.notificationContent,
-                                    statusObject.notificationBigText,
-                                    statusObject.notificationPercent,
-                                    ongoingNotificationID
-                                ))
-                            }
-                        }
-                    } catch (e: JSONException) {
-                        Log.e(tag(), "Error: the offending line: $line")
-                        //FLog.e(TAG, "onHandleIntent: error reading json", e)
-                    }
-                }
-            } catch (e: InterruptedIOException) {
-                FLog.e(tag(), "onHandleIntent: I/O interrupted, stream closed", e)
-            } catch (e: IOException) {
-                FLog.e(tag(), "onHandleIntent: error reading stdout", e)
-            }
-            try {
-                localProcessReference.waitFor()
-            } catch (e: InterruptedException) {
-                FLog.e(tag(), "onHandleIntent: error waiting for process", e)
-            }
-        } else {
+        if (sPendingProcesses.isEmpty()) {
             log("Sync: No Rclone Process!")
+            mNotificationManager?.cancelSyncNotification(ongoingNotificationID)
+            return
+        }
+        while (!isStopped && sPendingProcesses.isNotEmpty()) {
+            // Fold the finished process's deletions into the running total; its stats are
+            // replaced as soon as the next process starts reporting.
+            statusObject.accumulateDeletions()
+            sRcloneProcess = sPendingProcesses.removeFirst().invoke()
+            if (sRcloneProcess == null) {
+                log("Sync: Rclone process could not be started")
+                continue
+            }
+            readProcess(sRcloneProcess!!, title)
         }
         mNotificationManager?.cancelSyncNotification(ongoingNotificationID)
+    }
+
+    private fun readProcess(localProcessReference: Process, title: String) {
+        try {
+            val reader = BufferedReader(InputStreamReader(localProcessReference.errorStream))
+            val iterator = reader.lineSequence().iterator()
+            // Throttle notification rebuilds: rclone emits a stats line roughly every second,
+            // but with -vvv there can be many more log lines. Rebuilding a Notification and
+            // calling setForegroundAsync() on every line wastes CPU that the transfer needs.
+            var lastNotifyMs = 0L
+            val minNotifyIntervalMs = 500L
+            while(iterator.hasNext()) {
+                val line = iterator.next()
+                try {
+                    val logline = JSONObject(line)
+                    //todo: migrate this to StatusObject, so that we can handle everything properly.
+                    if (logline.getString("level") == "error") {
+                        if (sIsLoggingEnabled) {
+                            log2File?.log(line)
+                        }
+                    }
+
+                    // Process all log lines so stats/progress advance the notification
+                    statusObject.parseLoglineToStatusObject(logline)
+
+                    // Only rebuild when there is content to show, and at most once per
+                    // minNotifyIntervalMs to avoid notification churn on busy logs.
+                    if (statusObject.notificationContent.isNotEmpty()) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastNotifyMs >= minNotifyIntervalMs) {
+                            lastNotifyMs = now
+                            updateForegroundNotification(mNotificationManager?.updateNotification(
+                                title,
+                                statusObject.notificationContent,
+                                statusObject.notificationBigText,
+                                statusObject.notificationPercent,
+                                ongoingNotificationID
+                            ))
+                        }
+                    }
+                } catch (e: JSONException) {
+                    Log.e(tag(), "Error: the offending line: $line")
+                    //FLog.e(TAG, "onHandleIntent: error reading json", e)
+                }
+            }
+        } catch (e: InterruptedIOException) {
+            FLog.e(tag(), "onHandleIntent: I/O interrupted, stream closed", e)
+        } catch (e: IOException) {
+            FLog.e(tag(), "onHandleIntent: error reading stdout", e)
+        }
+        try {
+            localProcessReference.waitFor()
+        } catch (e: InterruptedException) {
+            FLog.e(tag(), "onHandleIntent: error waiting for process", e)
+        }
     }
 
     private fun postSync() {
@@ -320,11 +369,13 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     private fun showCancelledNotification(notificationId: Int) {
-        val content = mContext.getString(R.string.operation_failed_cancelled)
-        SyncLog.info(mContext, mTitle, content)
+        SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_failed_cancelled))
+        // The title inside the notification is the type-specific serviceCancelled string
+        // ("Delete cancelled" etc.); the content names the operation instead of the misleading
+        // generic "Sync was cancelled" that was shown for every worker type.
         mNotificationManager?.showCancelledNotification(
             mTitle,
-            content,
+            mTitle,
             notificationId,
             0
         )
@@ -407,6 +458,10 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             notification?.let {
                 setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC))
+            }
+        } else {
+            notification?.let {
+                setForegroundAsync(ForegroundInfo(ongoingNotificationID, it))
             }
         }
     }
@@ -512,7 +567,17 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 getFileitemFromParcel(MOVE_FILE)
             }
             Type.DELETE -> {
-                getFileitemFromParcel(DELETE_FILE)
+                val first = sDeleteEntries.firstOrNull()
+                    ?: throw NullPointerException("No delete entry was passed. We cannot continue!")
+                FileItem(
+                        RemoteItem("", ""),
+                        first.path,
+                        first.name,
+                        0,
+                        "",
+                        "",
+                        first.isDir,
+                        false)
             }
         }
     }

@@ -11,6 +11,8 @@ import de.schuelken.cloudbridge.notifications.implementations.DeleteWorkerNotifi
 import de.schuelken.cloudbridge.notifications.implementations.DownloadWorkerNotification
 import de.schuelken.cloudbridge.notifications.implementations.MoveWorkerNotification
 import de.schuelken.cloudbridge.notifications.implementations.UploadWorkerNotification
+import java.io.File
+import java.util.UUID
 
 class EphemeralTaskManager(private var mContext: Context) {
 
@@ -73,20 +75,36 @@ class EphemeralTaskManager(private var mContext: Context) {
             EphemeralTaskManager(context).work(data.build(), EPHEMERAL_WORK_TAG)
         }
 
+        /**
+         * Queues one delete worker for the whole selection. WorkManager's `Data` is capped at
+         * 10 KB, so large selections are handed over via a manifest file in the cache dir.
+         */
         fun queueDelete(
             context: Context,
             remote: RemoteItem,
-            file: FileItem,
-            currentPath: String
+            files: List<FileItem>
         ) {
 
             DeleteWorkerNotification(context).generateChannels()
+
+            // A queued job can be cancelled or lost (update, hard process kill) before its worker
+            // ever runs; sweep leftovers older than a day so the cache dir stays clean.
+            val cutoff = System.currentTimeMillis() - 24L * 60 * 60 * 1000
+            context.cacheDir.listFiles { file ->
+                (file.name.startsWith("delete-manifest-") || file.name.startsWith("delete-files-from-"))
+                        && file.lastModified() < cutoff
+            }?.forEach { it.delete() }
+
+            val manifest = File(context.cacheDir, "delete-manifest-${UUID.randomUUID()}.txt")
+            manifest.writeText(DeleteManifest.encode(files.map {
+                DeleteEntry(path = it.path, name = it.name, isDir = it.isDir)
+            }))
 
             val data = Data.Builder()
             data.putString(EphemeralWorker.EPHEMERAL_TYPE, Type.DELETE.name)
             addRemoteItemToData(EphemeralWorker.REMOTE, remote, data)
 
-            addFileItemToData(EphemeralWorker.DELETE_FILE, file, data)
+            data.putString(EphemeralWorker.DELETE_MANIFEST, manifest.absolutePath)
             EphemeralTaskManager(context).work(data.build(), EPHEMERAL_WORK_TAG)
         }
 

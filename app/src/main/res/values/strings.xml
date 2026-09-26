@@ -139,6 +139,12 @@
     <string name="transfer_only_on_wifi">Transfer files only over Wi-Fi</string>
     <string name="transfer_only_on_wifi_summary">Require Wi-Fi connection for file transfers</string>
     <string name="pref_transfers_title">Concurrent transfers</string>
+    <string name="cancel_all_transfers_title">Cancel all transfers and syncs</string>
+    <string name="cancel_all_transfers_summary">Cancels every queued and running upload, download, move, delete and sync</string>
+    <string name="cancel_all_transfers_confirm_title">Cancel all transfers and syncs?</string>
+    <string name="cancel_all_transfers_confirm_message">All queued and running uploads, downloads, moves, deletions and syncs will be cancelled.</string>
+    <string name="cancel_all_transfers_action">Cancel all</string>
+    <string name="cancel_all_transfers_done">All transfers and syncs were cancelled</string>
     <string name="pref_use_proxy_title">Use Proxy</string>
     <string name="pref_use_proxy_summary">Use proxy for all supported data transfers (HTTP, HTTPS)</string>
     <string name="pref_proxy_protocol">Proxy Protocol</string>
@@ -434,6 +440,10 @@
         <item quantity="zero">Nothing was deleted.</item>
         <item quantity="other">%s was deleted!</item>
     </plurals>
+    <plurals name="worker_deleting_success_batch">
+        <item quantity="one">%d item was deleted</item>
+        <item quantity="other">%d items were deleted</item>
+    </plurals>
     <plurals name="worker_move_success_message">
         <item quantity="zero">Nothing was moved.</item>
         <item quantity="other">%s was moved!</item>
@@ -608,7 +618,9 @@
     <string name="worker_deleting_initialtitle">Deleting…</string>
     <string name="worker_deleting_success">Deleted!</string>
     <string name="worker_deleting_failed">Failed to delete files or folders!</string>
+    <string name="worker_deleting_cancelled">Delete cancelled</string>
     <string name="worker_move_initialtitle">Moving…</string>
+    <string name="worker_move_cancelled">Move cancelled</string>
     <string name="worker_move_failed">Move failed!</string>
     <string name="worker_move_success">Move was successful!</string>
     <string name="worker_download_initialtitle">Downloading…</string>

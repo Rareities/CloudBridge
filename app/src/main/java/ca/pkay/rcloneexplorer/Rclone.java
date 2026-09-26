@@ -985,32 +985,68 @@ public class Rclone {
         return localPathBuilder.toString();
     }
 
-    public Process deleteItems(RemoteItem remote, FileItem deleteItem) {
-        String[] command;
-        String filePath;
-        Process process = null;
-        String localRemotePath;
+    /**
+     * Batch-deletes plain files listed in {@code filesFrom} (one root-relative path per line) with
+     * a single rclone process, so a multi-select delete occupies one worker instead of hundreds.
+     */
+    public Process deleteFilesFrom(RemoteItem remote, File filesFrom) {
+        // Plain-local remotes root at the SAF-mapped prefix; wrapped remotes (crypt/alias/cache)
+        // must NOT get that prefix — buildFullRemotePath applies the same exclusion as the
+        // per-file delete paths, and an empty path yields exactly the remote root.
+        String root = buildFullRemotePath(remote, "");
+        String[] command = createCommandWithOptions("delete", root,
+                "--files-from", filesFrom.getAbsolutePath(),
+                "--transfers", getTransfers(),
+                "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log",
+                "--contimeout", "30s", "--timeout", "2m");
 
+        String[] env = getRcloneEnv();
+        try {
+            return getRuntimeProcess(command, env);
+        } catch (IOException e) {
+            FLog.e(TAG, "deleteFilesFrom: error starting rclone", e);
+            return null;
+        }
+    }
+
+    /** Recursively deletes a single directory on the remote. */
+    public Process purgeItem(RemoteItem remote, String path) {
+        String[] command = createCommandWithOptions("purge", buildFullRemotePath(remote, path),
+                "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log",
+                "--contimeout", "30s", "--timeout", "2m");
+
+        String[] env = getRcloneEnv();
+        try {
+            return getRuntimeProcess(command, env);
+        } catch (IOException e) {
+            FLog.e(TAG, "purgeItem: error starting rclone", e);
+            return null;
+        }
+    }
+
+    /** Deletes a single plain file on the remote (fallback for names unusable in --files-from). */
+    public Process deleteItems(RemoteItem remote, String path) {
+        String[] command = createCommandWithOptions("deletefile", buildFullRemotePath(remote, path),
+                "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log",
+                "--contimeout", "30s", "--timeout", "2m");
+
+        String[] env = getRcloneEnv();
+        try {
+            return getRuntimeProcess(command, env);
+        } catch (IOException e) {
+            FLog.e(TAG, "deleteItems: error starting rclone", e);
+            return null;
+        }
+    }
+
+    private String buildFullRemotePath(RemoteItem remote, String path) {
+        String localRemotePath;
         if (remote.isRemoteType(RemoteItem.LOCAL) && (!remote.isAlias() && !remote.isCrypt() && !remote.isCache())) {
             localRemotePath = getLocalRemotePathPrefix(remote, context) + "/";
         } else {
             localRemotePath = "";
         }
-
-        filePath = remote.getName() + ":" + localRemotePath + deleteItem.getPath();
-        if (deleteItem.isDir()) {
-            command = createCommandWithOptions("purge", filePath);
-        } else {
-            command = createCommandWithOptions("deletefile", filePath);
-        }
-
-        String[] env = getRcloneEnv();
-        try {
-            process = getRuntimeProcess(command, env);
-        } catch (IOException e) {
-            FLog.e(TAG, "deleteItems: error starting rclone", e);
-        }
-        return process;
+        return remote.getName() + ":" + localRemotePath + path;
     }
 
     public Boolean makeDirectory(RemoteItem remote, String path) {

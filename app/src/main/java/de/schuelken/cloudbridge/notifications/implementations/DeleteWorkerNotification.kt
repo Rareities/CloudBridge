@@ -15,7 +15,7 @@ class DeleteWorkerNotification(var context: Context) : WorkerNotification(contex
     override val initialTitle = string(R.string.worker_deleting_initialtitle)
     override val serviceOngoingTitle = initialTitle
     override val serviceFailed = string(R.string.worker_deleting_failed)
-    override val serviceCancelled = "unused"
+    override val serviceCancelled = string(R.string.worker_deleting_cancelled)
     override val serviceSuccess = string(R.string.worker_deleting_success)
 
     // use only a single channel
@@ -35,9 +35,18 @@ class DeleteWorkerNotification(var context: Context) : WorkerNotification(contex
 
 
     override fun generateSuccessMessage(statusObject: StatusObject, fileItem: FileItem): String {
+        val deletions = statusObject.getDeletions()
+        if (deletions > 1) {
+            // Batch deletes span several files; naming one of them would be misleading.
+            return mContext.resources.getQuantityString(
+                    R.plurals.worker_deleting_success_batch,
+                    deletions,
+                    deletions
+            )
+        }
         return mContext.resources.getQuantityString(
                 R.plurals.worker_deleting_success_message,
-                statusObject.getDeletions(),
+                deletions,
                 fileItem.name
         )
     }

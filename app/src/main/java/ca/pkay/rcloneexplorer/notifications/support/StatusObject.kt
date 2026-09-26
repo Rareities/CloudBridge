@@ -77,8 +77,21 @@ class StatusObject(var mContext: Context){
         return mStats.optInt("totalTransfers", 0)
     }
 
+    /**
+     * Deletions reported by the current rclone process plus the totals folded in from earlier
+     * processes of the same batch job (a multi-item delete runs several rclone processes and
+     * each process only reports its own counts).
+     */
+    private var accumulatedDeletions = 0
+
+    /** Folds the current process's counts into the total and resets them. */
+    fun accumulateDeletions() {
+        accumulatedDeletions += mStats.optInt("deletes", 0) + mStats.optInt("deletedDirs", 0)
+        mStats = JSONObject()
+    }
+
     fun getDeletions(): Int {
-        return mStats.optInt("deletes", 0) + mStats.optInt("deletedDirs", 0)
+        return accumulatedDeletions + mStats.optInt("deletes", 0) + mStats.optInt("deletedDirs", 0)
     }
 
     fun getErrorMessage(): String {
