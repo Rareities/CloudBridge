@@ -16,6 +16,7 @@ for current-source counts; no upstream/original PR was created.
 | rclone full short suite | Go 1.26.8 Windows/amd64; `go test -short -mod=readonly -count=1 ./...` | **NOT PASS:** FTP, HDFS, SFTP, SIA, SMB, Swift and WebDAV test-server init scripts are unavailable in this checkout; the WebDAV range harness also ignored the requested range. These cases remain explicit environment/harness blockers, not waivers or passes. |
 | App-to-engine provenance | App immutable pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; clean app commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` | Pin is unchanged and verified locally. The clean-tree generator failed closed because it requires JDK 17 and this host has JDK 21.0.8.9; no current source-bound provenance manifest is claimed. Debug APK hashes do not establish release provenance. |
 | Samsung / Proton / release | Galaxy S26 One UI/API/firmware, live Proton disposable area, production signing and hosted CI | **NOT RUN / NO-GO**, not inferred from local passes. |
+| Fork-only review | Rareities-owned repositories | CloudBridge [PR #1](https://github.com/Rareities/CloudBridge/pull/1), rclone [PR #2](https://github.com/Rareities/rclone/pull/2) | **OPEN DRAFTS:** no upstream/original PR; connector reports no combined status checks or PR-triggered workflow runs. Do not merge or publish a release from these branches until the outstanding gates pass. |
 
 ### Current debug artifact hashes
 

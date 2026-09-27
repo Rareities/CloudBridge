@@ -2,11 +2,15 @@
 
 ## Current committed verification checkpoint — 2026-09-27
 
-- CloudBridge commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` is now pushed to
-  `Rareities/CloudBridge:codex/luna-implementation`; no upstream/original PR was created.
-  PR creation and release publication remain separate final-gate actions.
+- CloudBridge implementation commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` and
+  documentation head `2b1d56d689006c82c089bd8f4d81c36d394f6cc9` are pushed to
+  `Rareities/CloudBridge:codex/luna-implementation`; fork-only draft PR #1 is open at
+  https://github.com/Rareities/CloudBridge/pull/1. No upstream/original PR was created.
+  Release publication remains a separate final-gate action.
 - Rareities/rclone verification-ledger commit `cf4e787f7dbd8d2b01c86cdfb1f7577f00decb67`
-  is pushed to `Rareities/rclone:codex/luna-engine-final`; the app remains pinned to exact
+  and fork-only PR-ledger head `53a69b872ca1086568c4da90b06f4cd43f9e3305` are pushed to
+  `Rareities/rclone:codex/luna-engine-final`; draft PR #2 is open at
+  https://github.com/Rareities/rclone/pull/2. The app remains pinned to exact
   engine source `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`.
 - The committed source closes short-lived `DatabaseHandler` and `TriggerService`
   instances across import/export, reconciliation, adapters, activities, fragments and
