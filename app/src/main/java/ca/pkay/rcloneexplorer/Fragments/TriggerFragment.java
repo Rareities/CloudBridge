@@ -81,6 +81,15 @@ public class TriggerFragment extends Fragment {
         populateTriggerList(fragmentView);
     }
 
+    @Override
+    public void onDestroy() {
+        if (dbHandler != null) {
+            dbHandler.close();
+            dbHandler = null;
+        }
+        super.onDestroy();
+    }
+
     private void updateVisibilities(View view){
         if(dbHandler == null){
             dbHandler = new DatabaseHandler(view.getContext());
@@ -99,8 +108,12 @@ public class TriggerFragment extends Fragment {
             view.findViewById(R.id.layout_error).setVisibility(View.VISIBLE);
             //disable all trigger when no tasks are available.
             TriggerService triggerService = new TriggerService(view.getContext());
-            for(Trigger trigger : dbHandler.getAllTrigger()){
-                triggerService.cancelTrigger(trigger.getId());
+            try {
+                for(Trigger trigger : dbHandler.getAllTrigger()){
+                    triggerService.cancelTrigger(trigger.getId());
+                }
+            } finally {
+                triggerService.close();
             }
         }
 

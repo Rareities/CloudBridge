@@ -16,6 +16,7 @@ import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.Rclone;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import ca.pkay.rcloneexplorer.util.NotificationUtils;
 
 
@@ -38,7 +39,7 @@ public class StreamingService extends IntentService {
     private final String CHANNEL_NAME = "Streaming service";
     private final int PERSISTENT_NOTIFICATION_ID = 179;
     private Rclone rclone;
-    private Process runningProcess;
+    private NativeExecutionHandle runningProcess;
 
     /**
      * Creates an IntentService.  Invoked by your subclass's constructor.*
@@ -98,32 +99,26 @@ public class StreamingService extends IntentService {
 
         switch (protocol) {
             case SERVE_FTP:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_FTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serveOwned(Rclone.SERVE_PROTOCOL_FTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
                 break;
             case SERVE_WEBDAV:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_WEBDAV, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serveOwned(Rclone.SERVE_PROTOCOL_WEBDAV, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
                 break;
             case SERVE_DLNA:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_DLNA, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serveOwned(Rclone.SERVE_PROTOCOL_DLNA, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
                 break;
             case SERVE_HTTP:
             default:
-                runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_HTTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
+                runningProcess = rclone.serveOwned(Rclone.SERVE_PROTOCOL_HTTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
                 break;
         }
 
-        boolean exitedNormally = false;
         if (runningProcess != null) {
-            try {
-                runningProcess.waitFor();
-                exitedNormally = true;
-            } catch (InterruptedException e) {
-                FLog.e(TAG, "onHandleIntent: error waiting for process", e);
+            NativeExecutionHandle.Outcome outcome = runningProcess.await(
+                    NativeExecutionHandle.NO_TIMEOUT, null, null);
+            if (!outcome.isSuccess()) {
+                FLog.e(TAG, "onHandleIntent: serve exited with state %s", outcome.getState());
             }
-        }
-
-        if (exitedNormally && runningProcess.exitValue() != 0) {
-            rclone.logErrorOutput(runningProcess);
         }
 
         stopForeground(true);
@@ -133,7 +128,7 @@ public class StreamingService extends IntentService {
     public void onDestroy() {
         super.onDestroy();
         if (null != runningProcess) {
-            runningProcess.destroy();
+            runningProcess.cancelAndAwait(null, null);
         }
     }
 

@@ -91,7 +91,7 @@ public class ProviderPaths {
      */
     public Uri getUriByMappedPath(String requestUri) {
         if(null == requestUri || '/' != requestUri.charAt(0)){
-            throw new IllegalArgumentException("You must request an actual path permission, not " + requestUri);
+            throw new IllegalArgumentException("Mapped path must be absolute");
         }
         Uri thirdParty = getUriThirdParty(requestUri);
         if (null != thirdParty) {
@@ -120,7 +120,7 @@ public class ProviderPaths {
                     .build();
         }
 
-        Log.v(TAG, "Rewriting URI: " + requestUri);
+        Log.v(TAG, "path_mapping.rewrite_attempt");
         int trailingSlashPos = requestUri.lastIndexOf("/");
         int secondSlash = requestUri.indexOf("/", 1);
         // special handling for android document urls - they are normalized by using a slash instead of the internal ':'
@@ -142,7 +142,7 @@ public class ProviderPaths {
             String permissionPath = permission.getUri().toString().replace("%3A", ":");
             if(pathPrefix.contains(permissionPath)){
                 // all ok, we this is a android ext doc path provider and the app has been granted access
-                Log.v(TAG, "Rewrote URI to " + pathPrefix);
+                Log.v(TAG, "path_mapping.rewrite_succeeded");
                 Uri.Builder builder = new Uri.Builder();
                 return builder
                         .scheme("content")

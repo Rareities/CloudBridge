@@ -82,7 +82,13 @@ public class TriggerRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerVie
     public void onBindViewHolder(@NonNull final RecyclerView.ViewHolder holder, final int position) {
         final Trigger selectedTrigger = triggers.get(position);
 
-        Task task = (new DatabaseHandler(context)).getTask(selectedTrigger.getTriggerTarget());
+        DatabaseHandler dbForTarget = new DatabaseHandler(context);
+        Task task;
+        try {
+            task = dbForTarget.getTask(selectedTrigger.getTriggerTarget());
+        } finally {
+            dbForTarget.close();
+        }
         String targetTaskTitle = "ERR: NOTFOUND";
         if(task != null){ targetTaskTitle = task.getTitle(); }
 
@@ -122,15 +128,28 @@ public class TriggerRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerVie
     private void setIconListener(Trigger trigger, ImageButton button){
         DatabaseHandler db = new DatabaseHandler(context);
         trigger.setEnabled(!trigger.isEnabled());
-        db.updateTrigger(trigger);
+        try {
+            db.updateTrigger(trigger);
+        } finally {
+            db.close();
+        }
         updateStatusIcon(trigger, button);
 
         String message = context.getResources().getString(R.string.message_trigger_disabled);
+        TriggerService triggerService = new TriggerService(context);
         if(trigger.isEnabled()){
             message = context.getResources().getString(R.string.message_trigger_enabled);
-            new TriggerService(context).queueTrigger();
+            try {
+                triggerService.queueTrigger();
+            } finally {
+                triggerService.close();
+            }
         } else {
-            new TriggerService(context).cancelTrigger(trigger.getId());
+            try {
+                triggerService.cancelTrigger(trigger.getId());
+            } finally {
+                triggerService.close();
+            }
         }
         Toasty.info(context, message).show();
     }
@@ -147,14 +166,41 @@ public class TriggerRecyclerViewAdapter extends RecyclerView.Adapter<RecyclerVie
     }
 
     private void copyTrigger(Trigger trigger){
-        trigger.setTitle(trigger.getTitle() + context.getString(R.string.trigger_copy_suffix));
-        Trigger newTrigger = (new DatabaseHandler(context)).createTrigger(trigger, false);
+        Trigger newTrigger = trigger.duplicate(
+                trigger.getTitle() + context.getString(R.string.trigger_copy_suffix));
+        DatabaseHandler db = new DatabaseHandler(context);
+        try {
+            newTrigger = db.createTrigger(newTrigger, false);
+        } finally {
+            db.close();
+        }
+        if (newTrigger.getId() < 0) {
+            Toasty.error(context, context.getString(R.string.trigger_copy_failed)).show();
+            return;
+        }
+        TriggerService triggerService = new TriggerService(context);
+        try {
+            triggerService.queueSingleTrigger(newTrigger);
+        } finally {
+            triggerService.close();
+        }
         triggers.add(newTrigger);
         notifyItemInserted(triggers.size() - 1);
     }
 
     public void deleteTrigger(Trigger trigger) {
-        new DatabaseHandler(context).deleteTrigger(trigger.getId());
+        DatabaseHandler db = new DatabaseHandler(context);
+        try {
+            db.deleteTrigger(trigger.getId());
+        } finally {
+            db.close();
+        }
+        TriggerService triggerService = new TriggerService(context);
+        try {
+            triggerService.cancelTrigger(trigger.getId());
+        } finally {
+            triggerService.close();
+        }
         int index = triggers.indexOf(trigger);
         if (index >= 0) {
             triggers.remove(index);

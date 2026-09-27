@@ -11,7 +11,9 @@ import android.content.Intent
 import android.view.View
 import ca.pkay.rcloneexplorer.Activities.MainActivity
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle
 import java.util.ArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 
 @SuppressLint("StaticFieldLeak")
 class ConfigCreate internal constructor(
@@ -23,7 +25,7 @@ class ConfigCreate internal constructor(
     private val providerType: String = ""
 ) : AsyncTask<Void?, Void?, Boolean>() {
     private val options: ArrayList<String>
-    private var process: Process? = null
+    private var process: NativeExecutionHandle? = null
     private val mContext: Context
     private val mRclone: Rclone
     private val mFormView: View
@@ -31,10 +33,12 @@ class ConfigCreate internal constructor(
 
     companion object {
         private const val TAG = "ConfigCreate"
+        private const val MAX_CONFIG_STATE_OUTPUT_CHARS = 1_048_576
+        private const val MAX_CONFIG_STATE_STEPS = 8
     }
 
     init {
-        this.options = ArrayList(options)
+        this.options = ArrayList(options ?: emptyList())
         mFormView = formView
         mAuthView = authView
         mContext = context
@@ -48,6 +52,9 @@ class ConfigCreate internal constructor(
     }
 
     override fun doInBackground(vararg params: Void?): Boolean {
+        if (options.isEmpty()) {
+            return false
+        }
         return if (providerType.equals("internxt", ignoreCase = true)) {
             createInternxtWithTwoFactor()
         } else {
@@ -67,7 +74,7 @@ class ConfigCreate internal constructor(
      * 5. Shows "Keep this" confirmation -> respond with 'y'
      */
     private fun createInternxtWithTwoFactor(): Boolean {
-        android.util.Log.e(TAG, "=== INTERNXT AUTH START ===")
+        FLog.e(TAG, "=== INTERNXT AUTH START ===")
 
         // Step 0: Ask for Auth Method (Temporary vs Auto-Login)
         val authMethod = getAuthPreferenceFromUser()
@@ -84,54 +91,34 @@ class ConfigCreate internal constructor(
             // Add totp_secret to options
             options.add("totp_secret")
             options.add(totpSecret)
-            android.util.Log.e(TAG, "Added totp_secret to options")
+            FLog.e(TAG, "Added totp_secret to options")
         }
         
         // Step 1: Create the remote entry with --no-interaction so the backend's Config()
         // function (which does interactive login) is NOT triggered. We just save email/pass/
         // totp_secret as raw key-value pairs. The real interactive login happens in Step 2.
-        android.util.Log.e(TAG, "Step 1: Running config create (no-interaction)...")
-        process = mRclone.configCreateNoInteract(options)
+        FLog.e(TAG, "Step 1: Running config create (no-interaction)...")
+        process = mRclone.configCreateNoInteractOwned(options)
         if (process == null) {
-            android.util.Log.e(TAG, "Step 1 FAILED: process is null")
+            FLog.e(TAG, "Step 1 FAILED: process is null")
             return false
         }
         
         val createProc = process!!
-        android.util.Log.e(TAG, "Step 1: Waiting for config create to finish...")
-        
-        // Drain output to prevent blocking
-        Thread {
-            try {
-                createProc.inputStream.bufferedReader().forEachLine { }
-            } catch (e: Exception) {}
-        }.start()
-        Thread {
-            try {
-                createProc.errorStream.bufferedReader().forEachLine { }
-            } catch (e: Exception) {}
-        }.start()
-        
-        try {
-            val finished = createProc.waitFor(1, java.util.concurrent.TimeUnit.MINUTES)
-            val exitCode = if (finished) createProc.exitValue() else -1
-            android.util.Log.e(TAG, "Step 1 finished=$finished, exitCode=$exitCode")
-            if (exitCode != 0) {
-                android.util.Log.e(TAG, "Step 1 failed! Aborting configuration.")
-                return false
-            }
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Step 1 EXCEPTION: ${e.message}")
-            createProc.destroyForcibly()
+        FLog.e(TAG, "Step 1: Waiting for config create to finish...")
+
+        val createOutcome = createProc.await(60_000L, null, null)
+        if (!createOutcome.isSuccess()) {
+            FLog.e(TAG, "Step 1 config create ended with state ${createOutcome.getState()}")
             return false
         }
         
         // Extract remote name from options (first element)
         val remoteName = if (options.isNotEmpty()) options[0] else {
-            android.util.Log.e(TAG, "ERROR: options empty, cannot get remote name")
+            FLog.e(TAG, "ERROR: options empty, cannot get remote name")
             return false
         }
-        android.util.Log.e(TAG, "Step 2: Running config reconnect for '$remoteName'...")
+        FLog.e(TAG, "Step 2: Running config reconnect for '$remoteName'...")
         
         // Step 2: Run config reconnect to complete the interactive auth
         return runConfigReconnect(remoteName)
@@ -145,8 +132,10 @@ class ConfigCreate internal constructor(
         var state = ""
         var result = ""
         var isDone = false
+        var stepCount = 0
 
-        while (!isDone) {
+        while (!isDone && stepCount < MAX_CONFIG_STATE_STEPS) {
+            stepCount++
             val options = arrayListOf(remoteName, "--non-interactive", "--no-obscure")
             if (state.isNotEmpty()) {
                 options.add("--continue")
@@ -156,52 +145,23 @@ class ConfigCreate internal constructor(
                 options.add(result)
             }
 
-            android.util.Log.e(TAG, "Running Internxt config update")
-            val proc = mRclone.config("update", options) ?: return false
+            FLog.e(TAG, "Running Internxt config update")
+            val execution = mRclone.configOwned("update", options) ?: return false
 
             val jsonOutput = java.lang.StringBuilder()
-            // Read stdout (JSON output from rclone)
-            val outputReader = Thread {
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(proc.inputStream))
-                try {
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        jsonOutput.append(line).append("\n")
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Output reader error", e)
+            val outputTooLarge = AtomicBoolean(false)
+            val outcome = execution.await(2 * 60 * 1000L, { line ->
+                val addition = line + "\n"
+                if (jsonOutput.length + addition.length <= MAX_CONFIG_STATE_OUTPUT_CHARS) {
+                    jsonOutput.append(addition)
+                } else {
+                    outputTooLarge.set(true)
+                    execution.cancel()
                 }
-            }
+            }, null)
 
-            // Drain stderr without retaining sensitive auth output.
-            val errorReader = Thread {
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(proc.errorStream))
-                try {
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        // Keep draining so rclone cannot block on a full pipe.
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Error reader error", e)
-                }
-            }
-
-            outputReader.start()
-            errorReader.start()
-
-            val completed = proc.waitFor(2, java.util.concurrent.TimeUnit.MINUTES)
-            outputReader.join(1000)
-            errorReader.join(1000)
-
-            if (!completed) {
-                android.util.Log.e(TAG, "Config update timed out")
-                proc.destroyForcibly()
-                return false
-            }
-
-            val exitCode = proc.exitValue()
-            if (exitCode != 0) {
-                android.util.Log.e(TAG, "rclone config update failed with exit code $exitCode")
+            if (!outcome.isSuccess() || outputTooLarge.get()) {
+                FLog.e(TAG, "Config update ended with state ${outcome.getState()}")
                 return false
             }
 
@@ -209,7 +169,7 @@ class ConfigCreate internal constructor(
             if (jsonStr.isEmpty()) {
                 // Empty JSON means complete
                 isDone = true
-                android.util.Log.e(TAG, "Config state machine finished successfully")
+                FLog.e(TAG, "Config state machine finished successfully")
                 break
             }
 
@@ -219,7 +179,7 @@ class ConfigCreate internal constructor(
                 
                 if (state.isEmpty()) {
                     isDone = true
-                    android.util.Log.e(TAG, "Config state machine reached terminal state")
+                    FLog.e(TAG, "Config state machine reached terminal state")
                     break
                 }
 
@@ -228,11 +188,11 @@ class ConfigCreate internal constructor(
                     val helpText = optionObj.optString("Help", "")
                     
                     if (helpText.contains("Two-factor authentication code", ignoreCase = true)) {
-                        android.util.Log.e(TAG, "JSON requested 2FA")
+                        FLog.e(TAG, "JSON requested 2FA")
                         result = getTwoFactorCodeFromUser()
                     } else if (helpText.contains("password", ignoreCase = true)) {
                         result = "" 
-                        android.util.Log.e(TAG, "JSON requested password/unknown: $helpText")
+                        FLog.e(TAG, "JSON requested password/unknown: $helpText")
                     } else {
                         // Any other prompt, default to empty
                         result = ""
@@ -242,11 +202,15 @@ class ConfigCreate internal constructor(
                     result = ""
                 }
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to parse rclone JSON output", e)
+                // Reconnect JSON can contain authorization material; never include it in logs.
+                FLog.e(TAG, "Failed to parse bounded rclone config state output")
                 return false
             }
         }
-        return true
+        if (!isDone) {
+            FLog.e(TAG, "Internxt config state exceeded the step limit")
+        }
+        return isDone
     }
 
     private fun getAuthPreferenceFromUser(): String {
@@ -367,7 +331,7 @@ class ConfigCreate internal constructor(
 
     override fun onCancelled() {
         super.onCancelled()
-        process?.destroy()
+        process?.cancel()
     }
 
     override fun onPostExecute(success: Boolean) {

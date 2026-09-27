@@ -24,11 +24,13 @@ import java.util.ArrayList;
 import java.util.Date;
 
 import ca.pkay.rcloneexplorer.R;
+import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.SyncLog;
 import es.dmoral.toasty.Toasty;
 
 public class LogRecyclerViewAdapter extends RecyclerView.Adapter<LogRecyclerViewAdapter.ViewHolder>{
 
+    private static final String TAG = "LogRecyclerViewAdapter";
     private ArrayList<JSONObject> entries;
 
     public LogRecyclerViewAdapter(ArrayList<JSONObject> entries) {
@@ -89,7 +91,7 @@ public class LogRecyclerViewAdapter extends RecyclerView.Adapter<LogRecyclerView
                     break;
             }
         } catch (JSONException e) {
-            e.printStackTrace();
+            FLog.e(TAG, "Unable to render persisted sync log entry", e);
         }
     }
 

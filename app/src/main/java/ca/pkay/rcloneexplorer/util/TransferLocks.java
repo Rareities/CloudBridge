@@ -14,7 +14,7 @@ import androidx.annotation.Nullable;
  * the next Doze maintenance window, which destroys throughput. See the transmission-speed audit
  * (P0 item 2).
  */
-public final class TransferLocks {
+public final class TransferLocks implements AutoCloseable {
 
     private final PowerManager.WakeLock wakeLock;
     private final WifiManager.WifiLock wifiLock;
@@ -61,7 +61,8 @@ public final class TransferLocks {
     }
 
     /** Releases both locks if held. Safe to call from a {@code finally} block. */
-    public void release() {
+    @Override
+    public void close() {
         try {
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
@@ -76,5 +77,10 @@ public final class TransferLocks {
         } catch (RuntimeException e) {
             FLog.e("TransferLocks", "release wifiLock", e);
         }
+    }
+
+    /** Kept for callers that still use the pre-WP05 API. */
+    public void release() {
+        close();
     }
 }

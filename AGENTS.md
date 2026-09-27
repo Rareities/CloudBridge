@@ -16,7 +16,7 @@ Android cloud file manager wrapping [rclone](https://rclone.org). Fork of RCX / 
 | Module | Purpose |
 |---|---|
 | `app` | Main Android application |
-| `rclone` | Cross-compiles rclone (Go) into `librclone.so` per ABI |
+| `rclone` | Cross-compiles rclone into an ABI-specific executable named `librclone.so`; the app launches it as a subprocess, not through JNI |
 | `safdav` | SAF/WebDAV bridge library (`io.github.x0b.safdav`) |
 
 - Package namespace: `ca.pkay.rcloneexplorer` (legacy from rcloneExplorer fork).
@@ -32,36 +32,37 @@ Keep this repository easy to upgrade from upstream rclone.
 - The rclone source is controlled by `de.schuelken.cloudbridge.rCloneRepoUrl` and `de.schuelken.cloudbridge.rCloneRef` in `gradle.properties`.
 - To upgrade rclone, prefer changing only `rCloneRef` (and `rCloneRepoUrl` only if switching forks), then rebuild.
 - Do not modify generated or fetched rclone source under `rclone/cache/`.
-- Do not reintroduce the deprecated `rclone/patches/` flow. The fork already contains project-specific rclone changes, including Internxt auto-token-renewal.
-- Prefer Android-side integration changes in `app/` over Go-side changes in rclone.
-- If a Go-side rclone change is unavoidable, keep it in the rclone fork at `https://github.com/thies2005/rclone`; do not vendor local source patches here.
+- Do not reintroduce the deprecated `rclone/patches/` flow. Keep backend changes in the
+  selected Rareities/rclone repository and verify provider behavior before carrying forward
+  any app-specific behavior from an older engine fork.
+- Fix defects at the layer that owns their behavior: CloudBridge for Android orchestration, UI, lifecycle and scheduling; Rareities/rclone or its responsible dependency for backend, protocol, filesystem, persisted-engine-state and library-concurrency behavior. Use an app-side mitigation only when it is genuinely an integration concern or a lower-layer fix cannot be made safely, and record that reason.
+- Keep Go-side rclone changes in the Rareities fork at `https://github.com/Rareities/rclone`; do not vendor local source patches here. Independently test the engine/library change before app integration.
 
 ## Build
 
-Prerequisites: Go 1.25+, JDK 17, Android SDK with NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
+Prerequisites: Go 1.26+, JDK 17, Android SDK with NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
 
 ```sh
-./gradlew assembleOssDebug
-./gradlew assembleOssRelease
+./gradlew :app:testOssDebugUnitTest :app:assembleOssDebug
 ```
 
-- `app:preBuild` depends on `:rclone:buildAll`, so app builds trigger rclone cross-compilation.
-- First build downloads and caches rclone source in `rclone/cache/`.
+- The normal app build checks out the immutable Rareities/rclone ref from `gradle.properties` and builds its native libraries for the configured ABIs. Network access and Git HTTPS support are required unless the exact source and dependencies are already cached.
 - APK output is under `app/build/outputs/apk/oss/debug/`.
 - ABI splits: `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`, `universal`.
+- Release variants never fall back to the Android debug key. Release packaging requires all production signing values and a readable keystore; that is a build gate, not permission to publish a release.
+- The current GitHub Android workflow tests and packages an OSS debug APK only. It does not upload artifacts or publish a release.
 
 ## Verification
 
 Run the checks that match the change. Before any commit or push, required checks must pass or the failure must be explained to the user.
 
 ```sh
-./gradlew testOssDebugUnitTest
-./gradlew lint -x :rclone:buildAll
-./gradlew assembleOssDebug
+./gradlew :app:testOssDebugUnitTest
+./gradlew :app:assembleOssDebug
 ```
 
-- Unit test coverage is minimal and lives in `app/src/test/`.
-- No instrumented/androidTest runner is wired in CI.
+- JVM tests live in `app/src/test/`; instrumentation tests live separately and are not executed by the current `android.yml` workflow.
+- For an isolated app-JVM diagnostic only, it may be necessary to exclude `:rclone:checkoutRclone` and `:rclone:buildAll`. Such a run does not validate native integration or produce a complete APK; record those exclusions with the test result.
 - Lint baselines exist in `app/` and `safdav/`; `abortOnError` is enabled and `MissingTranslation` is a warning.
 - Skip `assembleOssDebug` only for docs-only changes that cannot affect the build.
 
@@ -83,10 +84,9 @@ Run the checks that match the change. Before any commit or push, required checks
 
 ## CI Workflows
 
-- `android.yml`: Builds **release** APKs on push to `master`; uploads per-ABI beta-release artifacts.
-- `lint.yml`: Runs unit tests + lint on every PR, not on `master`.
-- `dependencies.yml`: Rebuilds on `build.gradle` changes and runs FOSS library scan.
-- `translations.yml`: Profanity-checks translated `strings.xml` on PRs.
+- `android.yml`: runs on pushes and pull requests targeting `master`, and supports manual dispatch. It runs `:app:testOssDebugUnitTest` and `:app:assembleOssDebug`; it does not upload an APK artifact or publish a release.
+- Other workflow files have separate triggers and scopes. Read the checked-in YAML before relying on them; do not infer that a workflow ran or passed without current GitHub Actions evidence.
+- The 2026-09-25 GitHub refresh found no default-branch protection. Refresh this before publication, and use a reviewed pull request rather than pushing directly to `master` regardless of server-side settings.
 
 ## Gotchas
 

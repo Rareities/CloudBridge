@@ -55,19 +55,49 @@ public class SyncDirectionObject {
     };
 
     /**
-     * Returns the direction constant for a spinner position, or {@code SYNC_LOCAL_TO_REMOTE}
-     * (the safe default) if the position is out of range.
+     * Returns the direction constant for a spinner position, or {@code null} if the position is
+     * out of range. Invalid positions must not silently become a destructive one-way sync.
      */
-    public static int directionForSpinnerPosition(int position) {
+    public static Integer directionForSpinnerPosition(int position) {
         if (position < 0 || position >= SPINNER_TO_DIRECTION.length) {
-            return SYNC_LOCAL_TO_REMOTE;
+            return null;
         }
         return SPINNER_TO_DIRECTION[position];
     }
 
     /**
-     * Returns the spinner position for a direction constant, or {@code 0} if the direction is
-     * not in the array (e.g. bisync 5/6, which is commented out).
+     * Resolves an editor position when an unsupported saved value is shown as a placeholder at
+     * position zero. Selecting that placeholder remains unsupported; valid selections retain the
+     * same ordering as {@link #SPINNER_TO_DIRECTION}.
+     */
+    public static Integer directionForSpinnerPosition(int position, boolean hasUnsupportedPlaceholder) {
+        if (hasUnsupportedPlaceholder) {
+            if (position == 0) {
+                return null;
+            }
+            position--;
+        }
+        return directionForSpinnerPosition(position);
+    }
+
+    /**
+     * Resolves a task-editor selection while preserving an unsupported saved direction when its
+     * placeholder remains selected. An explicit supported choice replaces the saved direction.
+     */
+    public static Integer directionForSaving(
+            int position,
+            boolean hasUnsupportedPlaceholder,
+            Integer savedDirection
+    ) {
+        if (hasUnsupportedPlaceholder && position == 0) {
+            return savedDirection;
+        }
+        return directionForSpinnerPosition(position, hasUnsupportedPlaceholder);
+    }
+
+    /**
+     * Returns the spinner position for a supported direction constant, or {@code -1} if the
+     * direction is not represented (e.g. legacy Bisync or an unknown future value).
      */
     public static int spinnerPositionForDirection(int direction) {
         for (int i = 0; i < SPINNER_TO_DIRECTION.length; i++) {
@@ -75,7 +105,24 @@ public class SyncDirectionObject {
                 return i;
             }
         }
-        return 0;
+        return -1;
+    }
+
+    /**
+     * Returns whether a legacy task direction may enter the ordinary sync worker. Bisync and
+     * unknown values stay blocked until they have their own reviewed execution path.
+     */
+    public static boolean isRegularSyncWorkerDirectionSupported(int direction) {
+        return spinnerPositionForDirection(direction) >= 0;
+    }
+
+    /** Returns the editor position, using zero for an unsupported-value placeholder if present. */
+    public static int spinnerPositionForDirection(int direction, boolean hasUnsupportedPlaceholder) {
+        int position = spinnerPositionForDirection(direction);
+        if (position < 0) {
+            return hasUnsupportedPlaceholder ? 0 : -1;
+        }
+        return position + (hasUnsupportedPlaceholder ? 1 : 0);
     }
 
     public static String[] getOptionsArray(Context context) {

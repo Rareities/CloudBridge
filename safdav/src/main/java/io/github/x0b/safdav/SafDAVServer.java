@@ -85,7 +85,7 @@ public class SafDAVServer extends NanoHTTPD {
                 return onPut(session);
             // NanoHttpd will serve 501
             default:
-                return notImplementedResponse(session, "serve");
+                return notImplementedResponse(session);
         }
     }
 
@@ -152,11 +152,9 @@ public class SafDAVServer extends NanoHTTPD {
         return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "text/plain", "Internal Error");
     }
 
-    private Response notImplementedResponse(IHTTPSession session, String signature) {
+    private Response notImplementedResponse(IHTTPSession session) {
         // Don't dump headers: they may include the local WebDAV Authorization credential.
-        Log.e(TAG, signature + ": Request { method " + session.getMethod()
-                + ", uri: " + session.getUri() + " }");
-        Log.e(TAG, signature + ": not implemented", new Exception("Stack Trace"));
+        Log.w(TAG, "request.not_implemented method=" + session.getMethod());
         return null;
     }
 
@@ -207,7 +205,7 @@ public class SafDAVServer extends NanoHTTPD {
 
         // if root, offer permissions; else, normalize (strip permission from) path
         String path = session.getUri();
-        Log.d(TAG, "onPropFind: PROPFIND " + path);
+        Log.d(TAG, "request.propfind");
 
         SafItem directory;
         if ("/".equals(path)) {
@@ -237,7 +235,7 @@ public class SafDAVServer extends NanoHTTPD {
      * @return - an appropriate HTTP response
      */
     protected Response onPropPatch(IHTTPSession session) {
-        return notImplementedResponse(session, "onPropPatch");
+        return notImplementedResponse(session);
     }
 
     /**
@@ -260,7 +258,7 @@ public class SafDAVServer extends NanoHTTPD {
      */
     protected Response onMkCol(IHTTPSession session) {
         String path = session.getUri();
-        Log.d(TAG, "onMkCol: MKCOL " + path);
+        Log.d(TAG, "request.mkcol");
         Uri uri;
         try {
             uri = paths.getUriByMappedPath(path);
@@ -303,7 +301,7 @@ public class SafDAVServer extends NanoHTTPD {
      */
     protected Response onDelete(IHTTPSession session) {
         String path = session.getUri();
-        Log.d(TAG, "onDelete: DELETE " + path);
+        Log.d(TAG, "request.delete");
         Uri uri;
         try {
             uri = paths.getUriByMappedPath(path);
@@ -329,7 +327,7 @@ public class SafDAVServer extends NanoHTTPD {
         String path = session.getUri();
         String mime = session.getHeaders().get("content-type");
         String lengthValue = session.getHeaders().get("content-length");
-        Log.d(TAG, "onPut: PUT " + path + "; " + mime + "; " + lengthValue + " byte");
+        Log.d(TAG, "request.put");
         InputStream is = session.getInputStream();
         long length;
         try {
@@ -377,7 +375,7 @@ public class SafDAVServer extends NanoHTTPD {
      * @return
      */
     protected Response onCopy(IHTTPSession session) {
-        return notImplementedResponse(session, "onCopy");
+        return notImplementedResponse(session);
     }
 
     /**

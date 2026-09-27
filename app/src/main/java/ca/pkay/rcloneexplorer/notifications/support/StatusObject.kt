@@ -2,9 +2,10 @@ package ca.pkay.rcloneexplorer.notifications.support
 
 import android.content.Context
 import android.text.format.Formatter
-import android.util.Log
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.R
+import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.StructuredDiagnosticPolicy
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -15,6 +16,7 @@ class StatusObject(var mContext: Context){
     var notificationContent: String = ""
     var notificationBigText = ArrayList<String>()
     var mErrorList = ArrayList<ErrorObject>()
+    private val diagnosticCollector = StructuredDiagnosticPolicy.Collector()
     var mStats = JSONObject()
     var mLogline = JSONObject()
 
@@ -23,7 +25,7 @@ class StatusObject(var mContext: Context){
     var syncDirection: Int = 0
 
     fun getSpeed(): String {
-        return Formatter.formatFileSize(mContext, mStats.optLong("speed", 0)) + "/s"
+        return Formatter.formatFileSize(mContext, nonNegativeLong(mStats.optLong("speed", 0))) + "/s"
     }
 
     /**
@@ -58,57 +60,73 @@ class StatusObject(var mContext: Context){
     }
 
     fun getSize(): String {
-        return Formatter.formatFileSize(mContext, mStats.optLong("bytes", 0))
+        return Formatter.formatFileSize(mContext, nonNegativeLong(mStats.optLong("bytes", 0)))
     }
 
     fun getTotalSize(): String {
-        return Formatter.formatFileSize(mContext, mStats.optLong("totalBytes", 0))
+        return Formatter.formatFileSize(mContext, nonNegativeLong(mStats.optLong("totalBytes", 0)))
     }
 
     fun getPercentage(): Double {
-        return mStats.optLong("bytes", 0).toDouble() / mStats.optLong("totalBytes", 0) * 100
+        return NotificationProgressPolicy.percent(
+            mStats.optLong("bytes", 0),
+            mStats.optLong("totalBytes", 0)
+        ).toDouble()
     }
 
     fun getTransfers(): Int {
-        return mStats.optInt("transfers", 0)
+        return mStats.optInt("transfers", 0).coerceAtLeast(0)
     }
 
     fun getTotalTransfers(): Int {
-        return mStats.optInt("totalTransfers", 0)
+        return mStats.optInt("totalTransfers", 0).coerceAtLeast(0)
     }
 
     fun getDeletions(): Int {
-        return mStats.optInt("deletes", 0) + mStats.optInt("deletedDirs", 0)
+        val deletes = mStats.optInt("deletes", 0).coerceAtLeast(0)
+        val deletedDirs = mStats.optInt("deletedDirs", 0).coerceAtLeast(0)
+        return (deletes.toLong() + deletedDirs.toLong()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
     }
 
     fun getErrorMessage(): String {
-        if(mLogline.has("msg") && mLogline.getString("level") == "error") {
-            return mLogline.getString("msg")
+        if (mLogline.optString("level", "") == "error") {
+            return mLogline.optString("msg", "")
         }
         return ""
     }
 
     fun getErrorObject(): String {
-        if(mLogline.has("msg") && mLogline.getString("level") == "error") {
+        if (mLogline.optString("level", "") == "error") {
             return mLogline.optString("object", "")
         }
         return ""
     }
 
     fun parseLoglineToStatusObject(logLine: JSONObject) {
-        if(logLine.getString("level") == "error") {
+        if (logLine.optString("level", "") == "error") {
             clearObject()
-            mLogline = logLine
-
-            var error = ErrorObject(getErrorObject(), getErrorMessage())
-            Log.e(TAG, error.mErrorObject + " - " + error.mErrorMessage)
-            mErrorList.add(error)
+            val safe = StructuredDiagnosticPolicy.sanitize(
+                logLine.optString("object", ""),
+                logLine.optString("msg", "")
+            )
+            val error = ErrorObject(safe.objectName, safe.message)
+            // Keep only the safe fields needed by the existing accessors; never retain the raw
+            // error JSONObject after this ingestion boundary.
+            mLogline = JSONObject().apply {
+                put("level", "error")
+                put("object", error.mErrorObject)
+                put("msg", error.mErrorMessage)
+            }
+            FLog.e(TAG, "%s - %s", error.mErrorObject, error.mErrorMessage)
+            if (diagnosticCollector.add(safe)) {
+                mErrorList.add(error)
+            }
         }
 
-        if(logLine.has("stats")) {
+        if (logLine.has("stats")) {
             clearObject()
-            mLogline = logLine
-            mStats = mLogline.getJSONObject("stats")
+            val stats = logLine.optJSONObject("stats") ?: return
+            mStats = stats
 
             //available stats:
             //bytes,checks,deletedDirs,deletes,elapsedTime,errors,eta,fatalError,renames,retryError
@@ -122,12 +140,12 @@ class StatusObject(var mContext: Context){
             // when we check stuff, dont show the other messages.
             val checks = mStats.optJSONArray("checking")
             if(checks != null) {
-                var filename = checks.getString(0)
+                val filename = checks.optString(0, "")
                 if(!filename.equals("")) {
                     notificationBigText.add(
                         String.format(
                             mContext.getString(R.string.sync_notification_elapsed),
-                            prettyPrintDuration(mStats.getInt("elapsedTime"))
+                            prettyPrintDuration(mStats.optInt("elapsedTime", 0))
                         )
                     )
 
@@ -141,13 +159,13 @@ class StatusObject(var mContext: Context){
                 return
             }
 
-            if(mStats.has("transferring")) {
-                val transferring = mStats.getJSONArray("transferring").getJSONObject(0)
-                lastItemAverageSpeed = transferring.optLong("speedAvg", 0)
+            val transferring = mStats.optJSONArray("transferring")?.optJSONObject(0)
+            if(transferring != null) {
+                lastItemAverageSpeed = nonNegativeLong(transferring.optLong("speedAvg", 0))
 
-                val divisor = mStats.getInt("elapsedTime")
-                estimatedAverageSpeed = if(divisor != 0) {
-                    mStats.optLong("bytes", 0) / divisor
+                val divisor = mStats.optInt("elapsedTime", 0).coerceAtLeast(0)
+                estimatedAverageSpeed = if(divisor > 0) {
+                    nonNegativeLong(mStats.optLong("bytes", 0)) / divisor
                 } else {
                     0
                 }
@@ -210,22 +228,18 @@ class StatusObject(var mContext: Context){
                 )
             }
 
-            var eta = mStats.get("eta")
-            if(eta == null) {
-                eta = "0";
-            }
-
             notificationBigText.add(
                 String.format(
                     mContext.getString(R.string.sync_notification_remaining),
                     prettyPrintDuration(mStats.optInt("eta", 0))
                 )
             )
-            if (mStats.getInt("errors") > 0) {
+            val errors = mStats.optInt("errors", 0).coerceAtLeast(0)
+            if (errors > 0) {
                 notificationBigText.add(
                     String.format(
                         mContext.getString(R.string.sync_notification_errors),
-                        mStats.getInt("errors")
+                        errors
                     )
                 )
             }
@@ -233,13 +247,14 @@ class StatusObject(var mContext: Context){
             notificationBigText.add(
                 String.format(
                     mContext.getString(R.string.sync_notification_elapsed),
-                    prettyPrintDuration(mStats.getInt("elapsedTime"))
+                    prettyPrintDuration(mStats.optInt("elapsedTime", 0))
                 )
             )
 
             val transfers = mStats.optJSONArray("transferring")
             if(transfers != null) {
-                val transferObject = transfers.getJSONObject(0)
+                val transferObject = transfers.optJSONObject(0)
+                if (transferObject == null) return
                 var filename = transferObject.optString("name", "")
                 if(!filename.equals("")) {
                     notificationBigText.add(String.format(
@@ -249,7 +264,7 @@ class StatusObject(var mContext: Context){
                 }
             }
 
-            notificationPercent = percent.toInt()
+            notificationPercent = percent.toInt().coerceIn(0, 100)
         }
     }
 
@@ -262,17 +277,16 @@ class StatusObject(var mContext: Context){
 
     fun printErrors(){
         mErrorList.forEach {
-            Log.e(TAG, it.mErrorObject + " - " + it.mErrorMessage)
+            FLog.e(TAG, "%s - %s", it.mErrorObject, it.mErrorMessage)
         }
     }
 
-    fun getAllErrorMessages(): String{
-        var all = ""
-        mErrorList.forEach {
-            all += it.mErrorMessage + "\n"
-            all += mContext.getString(R.string.status_offendingfile) + it.mErrorObject + "\n"
-        }
-        return all
+    fun getOmittedErrorCount(): Int {
+        return diagnosticCollector.omittedCount
+    }
+
+    fun getAllErrorMessages(): String {
+        return diagnosticCollector.format(mContext.getString(R.string.status_offendingfile))
     }
 
     override fun toString(): String {
@@ -282,7 +296,8 @@ class StatusObject(var mContext: Context){
 
     private fun prettyPrintDuration(secondDuration: Int) : String {
 
-        var duration = secondDuration.toLong()
+        val safeDuration = secondDuration.coerceAtLeast(0)
+        var duration = safeDuration.toLong()
         val days = TimeUnit.SECONDS.toDays(duration).toInt()
         duration -= (days * 60 * 60 * 24)
         val hours = TimeUnit.SECONDS.toHours(duration).toInt()
@@ -338,10 +353,12 @@ class StatusObject(var mContext: Context){
         }
 
         //if the time is longer than an hour, dont show seconds
-        return if (60*60 < secondDuration) {
+        return if (60*60 < safeDuration) {
             "$daysText$hoursText$minutesText"
         } else {
             "$daysText$hoursText$minutesText$secondsText"
         }
     }
+
+    private fun nonNegativeLong(value: Long): Long = value.coerceAtLeast(0L)
 }

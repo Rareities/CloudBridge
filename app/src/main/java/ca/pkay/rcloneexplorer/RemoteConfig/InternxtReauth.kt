@@ -4,12 +4,12 @@ import android.annotation.SuppressLint
 import android.app.ProgressDialog
 import android.content.Context
 import android.os.AsyncTask
-import android.os.Build
 import android.text.InputType
 import android.widget.Toast
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
@@ -17,6 +17,7 @@ import es.dmoral.toasty.Toasty
 import org.json.JSONObject
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 @SuppressLint("StaticFieldLeak")
 class InternxtReauth(
@@ -33,6 +34,8 @@ class InternxtReauth(
         private const val CANCEL = "CANCEL"
         private const val TEMPORARY = "TEMPORARY"
         private const val PERMANENT = "PERMANENT"
+        private const val MAX_CONFIG_STATE_OUTPUT_CHARS = 1_048_576
+        private const val MAX_CONFIG_STATE_STEPS = 8
     }
 
     override fun onPreExecute() {
@@ -66,20 +69,16 @@ class InternxtReauth(
 
     private fun updateTOTPSecret(totpSecret: String): Boolean {
         val options = arrayListOf(remoteName, "totp_secret", totpSecret, "--obscure")
-        val proc = rclone.config("update", options)
-        if (proc == null) {
+        val execution = rclone.configOwned("update", options)
+        if (execution == null) {
             errorMessage = context.getString(R.string.error_creating_remote)
             return false
         }
 
-        val outputReader = proc.drainOutput()
-        val errorReader = proc.drainError()
-        val completed = proc.waitForQuietly(1, TimeUnit.MINUTES)
-        outputReader.join(1000)
-        errorReader.join(1000)
-        if (!completed || proc.exitValue() != 0) {
+        val outcome = execution.await(TimeUnit.MINUTES.toMillis(1), null, null)
+        if (!outcome.isSuccess()) {
             errorMessage = context.getString(R.string.error_creating_remote)
-            FLog.e(TAG, "Failed to update Internxt TOTP secret")
+            FLog.e(TAG, "Internxt config update ended with state ${outcome.getState()}")
             return false
         }
         return true
@@ -88,8 +87,10 @@ class InternxtReauth(
     private fun runConfigReconnect(): Boolean {
         var state = ""
         var result = ""
+        var steps = 0
 
-        while (true) {
+        while (steps < MAX_CONFIG_STATE_STEPS) {
+            steps++
             val options = arrayListOf(remoteName, "--non-interactive", "--no-obscure")
             if (state.isNotEmpty()) {
                 options.add("--continue")
@@ -99,52 +100,27 @@ class InternxtReauth(
                 options.add(result)
             }
 
-            val proc = rclone.config("update", options)
-            if (proc == null) {
+            val execution = rclone.configOwned("update", options)
+            if (execution == null) {
                 errorMessage = context.getString(R.string.error_creating_remote)
                 return false
             }
 
             val jsonOutput = StringBuilder()
-            // Capture stderr so we can surface a real failure reason instead of a
-            // generic "error" toast. Lines that may carry secrets (tokens,
-            // passwords, Authorization headers) are filtered out and never logged
-            // or shown to the user.
-            val stderrCapture = StringBuilder()
-            val outputReader = Thread {
-                proc.inputStream.bufferedReader().useLines { lines ->
-                    lines.forEach { jsonOutput.append(it).append('\n') }
+            val outputTooLarge = AtomicBoolean(false)
+            val outcome = execution.await(TimeUnit.MINUTES.toMillis(2), { line ->
+                val addition = "$line\n"
+                if (jsonOutput.length + addition.length <= MAX_CONFIG_STATE_OUTPUT_CHARS) {
+                    jsonOutput.append(addition)
+                } else {
+                    outputTooLarge.set(true)
+                    execution.cancel()
                 }
-            }
-            val errorReader = Thread {
-                proc.errorStream.bufferedReader().useLines { lines ->
-                    lines.forEach { line ->
-                        if (!containsSecret(line)) {
-                            stderrCapture.append(line).append('\n')
-                        }
-                    }
-                }
-            }
+            }, null)
 
-            outputReader.start()
-            errorReader.start()
-
-            val completed = proc.waitForQuietly(2, TimeUnit.MINUTES)
-            outputReader.join(1000)
-            errorReader.join(1000)
-
-            val stderrSummary = stderrCapture.toString().trim()
-
-            if (!completed) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) proc.destroyForcibly() else proc.destroy()
-                errorMessage = describeError("Internxt reauth timed out", stderrSummary)
-                FLog.e(TAG, "Internxt reauth timed out")
-                return false
-            }
-
-            if (proc.exitValue() != 0) {
-                errorMessage = describeError("Internxt reauth failed (exit ${proc.exitValue()})", stderrSummary)
-                FLog.e(TAG, "Internxt reauth failed. stderr: $stderrSummary")
+            if (!outcome.isSuccess() || outputTooLarge.get()) {
+                errorMessage = context.getString(R.string.error_creating_remote)
+                FLog.e(TAG, "Internxt reauth ended with state ${outcome.getState()}")
                 return false
             }
 
@@ -168,12 +144,23 @@ class InternxtReauth(
                 } else {
                     ""
                 }
+                if (optionObj != null &&
+                    optionObj.optString("Help", "").contains("Two-factor authentication code", ignoreCase = true) &&
+                    result.isEmpty()
+                ) {
+                    errorMessage = context.getString(R.string.cancelled)
+                    return false
+                }
             } catch (e: Exception) {
-                errorMessage = describeError("Failed to parse Internxt reauth state", stderrSummary)
-                FLog.e(TAG, "Failed to parse Internxt reauth state. stdout=$jsonStr stderr=$stderrSummary", e)
+                // Reconnect output can contain continuation credentials; do not log JSON or exception text.
+                errorMessage = context.getString(R.string.error_creating_remote)
+                FLog.e(TAG, "Failed to parse bounded Internxt reauth state")
                 return false
             }
         }
+        errorMessage = context.getString(R.string.error_creating_remote)
+        FLog.e(TAG, "Internxt reauth exceeded the config state step limit")
+        return false
     }
 
     private fun getAuthPreferenceFromUser(): String {
@@ -279,73 +266,6 @@ class InternxtReauth(
             ).show()
         }
     }
-}
-
-/**
- * Heuristic check for lines that may carry credentials. Used to keep tokens,
- * passwords and Authorization headers out of both the user-facing error toast
- * and the logcat output.
- */
-private fun containsSecret(line: String): Boolean {
-    val lower = line.lowercase()
-    return lower.contains("token") || lower.contains("password") ||
-        lower.contains("pass") || lower.contains("secret") ||
-        lower.contains("bearer") || lower.contains("authorization") ||
-        lower.contains("mnemonic") || lower.contains("credential")
-}
-
-/**
- * Builds a user-facing error message from a short reason and the (already
- * secret-filtered) rclone stderr. Caps the stderr excerpt so the toast stays
- * readable; the full filtered stderr is logged separately.
- */
-private fun describeError(reason: String, stderrSummary: String): String {
-    if (stderrSummary.isEmpty()) {
-        return reason
-    }
-    val excerpt = stderrSummary.lineSequence()
-        .filter { it.isNotBlank() }
-        .joinToString(" ")
-        .take(160)
-    return "$reason: $excerpt"
-}
-
-private fun Process.waitForQuietly(timeout: Long, unit: TimeUnit): Boolean {
-    return try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            waitFor(timeout, unit)
-        } else {
-            val deadlineMs = System.currentTimeMillis() + unit.toMillis(timeout)
-            while (System.currentTimeMillis() < deadlineMs) {
-                try {
-                    exitValue()
-                    return true
-                } catch (e: IllegalThreadStateException) {
-                    Thread.sleep(50)
-                }
-            }
-            false
-        }
-    } catch (e: InterruptedException) {
-        destroy()
-        false
-    }
-}
-
-private fun Process.drainOutput(): Thread {
-    return Thread {
-        inputStream.bufferedReader().useLines { lines ->
-            lines.forEach { }
-        }
-    }.also { it.start() }
-}
-
-private fun Process.drainError(): Thread {
-    return Thread {
-        errorStream.bufferedReader().useLines { lines ->
-            lines.forEach { }
-        }
-    }.also { it.start() }
 }
 
 private fun CountDownLatch.awaitQuietly(timeout: Long, unit: TimeUnit): Boolean {

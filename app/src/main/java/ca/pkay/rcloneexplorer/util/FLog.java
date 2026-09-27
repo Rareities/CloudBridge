@@ -57,7 +57,7 @@ public abstract class FLog {
 
     public static void w(String tag, String message, Exception e, Object... args) {
         if (isLoggable(tag, Log.WARN)) {
-            Log.w(tag, applyFormatting(message, args), e);
+            Log.w(tag, withThrowable(applyFormatting(message, args), e));
         }
     }
 
@@ -82,64 +82,58 @@ public abstract class FLog {
         }
     }
 
-    // Callers must ensure that any potentially tainted in formatting args
-    // is filtered by anonymizeArgument()
     public static void e(String tag, String message, Object... args) {
         if (isLoggable(tag, Log.ERROR)) {
             Log.e(tag, applyFormatting(message, args));
         }
     }
 
-    // Callers must ensure that any potentially tainted in formatting args
-    // is filtered by anonymizeArgument()
     public static void e(String tag, String message, Throwable e, Object... args) {
         String formatted = applyFormatting(message, args);
         if (isLoggable(tag, Log.ERROR)) {
-            Log.e(tag, formatted, e);
+            Log.e(tag, withThrowable(formatted, e));
         }
     }
 
     private static String applyFormatting(String message, Object... args) {
         if (args.length == 0) {
-            return message;
+            return LogRedactor.redact(message);
         } else {
             try {
-                return String.format(message, args);
+                return LogRedactor.redact(String.format(message, args));
             } catch (IllegalFormatException e) {
                 // We really shouldn't crash here even if there is a format
                 // error since this is usally used without in error logging
                 // itself.
-                return message;
+                return LogRedactor.redact(message);
             }
         }
     }
 
-    private static String applyAnonimizedFormatting(String message, Object[] args) {
-        for (int i = 0; i < args.length; i++) {
-            if (args[i] instanceof String) {
-                args[i] = anonymizeArgument((String) args[i]);
-            }
+    static String withThrowable(String message, Throwable throwable) {
+        if (throwable == null) {
+            return LogRedactor.redact(message);
         }
-        return applyFormatting(message, args);
-    }
-
-    // Ensure regulatory compliance by removing any potentially tainted data.
-    private static String anonymizeArgument (String arg) {
-        // Anonymize file paths (may contain private data in file names)
-        if (arg.startsWith(PATTERN_PATH)) {
-            return REPLACE_PATH;
-        // Anonymize content uris (may contain private data in uri)
-        } else if (arg.startsWith(PATTERN_URI)) {
-            return REPLACE_URI;
+        String detail = throwable.getMessage();
+        if (detail == null || detail.isEmpty()) {
+            return LogRedactor.redact(
+                    message + " [" + throwable.getClass().getSimpleName() + "]");
         }
-        return arg;
+        return LogRedactor.redact(message + " [" + throwable.getClass().getSimpleName() + ": "
+                + detail + "]");
     }
     
     private static final boolean isLoggable(String tag, int level){
-        if(BuildConfig.DEBUG) {
-            return Log.isLoggable(tag, level) || level != Log.INFO && Log.isLoggable(LOGGING_MIN_LEVEL_TAG, level);
-        } else {
-            return Log.isLoggable(tag, level);
+        try {
+            if(BuildConfig.DEBUG) {
+                return Log.isLoggable(tag, level) || level != Log.INFO && Log.isLoggable(LOGGING_MIN_LEVEL_TAG, level);
+            } else {
+                return Log.isLoggable(tag, level);
+            }
+        } catch (RuntimeException unavailableLogger) {
+            // Logging is diagnostic only. Mock Android stubs in local JVM tests (or a
+            // malfunctioning platform logger) must never break the operation being logged.
+            return false;
         }
     }
 }

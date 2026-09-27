@@ -30,6 +30,7 @@ import ca.pkay.rcloneexplorer.RemoteConfig.OauthHelper;
 import ca.pkay.rcloneexplorer.RemoteConfig.OauthHelper.InitOauthStep;
 import ca.pkay.rcloneexplorer.RemoteConfig.OauthHelper.OauthFinishStep;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import es.dmoral.toasty.Toasty;
 
 public class RemotePropertiesDialog extends DialogFragment {
@@ -208,8 +209,13 @@ public class RemotePropertiesDialog extends DialogFragment {
         @Override
         protected Void doInBackground(Void... params) {
             Context appContext = context.getApplicationContext();
-            final Process process = rclone.reconnectRemote(remoteItem);
-            if (process != null) {
+            final NativeExecutionHandle execution = OauthHelper.startAttempt(
+                    () -> rclone.reconnectRemoteOwned(remoteItem));
+            if (execution == null) {
+                FLog.w(TAG, "OAuth reconnect was not started because another attempt may still be stopping");
+                return null;
+            }
+            try {
                 // Since this is invoked on already existing remotes, we need
                 // to confirm renewing the token.
                 //
@@ -237,23 +243,31 @@ public class RemotePropertiesDialog extends DialogFragment {
                 }
 
                 ErrorHandler errorHandler = e -> {
-                    FLog.e(TAG, "onError: The recipe for %s is probably bad", e, remoteItem.getTypeReadable());
-                    process.destroy();
+                    FLog.e(TAG, "OAuth reconnect for %s failed (%s)",
+                            remoteItem.getTypeReadable(), e.getClass().getSimpleName());
+                    execution.cancel();
                     // Appcenter #965158510
                     if (e instanceof ActivityNotFoundException) {
                         Toasty.error(appContext, appContext.getString(R.string.no_app_found_for_this_link), Toast.LENGTH_LONG).show();
                     }
                 };
 
-                InteractiveRunner interactiveRunner = new InteractiveRunner(start, errorHandler, process);
-                OauthHelper.registerRunner(interactiveRunner);
+                InteractiveRunner interactiveRunner = new InteractiveRunner(start, errorHandler, execution);
+                if (!OauthHelper.registerRunner(interactiveRunner, execution)) {
+                    FLog.w(TAG, "OAuth reconnect was superseded before its interactive runner started");
+                    return null;
+                }
                 interactiveRunner.runSteps();
 
-                try {
-                    process.waitFor();
-                } catch (InterruptedException e) {
-                    FLog.e(TAG, "doInBackground: ", e);
+                NativeExecutionHandle.Outcome outcome = execution.await(NativeExecutionHandle.NO_TIMEOUT, null, null);
+                if (!outcome.isSuccess()) {
+                    FLog.w(TAG, "OAuth reconnect ended with state %s", outcome.getState());
                 }
+            } finally {
+                if (!execution.hasConfirmedReap()) {
+                    execution.cancelAndAwait(null, null);
+                }
+                OauthHelper.release(execution);
             }
             return null;
         }

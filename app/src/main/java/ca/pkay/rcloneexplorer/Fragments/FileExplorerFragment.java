@@ -90,8 +90,11 @@ import ca.pkay.rcloneexplorer.Services.StreamingService;
 import ca.pkay.rcloneexplorer.Services.ThumbnailsLoadingService;
 import ca.pkay.rcloneexplorer.util.ActivityHelper;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import ca.pkay.rcloneexplorer.util.LargeParcel;
 import ca.pkay.rcloneexplorer.workmanager.EphemeralTaskManager;
+import ca.pkay.rcloneexplorer.workmanager.PendingDeleteTarget;
+import ca.pkay.rcloneexplorer.workmanager.SnackbarDeletePolicy;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
 import de.felixnuesse.ui.BreadcrumbView;
 import es.dmoral.toasty.Toasty;
@@ -115,6 +118,7 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
     public static final int STREAMING_INTENT_RESULT = 468;
     private static final String TAG = "FileExplorerFragment";
     private static final String ARG_REMOTE = "remote_param";
+    private static final String ARG_REMOTE_CONFIG_REVISION = "remote_config_revision";
     private static final String SHARED_PREFS_SORT_ORDER = "ca.pkay.rcexplorer.sort_order";
     private static final int FILE_PICKER_UPLOAD_RESULT = 186;
     private static final int FILE_PICKER_DOWNLOAD_RESULT = 204;
@@ -142,6 +146,7 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
     private BreadcrumbView breadcrumbView;
     private Rclone rclone;
     private RemoteItem remote;
+    private String remoteConfigRevision;
     private String remoteName;
     private FileExplorerRecyclerViewAdapter recyclerViewAdapter;
     private LinearLayoutManager recyclerViewLinearLayoutManager;
@@ -187,6 +192,8 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         FileExplorerFragment fragment = new FileExplorerFragment();
         Bundle args = new Bundle();
         args.putParcelable(ARG_REMOTE, remoteItem);
+        args.putString(ARG_REMOTE_CONFIG_REVISION,
+                remoteItem == null ? null : remoteItem.getConfigRevision());
         fragment.setArguments(args);
         return fragment;
     }
@@ -204,6 +211,7 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         setHasOptionsMenu(true);
 
         remote = getArguments().getParcelable(ARG_REMOTE);
+        remoteConfigRevision = getArguments().getString(ARG_REMOTE_CONFIG_REVISION);
         if (remote == null) {
             return;
         }
@@ -1458,50 +1466,96 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
     }
 
     private void deleteFiles(final List<FileItem> deleteList) {
-        String title = getResources().getQuantityString(R.plurals.delete_x_items, deleteList.size(), deleteList.size());
-        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        final List<FileItem> requestedDeletes = deleteList == null
+                ? Collections.emptyList() : new ArrayList<>(deleteList);
+        if (requestedDeletes.isEmpty() || remote == null) {
+            return;
+        }
+        if (!SnackbarDeletePolicy.hasConfigRevision(remoteConfigRevision)) {
+            Context toastContext = context == null ? null : context.getApplicationContext();
+            if (toastContext != null) {
+                Toasty.error(toastContext, getString(R.string.delete_remote_identity_unavailable),
+                        Toast.LENGTH_LONG, true).show();
+            }
+            return;
+        }
+        final List<PendingDeleteTarget> pendingDeletes = new ArrayList<>(requestedDeletes.size());
+        for (FileItem item : requestedDeletes) {
+            if (item != null) {
+                try {
+                    pendingDeletes.add(PendingDeleteTarget.capture(remote, remoteConfigRevision, item));
+                } catch (IllegalArgumentException invalidTarget) {
+                    FLog.w(TAG, "Refusing delete selection containing an invalid target snapshot");
+                    Context toastContext = context == null ? null : context.getApplicationContext();
+                    if (toastContext != null) {
+                        Toasty.error(toastContext, getString(R.string.delete_target_invalid),
+                                Toast.LENGTH_LONG, true).show();
+                    }
+                    return;
+                }
+            }
+        }
+        if (pendingDeletes.isEmpty()) {
+            return;
+        }
+        final List<PendingDeleteTarget> deleteTargets =
+                SnackbarDeletePolicy.immutableSnapshot(pendingDeletes);
+        final Context uiContext = context;
+        if (uiContext == null) {
+            return;
+        }
+        final Context queueContext = uiContext.getApplicationContext();
+        final String undoMessage = getString(R.string.cancel);
+        String title = getResources().getQuantityString(
+                R.plurals.delete_x_items, deleteTargets.size(), deleteTargets.size());
+        AlertDialog.Builder builder = new AlertDialog.Builder(uiContext);
         builder
                 .setTitle(title)
                 .setNegativeButton(getResources().getString(R.string.cancel), null)
                 .setPositiveButton(getResources().getString(R.string.delete), (dialog, which) -> {
-                    recyclerViewAdapter.cancelSelection();
                     View view = getView();
                     if (view == null) {
-                        enqueueDeletes(deleteList);
+                        // Without the undo Snackbar there is no safe timeout authorization.
                         return;
                     }
+                    if (recyclerViewAdapter != null) {
+                        recyclerViewAdapter.cancelSelection();
+                    }
                     // RC-37: defer the destructive enqueue until the Snackbar undo window elapses.
-                    // Once a delete worker has started it cannot be reliably cancelled, so we only
-                    // enqueue when the user lets the Snackbar time out (no Undo tap).
-                    final List<FileItem> pendingDeletes = new ArrayList<>(deleteList);
+                    // Only an actual timeout authorizes enqueue; every other dismissal is non-destructive.
                     Snackbar snackbar = Snackbar.make(view, getString(R.string.deleting_info), Snackbar.LENGTH_LONG);
                     snackbar.setAction(R.string.undo, v -> {
-                        pendingDeletes.clear();
-                        Toasty.info(context, getString(R.string.cancel), Toast.LENGTH_SHORT, true).show();
+                        Toasty.info(queueContext, undoMessage, Toast.LENGTH_SHORT, true).show();
                     });
                     snackbar.addCallback(new Snackbar.Callback() {
                         @Override
                         public void onDismissed(Snackbar transientBottomBar, int event) {
                             super.onDismissed(transientBottomBar, event);
-                            if (event != DISMISS_EVENT_ACTION && !pendingDeletes.isEmpty()) {
-                                enqueueDeletes(pendingDeletes);
+                            if (SnackbarDeletePolicy.shouldEnqueue(
+                                    event, DISMISS_EVENT_TIMEOUT, remoteConfigRevision)) {
+                                enqueueDeletes(queueContext, deleteTargets);
                             }
                         }
                     });
                     snackbar.show();
                 });
-        if(deleteList.size() == 1) {
-            builder.setMessage(getString(R.string.name_will_be_deleted, deleteList.get(0).getName()));
+        if(deleteTargets.size() == 1) {
+            builder.setMessage(getString(R.string.name_will_be_deleted, deleteTargets.get(0).getFileName()));
         }
         builder.create().show();
     }
 
-    private void enqueueDeletes(List<FileItem> deleteList) {
-        if (context == null) {
+    private void enqueueDeletes(Context queueContext, List<PendingDeleteTarget> deleteTargets) {
+        if (queueContext == null) {
             return;
         }
-        for (FileItem deleteItem : deleteList) {
-            EphemeralTaskManager.Companion.queueDelete(this.context, remote, deleteItem, directoryObject.getCurrentPath());
+        for (PendingDeleteTarget target : deleteTargets) {
+            if (!EphemeralTaskManager.Companion.queueDelete(queueContext, target)) {
+                FLog.w(TAG, "Deferred delete target was not accepted by the worker queue");
+                Toasty.error(queueContext, getString(R.string.delete_remote_identity_unavailable),
+                        Toast.LENGTH_LONG, true).show();
+                return;
+            }
         }
     }
 
@@ -1812,7 +1866,7 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         private int openAs;
         private LoadingDialog loadingDialog;
         private String fileLocation;
-        private Process process;
+        private NativeExecutionHandle process;
         private volatile boolean isCancelled = false;
         private String mimeType;
 
@@ -1827,7 +1881,9 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
         private void cancelProcess() {
             isCancelled = true;
             if (null != process) {
-                process.destroy();
+                // The AsyncTask's background await owns the bounded reap; do not block the UI
+                // thread while the cancel button is being handled.
+                process.cancel();
             }
         }
 
@@ -1860,29 +1916,25 @@ public class FileExplorerFragment extends Fragment implements   FileExplorerRecy
 
             fileLocation = saveLocation + "/" + fileItem.getName();
 
-            process = rclone.downloadFile(remote, fileItem, saveLocation);
+            process = rclone.downloadFileOwned(remote, fileItem, saveLocation);
 
             if (process != null) {
-                try {
-                    process.waitFor();
-                } catch (InterruptedException e) {
+                NativeExecutionHandle.Outcome outcome = process.await(
+                        NativeExecutionHandle.NO_TIMEOUT, null, null);
+                if (!outcome.isSuccess()) {
                     if (!isCancelled) {
-                        FLog.e(TAG, "DownloadAndOpen/doInBackground: error waiting for process", e);
+                        FLog.e(TAG, "DownloadAndOpen/doInBackground: download exited with state %s", outcome.getState());
                     }
                     return false;
                 }
             }
 
-            if (process != null && process.exitValue() == 0) {
+            if (process != null && process.getOutcome() != null && process.getOutcome().isSuccess()) {
                 File savedFile = new File(fileLocation);
                 savedFile.setReadOnly();
             }
 
-            if (process != null && process.exitValue() != 0) {
-                rclone.logErrorOutput(process);
-            }
-
-            return process != null && process.exitValue() == 0;
+            return process != null && process.getOutcome() != null && process.getOutcome().isSuccess();
         }
 
         @Override

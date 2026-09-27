@@ -292,7 +292,19 @@ class TriggerActivity : AppCompatActivity() {
         } else {
             dbHandler.updateTrigger(mTrigger)
         }
-        TriggerService(this).queueSingleTrigger(mTrigger)
+        val triggerService = TriggerService(this)
+        try {
+            triggerService.queueSingleTrigger(mTrigger)
+        } finally {
+            triggerService.close()
+        }
         finish()
+    }
+
+    override fun onDestroy() {
+        if (::dbHandler.isInitialized) {
+            dbHandler.close()
+        }
+        super.onDestroy()
     }
 }

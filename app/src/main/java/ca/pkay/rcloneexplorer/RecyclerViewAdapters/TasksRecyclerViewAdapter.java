@@ -29,13 +29,17 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.util.ArrayList;
 import java.util.List;
 
+import ca.pkay.rcloneexplorer.Activities.BisyncPreviewActivity;
 import ca.pkay.rcloneexplorer.Activities.ShortcutServiceActivity;
 import ca.pkay.rcloneexplorer.Activities.TaskActivity;
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject;
 import ca.pkay.rcloneexplorer.Items.Task;
+import ca.pkay.rcloneexplorer.Items.Trigger;
 import ca.pkay.rcloneexplorer.R;
+import ca.pkay.rcloneexplorer.Services.TriggerService;
+import ca.pkay.rcloneexplorer.util.ShortcutCapabilities;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
 import es.dmoral.toasty.Toasty;
 
@@ -159,8 +163,18 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
     }
 
     private void copyTask(Task task) {
-        task.setTitle(task.getTitle() + context.getString(R.string.task_copy_suffix));
-        Task newTask = (new DatabaseHandler(context)).createTask(task, false);
+        // Do not mutate the object currently owned by the adapter. The original object is also
+        // the row rendered in the list; mutating it before insertion makes the UI show the copy's
+        // title for the original task until the next database reload.
+        Task copy = task.copy(-1L);
+        copy.setTitle(task.getTitle() + context.getString(R.string.task_copy_suffix));
+        DatabaseHandler db = new DatabaseHandler(context);
+        Task newTask;
+        try {
+            newTask = db.createTask(copy, false);
+        } finally {
+            db.close();
+        }
         tasks.add(newTask);
         notifyItemInserted(tasks.size() - 1);
     }
@@ -184,10 +198,19 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
     private void showFileMenu(View view, final Task task) {
         PopupMenu popupMenu = new PopupMenu(context, view);
         popupMenu.getMenuInflater().inflate(R.menu.task_item_menu, popupMenu.getMenu());
+        boolean isBisync = task.getDirection() == SyncDirectionObject.SYNC_BIDIRECTIONAL_INITIAL
+                || task.getDirection() == SyncDirectionObject.SYNC_BIDIRECTIONAL;
+        popupMenu.getMenu().findItem(R.id.action_start_task).setVisible(!isBisync);
+        popupMenu.getMenu().findItem(R.id.action_preview_bisync).setVisible(isBisync);
         popupMenu.setOnMenuItemClickListener(item -> {
             switch (item.getItemId()) {
                 case R.id.action_start_task:
                     startTask(task);
+                    break;
+                case R.id.action_preview_bisync:
+                    Intent preview = new Intent(context, BisyncPreviewActivity.class);
+                    preview.putExtra(BisyncPreviewActivity.ID_EXTRA, task.getId());
+                    context.startActivity(preview);
                     break;
                 case R.id.action_edit_task:
                     editTask(task);
@@ -196,7 +219,26 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
                     copyTask(task);
                     break;
                 case R.id.action_delete_task:
-                    new DatabaseHandler(context).deleteTask(task.getId());
+                    List<Long> triggerIds = new ArrayList<>();
+                    DatabaseHandler db = new DatabaseHandler(context);
+                    try {
+                        for (Trigger trigger : db.getAllTrigger()) {
+                            if (trigger.getTriggerTarget() == task.getId()) {
+                                triggerIds.add(trigger.getId());
+                            }
+                        }
+                        db.deleteTask(task.getId());
+                    } finally {
+                        db.close();
+                    }
+                    TriggerService triggerService = new TriggerService(context);
+                    try {
+                        for (Long triggerId : triggerIds) {
+                            triggerService.cancelTrigger(triggerId);
+                        }
+                    } finally {
+                        triggerService.close();
+                    }
                     notifyDataSetChanged();
                     removeItem(task);
                     break;
@@ -255,6 +297,8 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
         intent.setAction(TASK_SYNC_ACTION);
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
         intent.putExtra(EXTRA_TASK_ID, task.getId());
+        intent.putExtra(ShortcutCapabilities.EXTRA_CAPABILITY,
+                ShortcutCapabilities.issueOrGet(c, task.getId()));
 
         String id = String.valueOf(task.getTitle()+task.getLocalPath()+task.getRemotePath()+task.getDirection());
         ShortcutInfoCompat shortcut = new ShortcutInfoCompat.Builder(c, id)

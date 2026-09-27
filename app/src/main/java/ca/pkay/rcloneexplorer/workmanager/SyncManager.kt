@@ -5,9 +5,11 @@ import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkRequest
+import ca.pkay.rcloneexplorer.Database.RunRejectedException
+import ca.pkay.rcloneexplorer.Database.RunRepository
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
-import java.util.Random
+import ca.pkay.rcloneexplorer.util.FLog
 
 class SyncManager(private var mContext: Context) {
 
@@ -16,7 +18,7 @@ class SyncManager(private var mContext: Context) {
     }
 
     fun queue(trigger: Trigger) {
-        queue(trigger.triggerTarget)
+        queue(trigger.triggerTarget, trigger, trigger.triggerTarget)
     }
 
     fun queue(task: Task) {
@@ -24,29 +26,99 @@ class SyncManager(private var mContext: Context) {
     }
 
     fun queue(taskID: Long) {
-        val uploadWorkRequest = OneTimeWorkRequestBuilder<SyncWorker>()
+        queue(taskID, null, null)
+    }
 
-        val data = Data.Builder()
-        data.putLong(SyncWorker.TASK_ID, taskID)
+    internal fun queueScheduledFollowup(taskID: Long, trigger: Trigger, scheduledTargetId: Long) {
+        queue(taskID, trigger, scheduledTargetId)
+    }
 
-        uploadWorkRequest.setInputData(data.build())
-        uploadWorkRequest.addTag(taskID.toString())
-        uploadWorkRequest.addTag(SYNC_WORK_TAG)
-        work(uploadWorkRequest.build())
+    private fun queue(taskID: Long, trigger: Trigger?, scheduledTargetId: Long?) {
+        val run = try {
+            RunRepository(mContext).queueLegacyTask(taskID)
+        } catch (e: RunRejectedException) {
+            FLog.w("SyncManager", "Sync request was blocked: %s", e.message ?: "unknown reason")
+            return
+        } catch (e: Exception) {
+            FLog.e("SyncManager", "Unable to create durable sync run", e)
+            return
+        }
+
+        try {
+            val dataBuilder = Data.Builder()
+                .putLong(SyncWorker.TASK_ID, taskID)
+                .putString(SyncWorker.RUN_ID, run.runId)
+                .putString(SyncWorker.RUN_OWNER_TOKEN, run.ownerToken)
+            if (trigger != null) {
+                dataBuilder
+                    .putLong(SyncWorker.TRIGGER_ID, trigger.id)
+                    .putLong(SyncWorker.TRIGGER_TARGET_ID, scheduledTargetId ?: trigger.triggerTarget)
+                    .putInt(SyncWorker.TRIGGER_TYPE, trigger.type)
+                    .putInt(SyncWorker.TRIGGER_TIME, trigger.time)
+                    .putInt(SyncWorker.TRIGGER_WEEKDAYS, trigger.getWeekdays())
+            }
+            val data = dataBuilder.build()
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setInputData(data)
+                .addTag(taskID.toString())
+                .addTag(run.runId)
+                .addTag(SYNC_WORK_TAG)
+                .build()
+            work(request)
+        } catch (e: Exception) {
+            try {
+                val deferred = RunRepository(mContext).deferQueuedDispatch(
+                    run.runId,
+                    run.ownerToken,
+                    "WorkManager rejected durable run dispatch"
+                )
+                if (!deferred) {
+                    FLog.w("SyncManager", "Run had already left QUEUED state; preserving its current owner state")
+                }
+            } catch (stateError: Exception) {
+                FLog.e("SyncManager", "Unable to persist durable run dispatch deferral", stateError)
+            }
+            FLog.e("SyncManager", "Unable to dispatch durable sync run", e)
+        }
     }
 
     fun queueEphemeral(task: Task) {
-
-        task.id = Random().nextLong()
-        val uploadWorkRequest = OneTimeWorkRequestBuilder<SyncWorker>()
-
-        val data = Data.Builder()
-        data.putString(SyncWorker.TASK_EPHEMERAL, task.asJSON().toString())
-
-        uploadWorkRequest.setInputData(data.build())
-        uploadWorkRequest.addTag(task.id.toString())
-        uploadWorkRequest.addTag(SYNC_WORK_TAG)
-        work(uploadWorkRequest.build())
+        val run = try {
+            RunRepository(mContext).queueEphemeralTask(task)
+        } catch (e: RunRejectedException) {
+            FLog.w("SyncManager", "Ephemeral sync request was blocked: %s", e.message ?: "unknown reason")
+            return
+        } catch (e: Exception) {
+            FLog.e("SyncManager", "Unable to create durable ephemeral sync run", e)
+            return
+        }
+        try {
+            val data = Data.Builder()
+                .putString(SyncWorker.TASK_EPHEMERAL, task.asJSON().toString())
+                .putString(SyncWorker.RUN_ID, run.runId)
+                .putString(SyncWorker.RUN_OWNER_TOKEN, run.ownerToken)
+                .build()
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setInputData(data)
+                .addTag(run.runId)
+                .addTag(SYNC_WORK_TAG)
+                .build()
+            work(request)
+        } catch (e: Exception) {
+            try {
+                val deferred = RunRepository(mContext).deferQueuedDispatch(
+                    run.runId,
+                    run.ownerToken,
+                    "WorkManager rejected durable ephemeral sync dispatch"
+                )
+                if (!deferred) {
+                    FLog.w("SyncManager", "Ephemeral run had already left QUEUED state; preserving its current owner state")
+                }
+            } catch (stateError: Exception) {
+                FLog.e("SyncManager", "Unable to persist ephemeral run dispatch deferral", stateError)
+            }
+            FLog.e("SyncManager", "Unable to dispatch durable ephemeral sync run", e)
+        }
     }
 
     private fun work(request: WorkRequest) {

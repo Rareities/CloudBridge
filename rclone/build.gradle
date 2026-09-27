@@ -14,7 +14,7 @@
 //  - windows x64
 //
 // Prerequisites:
-//  - go 1.25+
+//  - go 1.26+
 //  - Either Android SDK command-line tools, or the expected NDK version (see gradle.properties).
 //
 // rclone source:
@@ -23,7 +23,9 @@
 //  To upgrade: change rCloneRef (or rCloneRepoUrl) and rebuild.
 
 
+import groovy.json.JsonOutput
 import java.nio.file.Paths
+import java.net.URI
 
 ext {
     NDK_VERSION = project.properties['de.schuelken.cloudbridge.ndkVersion']
@@ -31,13 +33,51 @@ ext {
     RCLONE_VERSION = project.properties['de.schuelken.cloudbridge.rCloneVersion']
     GO_REQ_VERSION = project.properties['de.schuelken.cloudbridge.goVersion']
 
-    RCLONE_REPO_URL = project.findProperty('de.schuelken.cloudbridge.rCloneRepoUrl') ?: 'https://github.com/rclone/rclone.git'
-    RCLONE_REF = project.findProperty('de.schuelken.cloudbridge.rCloneRef') ?: "v${RCLONE_VERSION}"
+    def configuredRepoUrl = project.findProperty('de.schuelken.cloudbridge.rCloneRepoUrl')?.toString()?.trim()
+    def configuredRef = project.findProperty('de.schuelken.cloudbridge.rCloneRef')?.toString()?.trim()
+    if (!configuredRepoUrl) {
+        throw new GradleException('Missing required de.schuelken.cloudbridge.rCloneRepoUrl; refusing an unpinned rclone fallback')
+    }
+    if (!configuredRef) {
+        throw new GradleException('Missing required de.schuelken.cloudbridge.rCloneRef; refusing an unpinned rclone fallback')
+    }
+    if (!(configuredRef ==~ /(?i)[0-9a-f]{40}/)) {
+        throw new GradleException('Rclone must be pinned to a full immutable 40-character commit SHA')
+    }
+    RCLONE_REPO_URL = configuredRepoUrl
+    RCLONE_REF = configuredRef
+
+    def configuredGo = project.findProperty('de.schuelken.cloudbridge.goExecutable')?.toString()?.trim()
+    def goRoot = System.getenv('GOROOT')?.trim()
+    def goBinary = System.properties['os.name'].startsWith('Windows') ? 'go.exe' : 'go'
+    def goFromRoot = goRoot ? Paths.get(goRoot, 'bin', goBinary).toAbsolutePath() : null
+    GO_EXECUTABLE = configuredGo
+        ? project.file(configuredGo).absolutePath
+        : (goFromRoot != null && goFromRoot.toFile().isFile() ? goFromRoot.toString() : 'go')
 
     PROJECT_DIR = projectDir.absolutePath
     CACHE_PATH = Paths.get(PROJECT_DIR, 'cache').toString()
     GOPATH = Paths.get(CACHE_PATH, 'gopath').toString()
     OUTPUT_BASE_PATH = Paths.get(PROJECT_DIR, '..', 'app', 'lib').toAbsolutePath().toString()
+}
+
+def sanitizeRepositoryUrl = { String repositoryUrl ->
+    try {
+        def uri = new URI(repositoryUrl)
+        if (uri.scheme && uri.host) {
+            return new URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toASCIIString()
+        }
+    } catch (Exception ignored) {
+        // Fall through to safe handling for SCP-style Git URLs and local paths.
+    }
+
+    if (!(repositoryUrl ==~ /^[A-Za-z]:[\\/].*/)) {
+        def scpMatcher = repositoryUrl =~ /^(?:[^@\/]+@)?([^:\/]+):(.+)$/
+        if (scpMatcher.matches()) {
+            return "${scpMatcher[1]}:${scpMatcher[2].replaceAll(/[?#].*$/, '')}"
+        }
+    }
+    return 'configured repository (identifier omitted)'
 }
 
 def findSdkDir() {
@@ -162,8 +202,17 @@ def buildRclone(abi) {
 
     return {
         doLast {
+            def goCache = Paths.get(CACHE_PATH, 'gocache')
+            def goTemp = Paths.get(CACHE_PATH, 'gotmp')
+            goCache.toFile().mkdirs()
+            goTemp.toFile().mkdirs()
             def commonEnv = [
                 'GOPATH'      : GOPATH,
+                'GOCACHE'     : goCache.toString(),
+                'GOTMPDIR'    : goTemp.toString(),
+                // This checkout is an independently pinned module, not a member of the
+                // host's workspace (which may contain local review/test replacements).
+                'GOWORK'      : 'off',
                 'GOOS'        : 'linux',
                 'CGO_ENABLED' : '0',
             ] + abiToEnv[abi]
@@ -173,8 +222,11 @@ def buildRclone(abi) {
                 workingDir Paths.get(CACHE_PATH, 'rclone-src').toString()
                 def ldflags = "-s -w -X github.com/rclone/rclone/fs.Version=${getSourceVersion()}"
                 commandLine (
-                    'go',
+                    GO_EXECUTABLE,
                     'build',
+                    // Repository and full commit provenance are verified and printed by this task;
+                    // keep Go's automatic VCS stamping independent of host Git ownership rules.
+                    '-buildvcs=false',
                     '-tags',
                     'noselfupdate',
                     '-trimpath',
@@ -196,7 +248,7 @@ task createRcloneModule {
         exec {
             workingDir CACHE_PATH
             environment 'GOPATH', GOPATH
-            commandLine 'go', 'mod', 'init', 'rclone'
+            commandLine GO_EXECUTABLE, 'mod', 'init', 'rclone'
         }
     }
 }
@@ -205,7 +257,7 @@ task checkoutRclone(dependsOn: createRcloneModule) {
     doLast {
         def goVersionOutput = new ByteArrayOutputStream()
         exec {
-            commandLine 'go', 'version'
+            commandLine GO_EXECUTABLE, 'version'
             standardOutput = goVersionOutput
         }
 
@@ -230,33 +282,100 @@ task checkoutRclone(dependsOn: createRcloneModule) {
         def srcDir = Paths.get(CACHE_PATH, 'rclone-src').toFile()
 
         if (!srcDir.exists()) {
-            println "Cloning rclone from ${RCLONE_REPO_URL} (ref: ${RCLONE_REF}) ..."
+            println "Cloning rclone from ${sanitizeRepositoryUrl(RCLONE_REPO_URL)} (ref: ${RCLONE_REF}) ..."
             exec {
                 workingDir CACHE_PATH
                 commandLine 'git', 'clone', '--no-tags', RCLONE_REPO_URL, 'rclone-src'
             }
         }
 
-        // Always sync to the requested ref so upgrades work without manual cache clears
-        println "Syncing rclone source to ref: ${RCLONE_REF}"
+        def originOut = new ByteArrayOutputStream()
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'fetch', 'origin', '--tags'
+            commandLine 'git', 'config', '--get', 'remote.origin.url'
+            standardOutput = originOut
         }
+        def resolvedOrigin = originOut.toString().trim()
+        if (resolvedOrigin != RCLONE_REPO_URL) {
+            throw new GradleException(
+                'Cached rclone origin does not match the configured repository; refusing a potentially stale source cache'
+            )
+        }
+
+        // Refresh only the source refs used by the reachability check. Pruning ensures a
+        // deleted or force-updated remote ref left in the cache cannot validate an old pin.
+        println "Refreshing rclone branches and tags for ${RCLONE_REF}"
+        exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'fetch', '--prune', 'origin',
+                '+refs/heads/*:refs/cloudbridge/origin/heads/*',
+                '+refs/tags/*:refs/cloudbridge/origin/tags/*'
+        }
+
+        def pinObjectResult = exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'cat-file', '-e', "${RCLONE_REF}^{commit}"
+            ignoreExitValue = true
+        }
+        if (pinObjectResult.exitValue != 0) {
+            throw new GradleException(
+                "Configured rclone commit ${RCLONE_REF} is absent after refreshing remote refs"
+            )
+        }
+
+        def reachableRefsOutput = new ByteArrayOutputStream()
+        exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'for-each-ref', "--contains=${RCLONE_REF}",
+                '--format=%(refname)', 'refs/cloudbridge/origin'
+            standardOutput = reachableRefsOutput
+        }
+        def reachableRemoteRefs = reachableRefsOutput.toString().readLines()
+            .collect { it.trim() }
+            .findAll { !it.isEmpty() }
+        if (reachableRemoteRefs.isEmpty()) {
+            throw new GradleException(
+                "Configured rclone commit ${RCLONE_REF} is not reachable from any refreshed origin branch or tag"
+            )
+        }
+
         exec {
             workingDir srcDir.absolutePath
             commandLine 'git', 'checkout', RCLONE_REF
         }
 
-        // Print resolved commit and version for traceability
+        // Verify the exact full commit before any native build and retain it in build output.
         def commitOut = new ByteArrayOutputStream()
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'rev-parse', '--short', 'HEAD'
+            commandLine 'git', 'rev-parse', '--verify', 'HEAD^{commit}'
             standardOutput = commitOut
         }
+        def resolvedCommit = commitOut.toString().trim().toLowerCase(java.util.Locale.ROOT)
+        if (resolvedCommit != RCLONE_REF.toLowerCase(java.util.Locale.ROOT)) {
+            throw new GradleException(
+                "Resolved rclone commit ${resolvedCommit} does not match configured pin ${RCLONE_REF}"
+            )
+        }
         def version = getSourceVersion()
-        println "rclone source: commit=${commitOut.toString().trim()} version=${version} (from ${RCLONE_REPO_URL})"
+        def safeRepository = sanitizeRepositoryUrl(resolvedOrigin)
+        def provenanceFile = project.file("${project.buildDir}/rclone-provenance.json")
+        provenanceFile.parentFile.mkdirs()
+        def provenance = [
+            schemaVersion: 1,
+            artifactType: 'cloudbridge-rclone-source-provenance',
+            repository: safeRepository,
+            requestedCommit: RCLONE_REF.toLowerCase(java.util.Locale.ROOT),
+            resolvedCommit: resolvedCommit,
+            sourceVersion: version,
+            rclonePinVerifiedAgainstRefreshedRemoteRefs: true,
+            reachableRemoteRefCount: reachableRemoteRefs.size(),
+            reachableRemoteRefs: reachableRemoteRefs,
+            scope: 'Source checkout provenance only; not an APK build or release attestation.'
+        ]
+        provenanceFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(provenance)) + System.lineSeparator()
+        println "rclone source: repository=${safeRepository} commit=${resolvedCommit} version=${version}"
+        println "rclone provenance: ${provenanceFile.absolutePath}"
     }
 }
 
@@ -284,7 +403,7 @@ task clean {
     doLast {
         exec {
             environment 'GOPATH', GOPATH
-            commandLine 'go', 'clean', '-cache', '-testcache', '-modcache', '-fuzzcache'
+            commandLine GO_EXECUTABLE, 'clean', '-cache', '-testcache', '-modcache', '-fuzzcache'
         }
         delete CACHE_PATH
         delete fileTree(OUTPUT_BASE_PATH).matching {

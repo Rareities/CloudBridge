@@ -76,6 +76,8 @@ public class RemoteItem implements Comparable<RemoteItem>, Parcelable {
     private boolean isPinned;
     private boolean isDrawerPinned;
     private String displayName;
+    // Transient config snapshot metadata; deliberately not added to this Parcelable's wire format.
+    private String configRevision;
 
     public RemoteItem(String name, String type) {
         this.name = name;
@@ -266,6 +268,15 @@ public class RemoteItem implements Comparable<RemoteItem>, Parcelable {
 
     public void setDisplayName(String displayName) {
         this.displayName = displayName;
+    }
+
+    /** Opaque revision of the config snapshot from which this remote was listed. */
+    public String getConfigRevision() {
+        return configRevision;
+    }
+
+    public void setConfigRevision(String configRevision) {
+        this.configRevision = configRevision;
     }
 
     public static List<RemoteItem> prepareDisplay(Context context, List<RemoteItem> items) {

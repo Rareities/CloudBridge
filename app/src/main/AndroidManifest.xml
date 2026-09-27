@@ -105,6 +105,9 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
         <receiver
@@ -227,6 +230,16 @@
         <activity
             android:name=".Activities.TaskActivity"
             android:label="@string/title_activity_task"
+            android:theme="@style/AppTheme.NoActionBar" />
+        <activity
+            android:name=".Activities.BisyncPreviewActivity"
+            android:exported="false"
+            android:label="@string/bisync_preview_title"
+            android:theme="@style/AppTheme.NoActionBar" />
+        <activity
+            android:name=".Activities.BisyncProfileActivity"
+            android:exported="false"
+            android:label="@string/bisync_profile_title"
             android:theme="@style/AppTheme.NoActionBar" />
         <activity
             android:name=".Activities.TriggerActivity"

@@ -24,7 +24,7 @@
     <string name="license_and_contributors">License and Contributors</string>
     <string name="credits_libraries">Libraries and Credits</string>
     <string name="star_on_github">Star on GitHub</string>
-    <string name="report_a_bug">Report a bug</string>
+    <string name="report_a_bug">Project repository</string>
     <string name="author">Original Author</string>
     <string name="author_name" translatable="false">Patryk Kaczmarkiewicz &lt;github.com/patrykcoding&gt;</string>
     <string name="follow_on_github">Follow on GitHub</string>
@@ -46,8 +46,8 @@
     <string name="cancel">Cancel</string>
     <string name="select">Select</string>
     <string name="app_icon">App Icon</string>
-    <string name="github_app_url" translatable="false">https://github.com/thies2005/CloudBridge</string>
-    <string name="github_issue_url" translatable="false">https://github.com/thies2005/CloudBridge/issues/new/choose</string>
+    <string name="github_app_url" translatable="false">https://github.com/Rareities/CloudBridge</string>
+    <string name="github_project_url" translatable="false">https://github.com/Rareities/CloudBridge</string>
     <string name="github_author_url" translatable="false">https://github.com/patrykcoding</string>
     <string name="github_maintainer_url" translatable="false">https://github.com/thies2005</string>
     <string name="github_previous_maintainer_url" translatable="false">https://github.com/newhinton</string>
@@ -125,7 +125,7 @@
     <string name="from">from</string>
     <string name="flaticon" translatable="false">Flaticon</string>
     <string name="intro_welcome_title">Welcome to CloudBridge!</string>
-    <string name="intro_welcome_description">CloudBridge is a file management tool that can handle files stored on your device or in the cloud.\n\ngithub.com/thies2005/CloudBridge</string>
+    <string name="intro_welcome_description">CloudBridge is a file management tool that can handle files stored on your device or in the cloud.\n\ngithub.com/Rareities/CloudBridge</string>
     <string name="intro_storage_title">Storage access</string>
     <string name="intro_storage_description">CloudBridge relies on rclone and needs your permission to access all files. Please grant storage access when prompted, otherwise the application will not work properly.</string>
     <string name="intro_community_title">Community</string>
@@ -161,6 +161,7 @@
     <string name="app_not_configured">CloudBridge is not configured</string>
     <string name="open_app_to_configure">Please open the app to set it up first</string>
     <string name="error_retrieving_files">Error retrieving files</string>
+    <string name="share_staging_limit_exceeded">This share exceeds CloudBridge’s staging limits (up to 4 GiB per file, 8 GiB total, and 128 files).</string>
     <string name="background_service_broadcast" translatable="false">ca.pkay.rcexplorer.BACKGROUND_SERVICE_BROADCAST</string>
     <string name="background_service_broadcast_data_remote" translatable="false">ca.pkay.rcexplorer.BACKGROUND_SERVICE_BROADCAST_DATA_REMOTE</string>
     <string name="background_service_broadcast_data_path" translatable="false">ca.pkay.rcexplorer.BACKGROUND_SERVICE_BROADCAST_DATA_PATH</string>
@@ -168,6 +169,9 @@
     <string name="sync_service_notification_channel_description">Background service for sync</string>
     <string name="moving_info">Moving…</string>
     <string name="deleting_info">Deleting…</string>
+    <string name="delete_remote_identity_unavailable">The remote configuration changed or could not be verified. Reopen the remote and try again. No items were deleted.</string>
+    <string name="delete_target_invalid">This selection contains an item that cannot be deleted safely.</string>
+    <string name="reset_app_rclone_busy_or_failed">CloudBridge could not safely reset while remote work is active or config recovery failed. Try again when it finishes.</string>
     <string name="operation_failed">Sync failed</string>
     <string name="operation_failed_unknown">%1$s could not be synchronized due to an unknown error</string>
     <string name="operation_failed_no_unmetered">Couldn\'t sync %1$s because of no Wi-Fi connection</string>
@@ -176,6 +180,7 @@
     <string name="operation_failed_unknown_rclone_error">%1$s could not be synchronized due to an unknown rclone-error</string>
     <string name="operation_failed_cancelled">Sync was cancelled</string>
     <string name="operation_failed_notask">There was no task to start!</string>
+    <string name="operation_failed_legacy_request">A queued sync was blocked because it has no safe run identity. Start it again from CloudBridge.</string>
     <string name="operation_failed_unsupported_direction">%1$s could not be synchronized because its sync direction is not supported by this version</string>
     <string name="moving_service">Moving Service</string>
     <string name="delete_service">Delete Service</string>
@@ -199,9 +204,9 @@
     <string name="title_activity_remote_config">Select type</string>
     <string name="error_exporting_config_file">Error exporting config file</string>
     <string name="app_update_notification_title">App update available!</string>
-    <string name="app_update_notification_description">A new version (%1$s) might be available. Tap to open the release page.</string>
+    <string name="app_update_notification_description">New version (%1$s) is available. Tap to open its release page.</string>
     <string name="app_updates_notification_action_ignore">Ignore Update</string>
-    <string name="app_updates_notification_action_apply">Open Release Page</string>
+    <string name="app_updates_notification_action_apply">View Release</string>
     <string name="app_updates_notifications">Get notified about app updates</string>
     <string name="app_update_notification_channel_name">Update Notifications</string>
     <string name="app_update_notification_channel_description">Shows notifications related to app updates</string>
@@ -449,7 +454,7 @@
         <item quantity="other">%s Files were uploaded!</item>
     </plurals>
 
-    <string name="abi_not_supported_arm_downgrade">Unfortunately, this CloudBridge version is not compatible with your device. Try the armeabi-v7a APK from github.com/thies2005/CloudBridge/releases/latest.</string>
+    <string name="abi_not_supported_arm_downgrade">Unfortunately, this CloudBridge version is not compatible with your device. Try the armeabi-v7a APK from github.com/Rareities/CloudBridge/releases/latest.</string>
     <string name="abi_not_supported">Your device does not support this version of CloudBridge.</string>
     <string name="trigger">Triggers</string>
     <string name="title_activity_trigger">Triggers</string>
@@ -502,6 +507,58 @@
     <string name="task_data_validation_error_no_local_path">You have not selected a local path yet</string>
     <string name="task_data_validation_error_no_remote_path">You have not selected a remote path yet</string>
     <string name="task_data_validation_error_same_remote">Source and destination remote paths cannot be identical</string>
+    <string name="task_data_validation_error_unsupported_direction">Choose a supported transfer mode before saving</string>
+    <string name="task_direction_unsupported_saved_value">Unsupported saved transfer mode (%1$d) — choose a replacement to save</string>
+    <string name="task_direction_unsupported_description">Saved transfer mode %1$d is legacy or unknown to this editor. Saving with this placeholder preserves it; choosing a supported mode explicitly replaces it.</string>
+    <string name="bisync_preview_menu_action">Review Bisync preview</string>
+    <string name="bisync_profile_menu_action">Bisync profile editor</string>
+    <string name="bisync_profile_title">Bisync profile</string>
+    <string name="bisync_preview_title">Bisync preview</string>
+    <string name="bisync_preview_disclaimer">Read-only review only. A preview can become stale as local or remote contents change. It never authorizes a sync. This screen cannot initialize, recover, write, delete, or apply changes.</string>
+    <string name="bisync_preview_comparison_label">Compare files by</string>
+    <string name="bisync_preview_comparison_size_modtime">Size and modification time</string>
+    <string name="bisync_preview_comparison_size">Size only</string>
+    <string name="bisync_preview_delete_percent_label">Maximum deletion percentage (1–100)</string>
+    <string name="bisync_preview_delete_count_label">Maximum absolute deletion candidates</string>
+    <string name="bisync_preview_start">Run read-only preflight and preview</string>
+    <string name="bisync_preview_cancel">Cancel current preview request</string>
+    <string name="bisync_preview_status_loading">Loading saved Bisync task…</string>
+    <string name="bisync_preview_status_idle">No preview has been run for this profile.</string>
+    <string name="bisync_preview_status_waiting_network">Waiting for a network connection before read-only preflight.</string>
+    <string name="bisync_preview_status_preflight">Checking the current profile and both listings. No files are being changed.</string>
+    <string name="bisync_preview_status_queued">Preflight passed; the isolated dry-run preview is queued.</string>
+    <string name="bisync_preview_status_running">Generating the isolated dry-run preview. No changes are applied.</string>
+    <string name="bisync_preview_status_complete">Preview finished. Counts below are review data only; endpoint contents may already have changed.</string>
+    <string name="bisync_preview_status_incomplete">Preview was incomplete. Do not treat these counts as a complete plan.</string>
+    <string name="bisync_preview_status_cancelled">Preview request was cancelled. No sync was applied.</string>
+    <string name="bisync_preview_status_interrupted">The preview owner was interrupted. This profile is held for review; a retry is blocked until the owner is reconciled.</string>
+    <string name="bisync_preview_status_blocked">Read-only preflight blocked the preview (%1$s). No sync was applied.</string>
+    <string name="bisync_preview_status_unavailable">A usable preview is unavailable (%1$s). No sync was applied.</string>
+    <string name="bisync_preview_history_title">Recent preview history</string>
+    <string name="bisync_preview_history_empty">No preview history is available.</string>
+    <string name="bisync_preview_history_entry">%1$s — %2$s (%3$s)</string>
+    <string name="bisync_preview_history_summary">Planned transfers: %1$d; estimated bytes: %2$d; file deletion candidates: %3$d; directory deletion candidates: %4$d; errors: %5$d.</string>
+    <string name="bisync_preview_conflicts_unknown">Conflict count: not calculated by this preview.</string>
+    <string name="bisync_preview_confirmation_title">Choose the absent-state preview policy</string>
+    <string name="bisync_preview_confirmation_message">This explicit preference is used only if preflight proves that no native Bisync baseline exists. Confirm a legacy profile for read-only preflight and a dry-run preview. Nothing will be initialized, repaired, written, deleted, or applied.</string>
+    <string name="bisync_preview_mode_path1">Prefer the first path (local)</string>
+    <string name="bisync_preview_mode_path2">Prefer the second path (remote)</string>
+    <string name="bisync_preview_mode_newer">Prefer newer files</string>
+    <string name="bisync_preview_mode_older">Prefer older files</string>
+    <string name="bisync_preview_mode_larger">Prefer larger files</string>
+    <string name="bisync_preview_mode_smaller">Prefer smaller files</string>
+    <string name="bisync_preview_unavailable_invalid_limit">Enter a deletion percentage from 1 to 100 and a positive absolute limit.</string>
+    <string name="bisync_preview_request_error">Could not queue the preview request. Review profile state and try again.</string>
+    <string name="bisync_preview_not_bisync">This task is not a supported legacy Bisync task.</string>
+    <string name="bisync_preview_fresh_display">Recent for display only</string>
+    <string name="bisync_preview_expired">Expired for display</string>
+    <string name="bisync_preview_profile_changed">Profile changed</string>
+    <string name="bisync_preview_native_state_changed">Native Bisync state changed since this preview</string>
+    <string name="bisync_preview_native_state_unverified">Current native Bisync state could not be verified</string>
+    <string name="bisync_preview_clock_invalid">Completion time could not be verified</string>
+    <string name="bisync_preview_not_complete">Not complete</string>
+    <string name="bisync_preview_result_unavailable">Result unavailable</string>
+    <string name="bisync_preview_failed_status">Could not load preview status. Reopen this screen to retry.</string>
     <string name="bisync">Bidirectional</string>
     <string name="description_sync_direction">This determines the source and destination for the data transfer.</string>
     <string name="description_sync_direction_sync_tolocal">Synchronize files from remote storage to local storage. It can also delete files from the local storage if they don\'t exist on the remote storage. Only the local storage is updated with changes.</string>
@@ -523,6 +580,7 @@
     <string name="shortcut_missing_id">Could not start Sync</string>
     <string name="task_copy_suffix">(Copy)</string>
     <string name="trigger_copy_suffix">(Copy)</string>
+    <string name="trigger_copy_failed">Could not save the copied trigger.</string>
     <string name="trigger_label_weekdays">Weekdays</string>
     <string name="sync_service_notification_channel_title">Sync service</string>
     <string name="sync_service_notification_channel_success_title">Sync service success</string>
@@ -550,6 +608,7 @@
     <string name="save">Save</string>
     <string name="dynamic_config_suffixselector_suffix_hint">Size Suffix</string>
     <string name="dynamic_config_suffixselector_value_hint">Value</string>
+    <string name="dynamic_config_required_field">This field is required</string>
     <string name="operation_no_identical_title">Sync aborted</string>
     <string name="operation_no_identical">You cannot run the same task in parallel: %s</string>
     <string name="intro_permission_changed_title">Permissions required!</string>

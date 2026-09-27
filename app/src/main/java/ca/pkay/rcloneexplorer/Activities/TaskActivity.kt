@@ -2,7 +2,6 @@ package ca.pkay.rcloneexplorer.Activities
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
@@ -31,6 +30,7 @@ import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.SpinnerAdapters.FilterSpinnerAdapter
 import ca.pkay.rcloneexplorer.util.ActivityHelper
+import ca.pkay.rcloneexplorer.util.FLog
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import es.dmoral.toasty.Toasty
 import java.io.UnsupportedEncodingException
@@ -73,6 +73,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
 
     private var existingTask: Task? = null
+    private var hasUnsupportedDirectionPlaceholder = false
     private var remotePathHolder = ""
     private var remotePathHolder2 = ""
     // Tracks which remote field the RemoteFolderPickerFragment is choosing a path for.
@@ -98,7 +99,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 }
 
                 // Todo: check if this provider is still valid; search other occurences
-                Log.e("TaskActivity provider", "recieved path: $path")
+                FLog.e("TaskActivity provider", "received path: %s", path)
                 val provider = "content://io.github.x0b.rcx.vcp/tree/rclone/remotes/"
                 if (path.startsWith(provider)) {
                     val parts = path.substring(provider.length).split(":").toTypedArray()
@@ -257,7 +258,19 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskToPopulate.title = findViewById<EditText>(R.id.task_title_textfield).text.toString()
         val remotename = remoteDropdown.selectedItem.toString()
         taskToPopulate.remoteId = remotename
-        val direction = SyncDirectionObject.directionForSpinnerPosition(syncDirection.selectedItemPosition)
+        val direction = SyncDirectionObject.directionForSaving(
+            syncDirection.selectedItemPosition,
+            hasUnsupportedDirectionPlaceholder,
+            existingTask?.direction
+        ) ?: run {
+            Toasty.error(
+                this,
+                getString(R.string.task_data_validation_error_unsupported_direction),
+                Toast.LENGTH_LONG,
+                true
+            ).show()
+            return null
+        }
         for (ri in rcloneInstance.remotes) {
             if (ri.name == taskToPopulate.remoteId) {
                 taskToPopulate.remoteType = ri.type
@@ -283,8 +296,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskToPopulate.md5sum = switchMD5sum.isChecked
         taskToPopulate.deleteExcluded = switchDeleteExcluded.isChecked
         taskToPopulate.filterId = if(filterDropdown.selectedItemPosition == 0 || filterDropdown.selectedItemPosition == -1) null else filterItems[filterDropdown.selectedItemPosition - 1].id
-        taskToPopulate.onFailFollowup = (onFailDropdown.selectedItem as TaskNameIdPair).id
-        taskToPopulate.onSuccessFollowup = (onSuccessDropdown.selectedItem as TaskNameIdPair).id
+        taskToPopulate.onFailFollowup =
+            (onFailDropdown.selectedItem as? TaskNameIdPair)?.id?.takeIf { it > 0L }
+        taskToPopulate.onSuccessFollowup =
+            (onSuccessDropdown.selectedItem as? TaskNameIdPair)?.id?.takeIf { it > 0L }
         val transfersValue = resources.getStringArray(R.array.task_transfers_values)
             .getOrNull(transfersDropdown.selectedItemPosition)?.toIntOrNull() ?: -1
         taskToPopulate.transfers = if (transfersValue <= 0) null else transfersValue
@@ -473,7 +488,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         onFailDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
                 val pair = parentView?.selectedItem as TaskNameIdPair
-                existingTask?.onFailFollowup = pair.id
+                existingTask?.onFailFollowup = pair.id.takeIf { it > 0L }
             }
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
@@ -496,7 +511,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         onSuccessDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
                 val pair = parentView?.selectedItem as TaskNameIdPair
-                existingTask?.onSuccessFollowup = pair.id
+                existingTask?.onSuccessFollowup = pair.id.takeIf { it > 0L }
             }
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
@@ -579,7 +594,13 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     private fun prepareSyncDirectionDropdown() {
-        val options = SyncDirectionObject.getOptionsArray(this)
+        val initialDirection = existingTask?.direction ?: SyncDirectionObject.SYNC_LOCAL_TO_REMOTE
+        hasUnsupportedDirectionPlaceholder =
+            existingTask != null && SyncDirectionObject.spinnerPositionForDirection(initialDirection) < 0
+        val options = SyncDirectionObject.getOptionsArray(this).toMutableList()
+        if (hasUnsupportedDirectionPlaceholder) {
+            options.add(0, getString(R.string.task_direction_unsupported_saved_value, initialDirection))
+        }
         val directionAdapter =
             ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
         syncDirection.adapter = directionAdapter
@@ -590,15 +611,22 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 position: Int,
                 id: Long
             ) {
-                val direction = SyncDirectionObject.directionForSpinnerPosition(position)
+                val direction = SyncDirectionObject.directionForSpinnerPosition(
+                    position,
+                    hasUnsupportedDirectionPlaceholder
+                )
                 updateSpinnerDescription(direction)
-                updateRemoteFieldVisibility(direction)
+                updateRemoteFieldVisibility(direction ?: initialDirection)
             }
 
             override fun onNothingSelected(adapterView: AdapterView<*>?) {}
         }
-        val initialDirection = existingTask?.direction ?: SyncDirectionObject.SYNC_LOCAL_TO_REMOTE
-        syncDirection.setSelection(SyncDirectionObject.spinnerPositionForDirection(initialDirection))
+        syncDirection.setSelection(
+            SyncDirectionObject.spinnerPositionForDirection(
+                initialDirection,
+                hasUnsupportedDirectionPlaceholder
+            ).coerceAtLeast(0)
+        )
         updateRemoteFieldVisibility(initialDirection)
     }
 
@@ -616,7 +644,14 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         transfersDropdown.setSelection(selection)
     }
 
-    private fun updateSpinnerDescription(value: Int) {
+    private fun updateSpinnerDescription(value: Int?) {
+        if (value == null) {
+            syncDescription.text = getString(
+                R.string.task_direction_unsupported_description,
+                existingTask?.direction ?: 0
+            )
+            return
+        }
         var text = getString(R.string.description_sync_direction_sync_toremote)
         when (value) {
             SyncDirectionObject.SYNC_LOCAL_TO_REMOTE -> text =
@@ -635,6 +670,13 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 getString(R.string.description_sync_direction_sync_bidirectional)
         }
         syncDescription.text = text
+    }
+
+    override fun onDestroy() {
+        if (::dbHandler.isInitialized) {
+            dbHandler.close()
+        }
+        super.onDestroy()
     }
 
     companion object {

@@ -8,10 +8,12 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.preference.PreferenceManager
 import androidx.work.WorkManager
+import ca.pkay.rcloneexplorer.Activities.MainActivity
 import ca.pkay.rcloneexplorer.BroadcastReceivers.SyncRestartAction
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.util.FLog
 import ca.pkay.rcloneexplorer.util.NotificationUtils
+import ca.pkay.rcloneexplorer.util.NotificationSinkPolicy
 import ca.pkay.rcloneexplorer.workmanager.SyncWorker
 import ca.pkay.rcloneexplorer.workmanager.SyncWorker.Companion.EXTRA_TASK_ID
 import java.util.UUID
@@ -56,18 +58,44 @@ class SyncServiceNotifications(var mContext: Context) {
         notificationId: Int,
         taskid: Long
     ) {
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(title)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
         if(!useReports()){
-            showFailedNotification(content, notificationId, taskid)
+            showFailedNotification(safeContent, notificationId, taskid)
             return
         }
         if(mReportManager.getFailures()<=1) {
-            showFailedNotification(content, notificationId, taskid)
+            showFailedNotification(safeContent, notificationId, taskid)
             mReportManager.lastFailedNotification(notificationId)
-            mReportManager.addToFailureReport(title, content)
+            mReportManager.addToFailureReport(safeTitle, safeContent)
         } else {
             mReportManager.cancelLastFailedNotification()
-            mReportManager.showFailReport(title, content)
+            mReportManager.showFailReport(safeTitle, safeContent)
         }
+    }
+
+    /** Shows an actionable notice without offering a retry against a stale task ID. */
+    fun showBlockedRequestNotification(content: String, notificationId: Int) {
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
+        val intent = Intent(mContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            mContext,
+            notificationId,
+            intent,
+            GenericSyncNotification.getFlags()
+        )
+        val notification = NotificationCompat.Builder(mContext, CHANNEL_FAIL_ID)
+            .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
+            .setContentTitle(mContext.getString(R.string.operation_failed))
+            .setContentText(safeContent)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(safeContent))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        NotificationUtils.createNotification(mContext, notificationId, notification)
     }
 
     fun showFailedNotification(
@@ -75,6 +103,7 @@ class SyncServiceNotifications(var mContext: Context) {
         notificationId: Int,
         taskid: Long
     ) {
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
         val i = Intent(mContext, SyncRestartAction::class.java)
         i.putExtra(EXTRA_TASK_ID, taskid)
 
@@ -82,9 +111,9 @@ class SyncServiceNotifications(var mContext: Context) {
         val builder = NotificationCompat.Builder(mContext, CHANNEL_FAIL_ID)
             .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
             .setContentTitle(mContext.getString(R.string.operation_failed))
-            .setContentText(content)
+            .setContentText(safeContent)
             .setStyle(
-                NotificationCompat.BigTextStyle().bigText(content)
+                NotificationCompat.BigTextStyle().bigText(safeContent)
             )
             .setGroup(OPERATION_FAILED_GROUP)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -99,19 +128,20 @@ class SyncServiceNotifications(var mContext: Context) {
         content: String,
         notificationId: Int,
         taskid: Long) {
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
 
         if(!useReports()){
-            showCancelledNotification(content, notificationId, taskid)
+            showCancelledNotification(safeContent, notificationId, taskid)
             return
         }
         var title = mContext.getString(R.string.operation_failed_cancelled)
         if(mReportManager.getFailures()<=1) {
-            showCancelledNotification(content, notificationId, taskid)
+            showCancelledNotification(safeContent, notificationId, taskid)
             mReportManager.lastFailedNotification(notificationId)
-            mReportManager.addToFailureReport(title, content)
+            mReportManager.addToFailureReport(title, safeContent)
         } else {
             mReportManager.cancelLastFailedNotification()
-            mReportManager.showFailReport(title, content)
+            mReportManager.showFailReport(title, safeContent)
         }
     }
 
@@ -120,6 +150,7 @@ class SyncServiceNotifications(var mContext: Context) {
         notificationId: Int,
         taskid: Long
     ) {
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
         val i = Intent(mContext, SyncRestartAction::class.java)
         i.putExtra(EXTRA_TASK_ID, taskid)
 
@@ -127,9 +158,9 @@ class SyncServiceNotifications(var mContext: Context) {
         val builder = NotificationCompat.Builder(mContext, CHANNEL_FAIL_ID)
             .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
             .setContentTitle(mContext.getString(R.string.operation_failed_cancelled))
-            .setContentText(content)
+            .setContentText(safeContent)
             .setStyle(
-                NotificationCompat.BigTextStyle().bigText(content)
+                NotificationCompat.BigTextStyle().bigText(safeContent)
             )
             .setGroup(OPERATION_FAILED_GROUP)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -146,29 +177,33 @@ class SyncServiceNotifications(var mContext: Context) {
         content: String,
         notificationId: Int
     ) {
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(title)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
 
         if(!useReports()){
-            showSuccessNotification(title, content, notificationId)
+            showSuccessNotification(safeTitle, safeContent, notificationId)
             return
         }
 
         if(mReportManager.getSucesses()<=1) {
-            showSuccessNotification(title, content, notificationId)
+            showSuccessNotification(safeTitle, safeContent, notificationId)
             mReportManager.lastSuccededNotification(notificationId)
-            mReportManager.addToSuccessReport(title, content)
+            mReportManager.addToSuccessReport(safeTitle, safeContent)
         } else {
             mReportManager.cancelLastSuccededNotification()
-            mReportManager.showSuccessReport(title, content)
+            mReportManager.showSuccessReport(safeTitle, safeContent)
         }
     }
     fun showSuccessNotification(title: String, content: String, notificationId: Int) {
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(title)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
         val builder = NotificationCompat.Builder(mContext, CHANNEL_SUCCESS_ID)
             .setSmallIcon(R.drawable.ic_twotone_cloud_done_24)
-            .setContentTitle(mContext.getString(R.string.operation_success, title))
-            .setContentText(content)
+            .setContentTitle(mContext.getString(R.string.operation_success, safeTitle))
+            .setContentText(safeContent)
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
-                    content
+                    safeContent
                 )
             )
             .setGroup(OPERATION_SUCCESS_GROUP)
@@ -199,16 +234,19 @@ class SyncServiceNotifications(var mContext: Context) {
         percent: Int,
         notificationId: Int
     ): Notification? {
-        if(content.isBlank()){
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(title)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
+        val safeBigText = NotificationSinkPolicy.sanitizeDetails(bigTextArray)
+        if(safeContent.isBlank()){
             FLog.e(TAG, "Missing notification content!")
             return null
         }
 
         val builder = GenericSyncNotification(mContext).updateGenericNotification(
-            mContext.getString(R.string.syncing_service, title),
-            content,
+            mContext.getString(R.string.syncing_service, safeTitle),
+            safeContent,
             R.drawable.ic_twotone_rounded_cloud_sync_24,
-            bigTextArray,
+            safeBigText,
             percent,
             SyncWorker::class.java,
             null,

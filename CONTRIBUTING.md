@@ -12,30 +12,29 @@ We welcome any contribution to CloudBridge, and there are multiple ways to contr
 ## Reporting a bug
 No one likes it if something goes wrong. However, before submitting a bug report, please make sure to check the following links:
 
-- [CloudBridge documentation](https://thies2005.github.io/CloudBridge/)
-- [search existing issues](https://github.com/thies2005/CloudBridge/issues?q=is%3Aissue)
+- [CloudBridge source repository](https://github.com/Rareities/CloudBridge)
+- [Inherited upstream documentation](https://thies2005.github.io/CloudBridge/) (may describe older behavior and releases)
 - [rclone documentation](https://rclone.org/)
 - [rclone forum](https://forum.rclone.org/)
 
-A lot of problems are errors in `rclone.conf`. If you have [Termux](https://github.com/termux/termux-app) installed, you can install rclone  with `pkg install rclone`. Then, export your config from CloudBridge and select Termux as target. You can then try to check if the error also occurs in Termux. You can also export and transfer your config to a desktop PC and test it there. 
+A lot of problems are errors in `rclone.conf`. Reproduce with synthetic or disposable credentials first. Do not export a live configuration to Termux, a desktop, or a ticket just to reproduce a bug. If testing in Termux or on a PC is necessary, use a separate disposable configuration.
 
-If you experience the same issue on your PC or in Termux, you can use the rclone forum to post your problem. If you are really sure that you have discovered an issue in rclone itself, you can also open an issue in the rclone repository.
+If a problem is reproducible in rclone itself, follow rclone's current reporting guidance after confirming it without exposing account data.
 
-When filing a new bug report, answer all the questions in the template. This includes:
+If a private issue-reporting channel or the upstream template is used, include the following non-secret diagnostic details:
  - App version (e.g. `v1.11.4`)
  - Exact Android version (e.g. `8.1.0`)
  - Your device model and manufacturer
- - An exact list of steps that leads to your issue. Please also enable local logging in Settings > Logging > Log rclone errors.
- - Paste or attach your rclone log located in `Android/data/de.schuelken.cloudbridge/files/logs/log.txt`. Make sure to remove any confidential information such as passwords, tokens or authorization info.
- - If your issue happens when using a remote, please also add a redacted version of your configuration file (passwords and tokens removed).
- - We may also ask you to test your config file on a PC or in Termux.
+ - An exact list of steps that leads to your issue. If you collect logs, inspect them locally before sharing.
+ - Never attach raw logs or an exported/live `rclone.conf`. Logs and configuration can contain credentials, tokens, remote names, account identifiers, paths, and provider-specific data.
+ - If a configuration example is essential, create a minimal synthetic file or manually redact a copy, then inspect every line for secrets, identifiers, URLs, and private paths before sharing it. Prefer disposable credentials.
+ - We may ask you to reproduce the problem on a PC or in Termux using a separate disposable configuration; do not copy real credentials for that test.
 
 
 ## Localize CloudBridge
- - Download [strings.xml](https://github.com/thies2005/CloudBridge/blob/master/app/src/main/res/values/strings.xml) file.
- - Open the `string.xml` file with your favorite text editor.
- - Delete all the `strings` with the attribute **translatable="false"**.
- - Translate `string` values from **en-US (English)** to that language you want to localize CloudBridge.
+ - Use the configured Weblate/Crowdin translation project and follow its current contribution instructions.
+ - Do not hand-edit generated localized `strings.xml` files. Changes to source-language strings belong in app source and should be reviewed separately from translations.
+ - Keep placeholders, formatting tokens, and XML escapes intact.
    Here is an example of translating into **bn-BD**
 
    Default string values **en-US**
@@ -55,7 +54,7 @@ When filing a new bug report, answer all the questions in the template. This inc
 ## Developing
 You should first make sure you have:
 
-- Go 1.25+ installed and in your PATH
+- Go 1.26+ installed and in your PATH
 - Java installed and in your PATH
 - Android SDK command-line tools installed OR the NDK version specified in `gradle.properties`
   installed
@@ -66,9 +65,9 @@ You can then build the app normally from Android Studio or from CLI by running:
 # Debug build
 ./gradlew assembleOssDebug
 
-# or release build
-./gradlew assembleOssRelease
 ```
+
+The current CI builds and tests OSS debug only. Release variants require a production keystore and credentials and must not be treated as publishable until signing continuity, provenance, and acceptance gates are documented. See [BUILD_GUIDE.md](BUILD_GUIDE.md) and [WINDOWS_BUILD_GUIDE.md](WINDOWS_BUILD_GUIDE.md).
 
 
 ## Submitting a PR
@@ -81,9 +80,9 @@ Here are a few tips on getting your PR merged:
 
 
 ## Requesting a new feature
-We also discuss new features on GitHub. You can browse the issue for existing feature requests and join the discussion. Note that commenting generally notifies all participants of your comment. Please avoid '+1', 'me to' or similar comments and use :+1: [reactions](https://github.blog/2016-03-10-add-reactions-to-pull-requests-issues-and-comments/) instead.
+The Rareities fork currently has its GitHub issue tracker disabled. For code changes, use a focused pull request against the current default branch. Do not assume the upstream issue tracker describes this fork's state. Please avoid '+1', 'me to' or similar comments on upstream discussions and use :+1: [reactions](https://github.blog/2016-03-10-add-reactions-to-pull-requests-issues-and-comments/) instead.
 
-When opening a new feature request, **answer all questions in the template**. This includes:
+The remaining template guidance below is inherited upstream material and applies only if that upstream issue form is used; it is not a currently enabled issue form for the Rareities fork. A future fork feature-request process should ask for:
 - Searching for existing issues and discussions that already cover your request. We may close your request without comment if you fail to do this.
 - For anything related to data transfer or accessing files on your cloud storage, please first check if your idea works in rclone. If it does not work there, it will probably also not work in CloudBridge.
 - Asking yourself what you can do to create this feature.

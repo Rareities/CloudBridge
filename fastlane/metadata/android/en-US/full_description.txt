@@ -1,12 +1,11 @@
-CloudBridge is a cloud file manager for Android, powered by rclone. It helps you to manage your files, everywhere you go, on your local device or on most cloud providers.
+CloudBridge is a cloud file manager for Android, powered by a pinned Rareities/rclone fork. It helps you manage files on local storage and configured remote backends supported by the included engine. Provider and Android permission capabilities vary.
 
-* <b>File Management:</b> You can list, view, download, upload, move, rename, delete files and folders
+* <b>File Management:</b> List, view, download, upload, move, rename and delete files and folders where the selected provider and Android permissions support those operations
 * <b>Streaming:</b> Stream media files, serve files and directories over FTP, HTTP, WebDAV or DLNA
-* <b>Syncing:</b> You can create tasks to automatically schedule syncs of your files
-* <b>Encryption:</b> Keep your files private on any cloud provider with 256 bit crypt remotes
-* <b>Many cloud providers:</b> Access most cloud storage providers via rclone config import, including Internxt and Drime
+* <b>Syncing:</b> Create tasks and schedules for file synchronization; Android may delay background work
+* <b>Encryption:</b> Use rclone crypt remotes to encrypt file contents before transfer, with behavior determined by the configured crypt options
+* <b>Remote backends:</b> Configure backends supported by the included engine, including Internxt and Drime; provider features vary
 * <b>Material Design:</b> Supports automatic dark theme in the style of Material 3
-* <b>Access everything:</b> Supports Storage Access Framework (SAF) for SD card and USB device access, regular storage devices and of course any cloud compatible with rclone
-* <b>Always up to date:</b> CloudBridge is regularly updated to the newest rclone version, so new providers and fixes arrive quickly
+* <b>Removable storage:</b> Uses Android's Storage Access Framework for supported SD-card and USB routes, subject to device/provider permissions
 
-CloudBridge is free and open source software (GPLv3). Questions, feedback or feature ideas? You are welcome to write me at 136268370+thies2005@users.noreply.github.com, or open an issue or pull request on GitHub: https://github.com/thies2005/CloudBridge
+This Rareities fork is based on the original CloudBridge project and is distributed under GPLv3. Original authors and contributors are credited in the app. Source and fork release information: https://github.com/Rareities/CloudBridge. The fork's issue tracker and private security-reporting route were not available in the latest repository review; do not send sensitive information through public channels.

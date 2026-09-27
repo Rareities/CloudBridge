@@ -78,9 +78,13 @@ public class TasksFragment extends Fragment {
 
     private void updateVisibilities(View view){
         DatabaseHandler dbHandler = new DatabaseHandler(view.getContext());
-        if(dbHandler.getAllTasks().size() > 0 ){
-            view.findViewById(R.id.layout_error).setVisibility(View.GONE);
-            view.findViewById(R.id.layout_tasklist).setVisibility(View.VISIBLE);
+        try {
+            if(dbHandler.getAllTasks().size() > 0 ){
+                view.findViewById(R.id.layout_error).setVisibility(View.GONE);
+                view.findViewById(R.id.layout_tasklist).setVisibility(View.VISIBLE);
+            }
+        } finally {
+            dbHandler.close();
         }
     }
 
@@ -92,7 +96,13 @@ public class TasksFragment extends Fragment {
         recyclerView.setLayoutManager(new LinearLayoutManager(c));
         recyclerView.setItemAnimator(new LandingAnimator());
 
-        TasksRecyclerViewAdapter recyclerViewAdapter = new TasksRecyclerViewAdapter(dbHandler.getAllTasks(), c);
+        java.util.List<ca.pkay.rcloneexplorer.Items.Task> tasks;
+        try {
+            tasks = dbHandler.getAllTasks();
+        } finally {
+            dbHandler.close();
+        }
+        TasksRecyclerViewAdapter recyclerViewAdapter = new TasksRecyclerViewAdapter(tasks, c);
         recyclerView.setAdapter(recyclerViewAdapter);
         recyclerView.addOnChildAttachStateChangeListener(new RecyclerView.OnChildAttachStateChangeListener() {
             @Override public void onChildViewAttachedToWindow(final View view) { updateVisibilities(fragmentView); }

@@ -2,24 +2,63 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply plugin: 'kotlinx-serialization'
 
-android {
-    // Release signing: credentials come from a git-ignored keystore.properties
-    // (local builds) or CB_* env vars (CI). Falls back to the debug key when
-    // neither is present so fresh checkouts still build an installable APK.
-    def keystoreProperties = new Properties()
-    def keystorePropertiesFile = rootProject.file("keystore.properties")
-    if (keystorePropertiesFile.exists()) {
-        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+// Release signing is deliberately fail-closed. A missing production key must never
+// silently produce a debug-signed artifact from a release variant.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { input -> keystoreProperties.load(input) }
+}
+def releaseStorePath = keystoreProperties['storeFile'] ?: System.getenv('CB_STORE_FILE')
+def releaseKeyAlias = keystoreProperties['keyAlias'] ?: System.getenv('CB_KEY_ALIAS')
+def releaseStorePassword = keystoreProperties['storePassword'] ?: System.getenv('CB_STORE_PASSWORD')
+def releaseKeyPassword = keystoreProperties['keyPassword'] ?: System.getenv('CB_KEY_PASSWORD')
+def releaseStoreFile = releaseStorePath ? file(releaseStorePath) : null
+def releaseSigningConfigured = releaseStoreFile != null && releaseStoreFile.isFile() && releaseStoreFile.canRead() &&
+        [releaseKeyAlias, releaseStorePassword, releaseKeyPassword].every {
+            it != null && !it.toString().trim().isEmpty()
+        }
+def expectedReleaseCertificateSha256 = System.getenv('CB_SIGNING_CERT_SHA256')
+
+def normalizeSigningCertificateFingerprint = { Object fingerprint ->
+    if (fingerprint == null) {
+        return null
     }
-    def releaseStorePath = keystoreProperties['storeFile'] ?: System.getenv('CB_STORE_FILE')
-    def releaseKeyConfigured = releaseStorePath != null && file(releaseStorePath).exists()
+    def normalized = fingerprint.toString()
+            .replaceAll(/[\s:-]/, '')
+            .toUpperCase(java.util.Locale.ROOT)
+    normalized ==~ /[0-9A-F]{64}/ ? normalized : null
+}
+
+def requireSigningCertificateFingerprintMatch = { Object expectedFingerprint, Object actualFingerprint ->
+    def expected = normalizeSigningCertificateFingerprint(expectedFingerprint)
+    if (expected == null) {
+        throw new GradleException(
+                'CB_SIGNING_CERT_SHA256 is required and must be a 64-character hexadecimal SHA-256 fingerprint.'
+        )
+    }
+    def actual = normalizeSigningCertificateFingerprint(actualFingerprint)
+    if (actual == null) {
+        throw new GradleException('The configured release signing certificate has no valid SHA-256 fingerprint.')
+    }
+    if (expected != actual) {
+        throw new GradleException('The configured release signing certificate does not match CB_SIGNING_CERT_SHA256.')
+    }
+}
+
+android {
+    def configuredRcloneVersion = project.properties['de.schuelken.cloudbridge.rCloneVersion'] ?: 'unknown'
+    def configuredRcloneRef = project.properties['de.schuelken.cloudbridge.rCloneRef']?.toString()?.trim()
+    if (!(configuredRcloneRef ==~ /(?i)[0-9a-f]{40}/)) {
+        throw new GradleException('Rclone must be pinned to a full immutable 40-character commit SHA')
+    }
     signingConfigs {
         release {
-            if (releaseKeyConfigured) {
-                keyAlias = keystoreProperties['keyAlias'] ?: System.getenv('CB_KEY_ALIAS')
-                storeFile file(releaseStorePath)
-                storePassword = keystoreProperties['storePassword'] ?: System.getenv('CB_STORE_PASSWORD')
-                keyPassword = keystoreProperties['keyPassword'] ?: System.getenv('CB_KEY_PASSWORD')
+            if (releaseSigningConfigured) {
+                keyAlias = releaseKeyAlias
+                storeFile releaseStoreFile
+                storePassword = releaseStorePassword
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -31,12 +70,14 @@ android {
         minSdkVersion 23
         compileSdk 36
         targetSdkVersion 36
-        // CI bumps these per beta via CB_VERSION_CODE / CB_VERSION_NAME env vars.
+        // An explicitly gated release workflow may override these via CB_VERSION_CODE / CB_VERSION_NAME.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
         versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 20
         versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.1'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
+        buildConfigField "java.lang.String", "RCLONE_ENGINE_VERSION", "\"${configuredRcloneVersion}\""
+        buildConfigField "java.lang.String", "RCLONE_ENGINE_REF", "\"${configuredRcloneRef.toLowerCase(java.util.Locale.ROOT)}\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";
         setProperty("archivesBaseName",  "cloudbridge_v"+versionName)
 
@@ -73,7 +114,7 @@ android {
                     appIcon: "@mipmap/ic_launcher",
                     appIconRound: "@mipmap/ic_launcher_round"
             ]
-            signingConfig releaseKeyConfigured ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 
@@ -169,6 +210,139 @@ android {
     }
 }
 
+def validateProductionReleaseSigning = {
+    if (!releaseSigningConfigured) {
+        throw new GradleException(
+                "Release APK/AAB packaging requires a readable production keystore and non-empty " +
+                        "storeFile, keyAlias, storePassword, and keyPassword values; debug signing is never used for release."
+        )
+    }
+
+    def normalizedExpectedFingerprint = normalizeSigningCertificateFingerprint(expectedReleaseCertificateSha256)
+    if (normalizedExpectedFingerprint == null) {
+        throw new GradleException(
+                'CB_SIGNING_CERT_SHA256 is required and must be a 64-character hexadecimal SHA-256 fingerprint.'
+        )
+    }
+
+    def releaseSigning = android.signingConfigs.getByName('release')
+    char[] storePasswordChars = releaseSigning.storePassword.toCharArray()
+    char[] keyPasswordChars = releaseSigning.keyPassword.toCharArray()
+    def passwordProtection = null
+    def actualFingerprint
+    try {
+        def keyStore = java.security.KeyStore.getInstance(
+                releaseSigning.storeType ?: java.security.KeyStore.getDefaultType()
+        )
+        def input = new java.io.FileInputStream(releaseSigning.storeFile)
+        try {
+            keyStore.load(input, storePasswordChars)
+        } finally {
+            input.close()
+        }
+
+        passwordProtection = new java.security.KeyStore.PasswordProtection(keyPasswordChars)
+        def entry = keyStore.getEntry(releaseSigning.keyAlias, passwordProtection)
+        if (!(entry instanceof java.security.KeyStore.PrivateKeyEntry) ||
+                !(entry.certificate instanceof java.security.cert.X509Certificate)) {
+            throw new java.security.GeneralSecurityException('Release alias has no X.509 private-key certificate')
+        }
+        actualFingerprint = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(entry.certificate.encoded)
+                .encodeHex()
+                .toString()
+                .toUpperCase(java.util.Locale.ROOT)
+    } catch (Exception ignored) {
+        throw new GradleException(
+                'Unable to load the configured release keystore alias and X.509 certificate, or verify its fingerprint.'
+        )
+    } finally {
+        if (passwordProtection != null) {
+            passwordProtection.destroy()
+        }
+        java.util.Arrays.fill(storePasswordChars, (char) 0)
+        java.util.Arrays.fill(keyPasswordChars, (char) 0)
+    }
+    requireSigningCertificateFingerprintMatch(normalizedExpectedFingerprint, actualFingerprint)
+}
+
+def verifyProductionReleaseSigning = tasks.register("verifyProductionReleaseSigning") {
+    doLast {
+        validateProductionReleaseSigning.call()
+    }
+}
+
+tasks.register('testReleaseSigningCertificateFingerprintPolicy') {
+    group = 'verification'
+    description = 'Checks release signing certificate fingerprint normalization and rejection cases.'
+    doLast {
+        def canonical = 'A1' * 32
+        def formatted = canonical.toLowerCase(java.util.Locale.ROOT).replaceAll(/(..)(?=.)/, '$1:')
+        assert normalizeSigningCertificateFingerprint("  ${formatted}  ") == canonical
+        assert normalizeSigningCertificateFingerprint('not-a-fingerprint') == null
+
+        def expectRejected = { Closure action, String messagePart ->
+            try {
+                action.call()
+            } catch (GradleException failure) {
+                assert failure.message.contains(messagePart)
+                return
+            }
+            throw new GradleException("Expected fingerprint policy rejection containing: ${messagePart}")
+        }
+        expectRejected({ requireSigningCertificateFingerprintMatch(null, canonical) }, 'CB_SIGNING_CERT_SHA256')
+        expectRejected({ requireSigningCertificateFingerprintMatch('invalid', canonical) }, 'CB_SIGNING_CERT_SHA256')
+        expectRejected({ requireSigningCertificateFingerprintMatch(canonical, 'B2' * 32) }, 'does not match')
+    }
+}
+
+def attachProductionReleaseSigningGuard = { task ->
+    // Keep the validation inside the release artifact task: `-x verifyProductionReleaseSigning`
+    // can exclude the standalone task, but cannot exclude this task's own pre-packaging action.
+    task.doFirst {
+        validateProductionReleaseSigning.call()
+    }
+    // A stale or cached signed artifact must not bypass current signing-policy validation.
+    task.outputs.upToDateWhen { false }
+    task.outputs.cacheIf('Release artifacts require fresh signing-policy validation') { false }
+    task.extensions.extraProperties.set('cloudBridgeProductionReleaseSigningGuard', true)
+    task.extensions.extraProperties.set('cloudBridgeFreshReleaseSigningExecutionRequired', true)
+}
+
+tasks.configureEach { task ->
+    if (task.name ==~ /(?i)^(package|sign|bundle).*release.*$/) {
+        attachProductionReleaseSigningGuard(task)
+    }
+}
+
+tasks.register('testProductionReleaseSigningTaskWiring') {
+    group = 'verification'
+    description = 'Checks every release package, signing, and bundle task has an inline signing-policy guard.'
+    doLast {
+        def releaseArtifactTasks = project.tasks.findAll {
+            it.name ==~ /(?i)^(package|sign|bundle).*release.*$/
+        }
+        def expectedOssPackageTask = releaseArtifactTasks.find { it.name == 'packageOssRelease' }
+        def unguardedTasks = releaseArtifactTasks.findAll {
+            !it.extensions.extraProperties.has('cloudBridgeProductionReleaseSigningGuard') ||
+                    !it.extensions.extraProperties.has('cloudBridgeFreshReleaseSigningExecutionRequired')
+        }
+        def standaloneVerifier = verifyProductionReleaseSigning.get()
+        def verifierDependencies = releaseArtifactTasks.findAll {
+            it.taskDependencies.getDependencies(it).contains(standaloneVerifier)
+        }
+        if (expectedOssPackageTask == null || !unguardedTasks.isEmpty() || !verifierDependencies.isEmpty()) {
+            def names = unguardedTasks.collect { it.name }.join(', ')
+            def dependentNames = verifierDependencies.collect { it.name }.join(', ')
+            throw new GradleException(
+                    "Release signing task wiring is incomplete; OSS release package present: " +
+                            "${expectedOssPackageTask != null}; unguarded release tasks: ${names}; " +
+                            "release tasks depending on the excludable verifier: ${dependentNames}"
+            )
+        }
+    }
+}
+
 repositories {
     mavenCentral()
     google()
@@ -223,6 +397,10 @@ dependencies {
     implementation 'com.github.AppIntro:AppIntro:6.3.1'
     // TEST
     testImplementation 'junit:junit:4.13.2'
+    // The Android framework's org.json classes are stubs in local JVM tests.
+    // Use the compatible JVM implementation to exercise import validation without
+    // weakening production's Android runtime dependency.
+    testImplementation 'org.json:json:20231013'
     androidTestImplementation 'androidx.test:runner:1.5.2'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
 

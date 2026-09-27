@@ -15,20 +15,20 @@
     <nav class="site">
       <a href="index.html" aria-current="page">Home</a>
       <a href="internals.html">How it works</a>
-      <a href="privacy.html">Privacy policy</a>
-      <a href="https://github.com/thies2005/CloudBridge">GitHub</a>
+      <a href="privacy.html">Privacy review status</a>
+      <a href="https://github.com/Rareities/CloudBridge">Rareities source fork</a>
     </nav>
   </div>
 </header>
 
 <main>
+  <p class="note"><strong>Fork status checked 2026-09-25:</strong> this page has no verified Rareities/CloudBridge release or APK download link. The available read-only GitHub snapshot did not include a complete release inventory, so it does not establish that no release exists. These pages are descriptive project notes, not proof of release readiness.</p>
   <h2>What is CloudBridge?</h2>
   <p>
-    CloudBridge turns your Android phone or tablet into a full cloud file manager.
-    It uses <a href="https://rclone.org">rclone</a> to talk to your cloud storage,
-    so it supports every provider rclone supports — from Google Drive, OneDrive and
-    Dropbox to decentralized storage like Internxt. You can browse, upload, download,
-    move, rename and delete files, stream media, and schedule automatic sync tasks.
+    CloudBridge is an Android file-management app built around <a href="https://rclone.org">rclone</a>.
+    Provider setup and compatibility vary by app configuration and the fork-pinned engine.
+    Source paths exist for file management, transfers, streaming and schedules, but this
+    list is not a claim that every provider or lifecycle passed acceptance testing.
   </p>
   <p>
     CloudBridge is free and open source software (GPLv3). It is a fork of
@@ -36,26 +36,26 @@
     <a href="https://github.com/patrykcoding/rcloneExplorer">rcloneExplorer</a>.
   </p>
 
+  <p class="note"><strong>Bisync preview only:</strong> safe initialization, apply, and recovery are not available in this fork. Do not use it for two-way Bisync mutations or treat a preview as authorization to change either endpoint.</p>
+
   <h2>Highlights</h2>
   <ul>
     <li><strong>File management</strong> — list, view, download, upload, move, rename, delete.</li>
-    <li><strong>Streaming</strong> — stream media, serve files and folders over FTP, HTTP, WebDAV or DLNA.</li>
-    <li><strong>Sync tasks</strong> — schedule recurring syncs between any remotes and local storage.</li>
-    <li><strong>Encryption</strong> — keep files private on any provider with 256-bit crypt remotes.</li>
+    <li><strong>Streaming</strong> - source paths exist for serving protocols; security and lifecycle acceptance remains incomplete.</li>
+    <li><strong>Sync tasks</strong> - task and schedule paths exist; timing and background lifecycle are not guaranteed or device-accepted.</li>
+    <li><strong>Encryption</strong> - rclone crypt can encrypt configured content before upload; settings and recovery keys must be handled carefully.</li>
     <li><strong>Local storage</strong> — Storage Access Framework (SAF) support for SD cards and USB devices.</li>
-    <li><strong>Always current</strong> — regularly updated to the newest rclone version.</li>
+    <li><strong>rclone integration</strong> - the configured source fork and immutable commit are recorded in build properties; native APK integration is not verified.</li>
     <li><strong>Material 3 design</strong> — including dark theme.</li>
-    <li><strong>All architectures</strong> — ARM, ARM64, x86 and x64, Android 7+.</li>
+    <li><strong>Multiple architectures</strong> — ARM, ARM64, x86 and x64; Android 6+ (minSdk 23).</li>
   </ul>
 
-  <h2>Downloads</h2>
+  <h2>Development builds</h2>
   <p>
-    Signed APKs for every CPU architecture are available on the
-    <a href="https://github.com/thies2005/CloudBridge/releases">GitHub releases page</a>.
-    The app is also being published on Google Play.
+    No signed APK or verified Google Play distribution is linked from this page. Do not install an upstream APK expecting it to contain this fork's changes. The table below lists configured ABI variants for developers only; local build instructions are in the <a href="https://github.com/Rareities/CloudBridge/blob/master/BUILD_GUIDE.md">repository build guide</a>.
   </p>
   <table>
-    <tr><th>Variant</th><th>For</th></tr>
+    <tr><th>Configured ABI name</th><th>Example device class</th></tr>
     <tr><td><code>arm64-v8a</code></td><td>Most modern phones</td></tr>
     <tr><td><code>armeabi-v7a</code></td><td>Older 32-bit ARM devices</td></tr>
     <tr><td><code>x86_64</code></td><td>Emulators, ChromeOS</td></tr>
@@ -65,22 +65,22 @@
 
   <h2>Learn more</h2>
   <ul>
-    <li><a href="internals.html">How CloudBridge works</a> — a detailed technical tour of the app, the build system, CI/CD, releases and the Play Store pipeline.</li>
-    <li><a href="privacy.html">Privacy policy</a></li>
-    <li><a href="https://github.com/thies2005/CloudBridge">Source code on GitHub</a></li>
+    <li><a href="https://github.com/Rareities/CloudBridge/blob/master/USER_GUIDE.md">Fork-specific user guide</a> - current limitations and safe-use guidance.</li>
+    <li><a href="https://github.com/Rareities/CloudBridge/blob/master/TEST_REPORT.md">Test report</a>, <a href="https://github.com/Rareities/CloudBridge/blob/master/SECURITY_REVIEW.md">security review</a>, and <a href="https://github.com/Rareities/CloudBridge/blob/master/RELEASE_READINESS.md">release readiness</a>.</li>
+    <li><a href="internals.html">How CloudBridge works</a> — architecture, current CI scope, security limits, and acceptance gates.</li>
+    <li><a href="privacy.html">Privacy review status (incomplete)</a></li>
+    <li><a href="https://github.com/Rareities/CloudBridge">Source code for the Rareities fork</a></li>
   </ul>
 
   <h2>Contact</h2>
   <p>
-    Questions, bug reports or feature ideas are always welcome:
-    <a href="mailto:136268370+thies2005@users.noreply.github.com">136268370+thies2005@users.noreply.github.com</a>.
-    Pull requests are welcome too!
+    The fork issue tracker is disabled and no support or private security contact has been confirmed. Do not send credentials, private logs or vulnerability details to an inherited upstream contact. A fork-specific reporting route must be established before distribution.
   </p>
 </main>
 
 <footer class="site">
   <div class="inner">
-    CloudBridge is released under the <a href="https://github.com/thies2005/CloudBridge/blob/master/LICENSE">GPLv3 license</a>.
+    CloudBridge is released under the <a href="https://github.com/Rareities/CloudBridge/blob/master/LICENSE">GPLv3 license</a>.
   </div>
 </footer>
 </body>

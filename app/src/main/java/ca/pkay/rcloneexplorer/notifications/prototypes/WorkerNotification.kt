@@ -15,6 +15,7 @@ import ca.pkay.rcloneexplorer.notifications.GenericSyncNotification
 import ca.pkay.rcloneexplorer.notifications.support.StatusObject
 import ca.pkay.rcloneexplorer.util.FLog
 import ca.pkay.rcloneexplorer.util.NotificationUtils
+import ca.pkay.rcloneexplorer.util.NotificationSinkPolicy
 import ca.pkay.rcloneexplorer.workmanager.SyncWorker
 import ca.pkay.rcloneexplorer.workmanager.SyncWorker.Companion.EXTRA_TASK_ID
 import de.schuelken.cloudbridge.extensions.tag
@@ -107,6 +108,7 @@ abstract class WorkerNotification(var mContext: Context) {
     ) {
         val i = Intent(mContext, SyncRestartAction::class.java)
         i.putExtra(EXTRA_TASK_ID, taskid)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
 
         val retryPendingIntent = PendingIntent.getService(mContext, taskid.toInt(), i,
                 GenericSyncNotification.getFlags()
@@ -114,9 +116,9 @@ abstract class WorkerNotification(var mContext: Context) {
         val builder = NotificationCompat.Builder(mContext, CHANNEL_FAIL_ID)
                 .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
                 .setContentTitle(serviceFailed)
-                .setContentText(content)
+                .setContentText(safeContent)
                 .setStyle(
-                        NotificationCompat.BigTextStyle().bigText(content)
+                        NotificationCompat.BigTextStyle().bigText(safeContent)
                 )
                 .setGroup(OPERATION_FAILED_GROUP)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -136,6 +138,7 @@ abstract class WorkerNotification(var mContext: Context) {
     ) {
         val i = Intent(mContext, SyncRestartAction::class.java)
         i.putExtra(EXTRA_TASK_ID, taskid)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
 
         val retryPendingIntent = PendingIntent.getService(mContext, taskid.toInt(), i,
                 GenericSyncNotification.getFlags()
@@ -143,9 +146,9 @@ abstract class WorkerNotification(var mContext: Context) {
         val builder = NotificationCompat.Builder(mContext, CHANNEL_FAIL_ID)
                 .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
                 .setContentTitle(serviceCancelled)
-                .setContentText(content)
+                .setContentText(safeContent)
                 .setStyle(
-                        NotificationCompat.BigTextStyle().bigText(content)
+                        NotificationCompat.BigTextStyle().bigText(safeContent)
                 )
                 .setGroup(OPERATION_FAILED_GROUP)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -158,17 +161,19 @@ abstract class WorkerNotification(var mContext: Context) {
     }
 
     fun showSuccessNotification(title: String, content: String, notificationId: Int) {
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(title)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
         val builder = NotificationCompat.Builder(mContext, CHANNEL_SUCCESS_ID)
                 .setSmallIcon(R.drawable.ic_twotone_cloud_done_24)
-                .setContentTitle(String.format(serviceSuccess, title))
-                .setContentText(content)
+                .setContentTitle(String.format(serviceSuccess, safeTitle))
+                .setContentText(safeContent)
                 .setGroup(SUMMARY_GROUP)
         NotificationUtils.createNotification(mContext, notificationId, builder.build())
 
 
         val summaryNotification = NotificationCompat.Builder(mContext, CHANNEL_SUCCESS_ID)
                 .setSmallIcon(R.drawable.ic_twotone_cloud_done_24)
-                .setContentTitle(String.format(serviceSuccess, title))
+                .setContentTitle(String.format(serviceSuccess, safeTitle))
                 .setGroup(SUMMARY_GROUP)
                 .setGroupSummary(true)
         NotificationUtils.createNotification(mContext, SUMMARY_ID, summaryNotification.build())
@@ -186,11 +191,15 @@ abstract class WorkerNotification(var mContext: Context) {
             return null
         }
 
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(title)
+        val safeContent = NotificationSinkPolicy.sanitizeContent(content)
+        val safeDetails = NotificationSinkPolicy.sanitizeDetails(bigTextArray)
+
         val builder = GenericSyncNotification(mContext).updateGenericNotification(
-                String.format(serviceOngoingTitle, title),
-                content,
+                String.format(serviceOngoingTitle, safeTitle),
+                safeContent,
                 R.drawable.ic_twotone_rounded_cloud_sync_24,
-                bigTextArray,
+                safeDetails,
                 percent,
                 SyncWorker::class.java,
                 null,

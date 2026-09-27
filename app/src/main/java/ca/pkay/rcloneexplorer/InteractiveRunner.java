@@ -3,6 +3,7 @@ package ca.pkay.rcloneexplorer;
 import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -21,12 +22,12 @@ import java.util.concurrent.TimeoutException;
 public class InteractiveRunner {
 
     private static final String TAG = "InteractiveRunner";
-    private Process process;
+    private final NativeExecutionHandle execution;
     private Thread runner;
 
-    public InteractiveRunner(Step startingStep, ErrorHandler errorHandler, Process process) {
-        this.process = process;
-        runner = new StepRunner(process, startingStep, errorHandler);
+    public InteractiveRunner(Step startingStep, ErrorHandler errorHandler, NativeExecutionHandle execution) {
+        this.execution = execution;
+        runner = new StepRunner(execution, startingStep, errorHandler);
     }
 
     public void runSteps() {
@@ -35,7 +36,29 @@ public class InteractiveRunner {
 
     public void forceStop() {
         runner.interrupt();
-        process.destroy();
+        execution.cancel();
+    }
+
+    /** Stops an interactive attempt and confirms both native reap and runner-thread exit. */
+    public boolean stopAndAwait() {
+        forceStop();
+        NativeExecutionHandle.Outcome outcome = execution.cancelAndAwait(null, null);
+        if (!outcome.isConfirmed() || !execution.hasConfirmedReap()) {
+            return false;
+        }
+        if (Thread.currentThread() == runner) {
+            return false;
+        }
+        boolean interrupted = false;
+        try {
+            runner.join(1000L);
+        } catch (InterruptedException e) {
+            interrupted = true;
+        }
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+        return !runner.isAlive();
     }
 
     /**
@@ -230,12 +253,12 @@ public class InteractiveRunner {
     }
 
     static class StepRunner extends Thread {
-        private final Process process;
+        private final NativeExecutionHandle execution;
         private final Step firstStep;
         private final ErrorHandler errorHandler;
 
-        public StepRunner(@NonNull Process process, @NonNull Step firstStep, @NonNull ErrorHandler errorHandler) {
-            this.process = process;
+        public StepRunner(@NonNull NativeExecutionHandle execution, @NonNull Step firstStep, @NonNull ErrorHandler errorHandler) {
+            this.execution = execution;
             this.firstStep = firstStep;
             this.errorHandler = errorHandler;
         }
@@ -250,10 +273,13 @@ public class InteractiveRunner {
             // kept at top scope to enable debug logging
             String bufferContent = null;
             List<? extends Step> currentSteps = Collections.singletonList(firstStep);
+            NativeExecutionHandle.InteractiveSession session = null;
 
-            try (InputStreamReader stdout = new InputStreamReader(process.getInputStream());
-                 InputStreamReader stderr = new InputStreamReader(process.getErrorStream());
-                 PrintWriter stdin = new PrintWriter(new OutputStreamWriter(process.getOutputStream()))) {
+            try {
+                session = execution.openInteractiveSession();
+                InputStreamReader stdout = new InputStreamReader(session.getStdout());
+                InputStreamReader stderr = new InputStreamReader(session.getStderr());
+                PrintWriter stdin = new PrintWriter(new OutputStreamWriter(session.getStdin()));
                 // Store the last 256 characters for matching on triggers
                 char[] buffer = new char[256];
                 int bufPos = 0;
@@ -282,22 +308,14 @@ public class InteractiveRunner {
                         bufferContent = new String(buffer);
                     }
 
-                    if (bufferContent.endsWith("\n")) {
-                        int index = bufferContent.lastIndexOf('\n', bufferContent.length() - 2);
-                        if (index < 0) {
-                            index = 0;
-                        }
-                        FLog.d(TAG, "rclone: %s", bufferContent.substring(index));
-                    }
-
                     // Test if any of the current steps have matching triggers
                     Step matchedStep = matchToTriggers(bufferContent, currentSteps);
 
                     if (null != matchedStep) {
-                        FLog.d(TAG, "run: Match for Step on '%s'", matchedStep.trigger);
+                        FLog.d(TAG, "Interactive rclone step matched");
                         Action action = matchedStep.getAction();
                         action.onTrigger(bufferContent);
-                        FLog.d(TAG, "run: entering '%s'", action.getInput());
+                        // Never log interactive input: it may be a password, 2FA code or auth result.
                         stdin.println(action.getInput());
                         stdin.flush();
 
@@ -327,6 +345,10 @@ public class InteractiveRunner {
             } catch (IOException | TimeoutException | RuntimeException e) {
                 makeDebugReport(bufferContent, currentSteps, e);
                 errorHandler.onError(e);
+            } finally {
+                if (session != null) {
+                    session.close();
+                }
             }
         }
 
@@ -351,19 +373,7 @@ public class InteractiveRunner {
         }
 
         private void makeDebugReport(String bufferContent, List<? extends Step> currentSteps, Exception e) {
-            if (null != bufferContent) {
-                StringBuilder sb = new StringBuilder();
-                if (null != currentSteps) {
-                    for (Step step : currentSteps) {
-                        sb.append(" - '").append(step.trigger).append('\'');
-                    }
-                } else {
-                    sb.append("(none)");
-                }
-                FLog.e(TAG, "run: transcript: \n%s\n active triggers:\n%s", e, bufferContent, sb);
-            } else {
-                FLog.e(TAG, "run: (no transcript)", e);
-            }
+            FLog.e(TAG, "Interactive rclone exchange failed (%s)", e.getClass().getSimpleName());
         }
 
         private void readChar(char[] buffer, int pos, @Step.StreamType int streamType, long timeout,

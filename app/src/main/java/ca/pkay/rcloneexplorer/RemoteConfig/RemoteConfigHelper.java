@@ -2,11 +2,12 @@ package ca.pkay.rcloneexplorer.RemoteConfig;
 
 import android.content.Context;
 import android.os.Environment;
-import android.util.Log;
 import android.widget.Toast;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.Rclone;
+import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
 import es.dmoral.toasty.Toasty;
 import io.github.x0b.safdav.SafAccessProvider;
 import io.github.x0b.safdav.file.SafConstants;
@@ -35,58 +36,25 @@ public class RemoteConfigHelper {
 
     public static void updateAndWait(Context context, ArrayList<String> options) {
         Rclone rclone = new Rclone(context);
-        Process process = rclone.configUpdate(options);
-        rcloneRun(process, context, options);
+        NativeExecutionHandle execution = rclone.configUpdateOwned(options);
+        rcloneRun(execution, context);
     }
 
     public static void setupAndWait(Context context, ArrayList<String> options) {
         Rclone rclone = new Rclone(context);
-        Process process = rclone.configCreate(options);
-        rcloneRun(process, context, options);
+        NativeExecutionHandle execution = rclone.configCreateOwned(options);
+        rcloneRun(execution, context);
     }
 
-    private static void rcloneRun(Process process, Context context, ArrayList<String> options) {
-        if (null == process) {
+    private static void rcloneRun(NativeExecutionHandle execution, Context context) {
+        if (execution == null) {
             Toasty.error(context, context.getString(R.string.error_creating_remote), Toast.LENGTH_SHORT, true).show();
             return;
         }
-        
-        // Capture stderr in background thread for debugging
-        final StringBuilder errorOutput = new StringBuilder();
-        Thread errorReader = new Thread(() -> {
-            try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                    new java.io.InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    errorOutput.append(line).append("\n");
-                }
-            } catch (java.io.IOException e) {
-                Log.e("RemoteConfigHelper", "Error reading stderr", e);
-            }
-        });
-        errorReader.start();
-        
-        int exitCode;
-        while (true) {
-            try {
-                exitCode = process.waitFor();
-                break;
-            } catch (InterruptedException e) {
-                try {
-                    exitCode = process.exitValue();
-                    break;
-                } catch (IllegalStateException ignored) {}
-            }
-        }
-        
-        // Wait for error reader to finish
-        try {
-            errorReader.join(1000);
-        } catch (InterruptedException ignored) {}
-        
-        if (0 != exitCode) {
-            Log.e("RemoteConfigHelper", "rclone config create failed with exit code: " + exitCode);
-            Log.e("RemoteConfigHelper", "rclone stderr: " + errorOutput.toString());
+
+        NativeExecutionHandle.Outcome outcome = execution.await(2 * 60 * 1000L, null, null);
+        if (!outcome.isSuccess()) {
+            FLog.e("RemoteConfigHelper", "rclone config ended with state: %s", outcome.getState());
             Toasty.error(context, context.getString(R.string.error_creating_remote), Toast.LENGTH_SHORT, true).show();
         } else {
             Toasty.success(context, context.getString(R.string.remote_creation_success), Toast.LENGTH_SHORT, true).show();

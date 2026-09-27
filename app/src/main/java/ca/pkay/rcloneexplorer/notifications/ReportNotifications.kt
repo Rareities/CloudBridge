@@ -14,6 +14,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import ca.pkay.rcloneexplorer.BroadcastReceivers.ClearReportBroadcastReceiver
 import ca.pkay.rcloneexplorer.R
+import ca.pkay.rcloneexplorer.util.NotificationSinkPolicy
 import ca.pkay.rcloneexplorer.util.NotificationUtils
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -53,40 +54,17 @@ class ReportNotifications(var mContext: Context) {
     }
 
     fun addToSuccessReport(title: String, line: String) {
-        val content = "$title: $line\n"
-        val prefMap = runBlocking { mContext.dataStore.data.first().asMap() }
-        runBlocking {
-            mContext.dataStore.edit { settings ->
-                val currentCounterValue: String = (prefMap[NOTIFICATION_CACHE_SUCCESS_PREFERENCE] ?: "") as String
-                if(currentCounterValue.isEmpty()) {
-                    settings[NOTIFICATION_CACHE_SUCCESS_PREFERENCE] = currentCounterValue + content
-                } else {
-                    settings[NOTIFICATION_CACHE_SUCCESS_PREFERENCE] =  content + currentCounterValue
-                }
-            }
-        }
+        appendToReport(NOTIFICATION_CACHE_SUCCESS_PREFERENCE, title, line)
     }
 
     fun showSuccessReport(title: String, line: String) {
-        val content = "$title: $line\n"
-
-        val prefMap = runBlocking { mContext.dataStore.data.first().asMap() }
-        runBlocking {
-            mContext.dataStore.edit { settings ->
-                val currentCounterValue: String = (prefMap[NOTIFICATION_CACHE_SUCCESS_PREFERENCE] ?: "") as String
-                if(currentCounterValue.isEmpty()) {
-                    settings[NOTIFICATION_CACHE_SUCCESS_PREFERENCE] = currentCounterValue + content
-                } else {
-                    settings[NOTIFICATION_CACHE_SUCCESS_PREFERENCE] =  content + currentCounterValue
-                }
-            }
-        }
-        val notificationContent: String = content + prefMap[NOTIFICATION_CACHE_SUCCESS_PREFERENCE].toString()
+        val notificationContent = appendToReport(NOTIFICATION_CACHE_SUCCESS_PREFERENCE, title, line)
 
         val builder = NotificationCompat.Builder(mContext, CHANNEL_REPORT_ID)
             .setSmallIcon(R.drawable.ic_twotone_cloud_done_24)
             .setContentTitle(mContext.getString(R.string.operation_report_success_title))
-            .setContentText(mContext.getString(R.string.operation_report_success_short_content, notificationContent.lines().size-1))
+            .setContentText(mContext.getString(R.string.operation_report_success_short_content,
+                NotificationSinkPolicy.reportEntryCount(notificationContent)))
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
                     notificationContent
@@ -118,30 +96,17 @@ class ReportNotifications(var mContext: Context) {
     }
 
     fun addToFailureReport(title: String, line: String) {
-        val content = "$title: $line\n"
-        val prefMap = runBlocking { mContext.dataStore.data.first().asMap() }
-        runBlocking {
-            mContext.dataStore.edit { settings ->
-                val currentCounterValue: String = (prefMap[NOTIFICATION_CACHE_FAIL_PREFERENCE] ?: "") as String
-                if(currentCounterValue.isEmpty()) {
-                    settings[NOTIFICATION_CACHE_FAIL_PREFERENCE] = currentCounterValue + content
-                } else {
-                    settings[NOTIFICATION_CACHE_FAIL_PREFERENCE] =  content + currentCounterValue
-                }
-            }
-        }
+        appendToReport(NOTIFICATION_CACHE_FAIL_PREFERENCE, title, line)
     }
 
     fun showFailReport(title: String, line: String) {
-        addToFailureReport(title, line)
-
-        val prefMap = runBlocking { mContext.dataStore.data.first().asMap() }
-        val notificationContent: String = prefMap[NOTIFICATION_CACHE_FAIL_PREFERENCE].toString()
+        val notificationContent = appendToReport(NOTIFICATION_CACHE_FAIL_PREFERENCE, title, line)
 
         val builder = NotificationCompat.Builder(mContext, CHANNEL_REPORT_ID)
             .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
             .setContentTitle(mContext.getString(R.string.operation_report_fail_title))
-            .setContentText(mContext.getString(R.string.operation_report_fail_short_content, notificationContent.lines().size-1))
+            .setContentText(mContext.getString(R.string.operation_report_fail_short_content,
+                NotificationSinkPolicy.reportEntryCount(notificationContent)))
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
                     notificationContent
@@ -168,14 +133,35 @@ class ReportNotifications(var mContext: Context) {
     }
 
     fun getFailures(): Int {
-        val prefMap = runBlocking { mContext.dataStore.data.first().asMap() }
-        val notificationContent = prefMap[NOTIFICATION_CACHE_FAIL_PREFERENCE].toString()
-        return notificationContent.lines().size
+        val history = runBlocking {
+            mContext.dataStore.data.first()[NOTIFICATION_CACHE_FAIL_PREFERENCE]
+        }
+        return NotificationSinkPolicy.aggregationLineCount(history)
     }
 
     fun getSucesses(): Int {
-        val prefMap = runBlocking { mContext.dataStore.data.first().asMap() }
-        val notificationContent = prefMap[NOTIFICATION_CACHE_SUCCESS_PREFERENCE].toString()
-        return notificationContent.lines().size
+        val history = runBlocking {
+            mContext.dataStore.data.first()[NOTIFICATION_CACHE_SUCCESS_PREFERENCE]
+        }
+        return NotificationSinkPolicy.aggregationLineCount(history)
+    }
+
+    private fun appendToReport(
+        key: androidx.datastore.preferences.core.Preferences.Key<String>,
+        title: String,
+        line: String
+    ): String {
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(title)
+        val safeLine = NotificationSinkPolicy.sanitizeContent(line)
+        val updatedPreferences = runBlocking {
+            mContext.dataStore.edit { settings ->
+                settings[key] = NotificationSinkPolicy.prependReport(
+                    settings[key],
+                    safeTitle,
+                    safeLine
+                )
+            }
+        }
+        return updatedPreferences[key].orEmpty()
     }
 }

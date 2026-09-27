@@ -8,6 +8,7 @@ import android.app.PendingIntent.FLAG_IMMUTABLE
 import android.app.PendingIntent.FLAG_UPDATE_CURRENT
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -15,7 +16,11 @@ import androidx.core.app.NotificationManagerCompat
 import ca.pkay.rcloneexplorer.Activities.MainActivity
 import ca.pkay.rcloneexplorer.AppShortcutsHelper
 import ca.pkay.rcloneexplorer.R
+import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.NotificationSinkPolicy
 import ca.pkay.rcloneexplorer.util.PermissionManager
+import ca.pkay.rcloneexplorer.util.ShortcutCapabilities
+import ca.pkay.rcloneexplorer.util.StableNotificationIdentity
 import ca.pkay.rcloneexplorer.util.SyncLog
 
 class AppErrorNotificationManager(var mContext: Context) {
@@ -79,26 +84,34 @@ class AppErrorNotificationManager(var mContext: Context) {
 
     @SuppressLint("MissingPermission")
     fun showSessionExpiredNotification(remoteName: String) {
-        // Deep-link directly into the Internxt re-auth flow: tapping the
-        // notification opens MainActivity with the REAUTH action and the remote
-        // name, which triggers InternxtReauth instead of just landing on the
-        // remotes list. Vary the request code per remote (via hashCode) and use
-        // FLAG_UPDATE_CURRENT so distinct remotes get distinct, fresh intents.
-        val requestCode = SESSION_EXPIRED_ID + remoteName.hashCode()
+        // Keep per-remote PendingIntent and notification identity collision-resistant.
+        // Intent extras alone do not participate in PendingIntent identity.
+        val remoteIdentity = StableNotificationIdentity.forRemote(remoteName)
+        val requestCode = SESSION_EXPIRED_ID
+        val reauthAction = MainActivity.MAIN_ACTIVITY_START_REAUTH
+        val capability = try {
+            ShortcutCapabilities.issueOrGetForIntent(mContext, reauthAction, remoteName)
+        } catch (failure: RuntimeException) {
+            FLog.e("AppErrorNotificationManager", "Unable to persist re-authentication capability")
+            return
+        }
         val contentIntent = PendingIntent.getActivity(
             mContext,
             requestCode,
             Intent(mContext, MainActivity::class.java).apply {
-                action = MainActivity.MAIN_ACTIVITY_START_REAUTH
+                action = reauthAction
+                data = Uri.parse("cloudbridge://session-expired/$remoteIdentity")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                 putExtra(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME, remoteName)
+                putExtra(ShortcutCapabilities.EXTRA_INTENT_CAPABILITY, capability)
             },
             FLAG_IMMUTABLE or FLAG_UPDATE_CURRENT
         )
 
+        val safeRemoteName = NotificationSinkPolicy.sanitizeTitle(remoteName)
         val notificationText = mContext.getString(
             R.string.session_expired_notification_text,
-            remoteName
+            safeRemoteName
         )
 
         val b = NotificationCompat.Builder(mContext, APP_ERROR_CHANNEL_ID)
@@ -113,7 +126,7 @@ class AppErrorNotificationManager(var mContext: Context) {
         val notificationManager = NotificationManagerCompat.from(mContext)
 
         if(PermissionManager(mContext).grantedNotifications()) {
-            notificationManager.notify(requestCode, b.build())
+            notificationManager.notify("session-expired:$remoteIdentity", requestCode, b.build())
         } else {
             Log.e("AppErrorNotificationManager", "We dont have Notification Permission!")
         }
