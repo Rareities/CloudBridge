@@ -17,15 +17,15 @@
   (134902082 bytes) and RS
   `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`
 -  (134902067 bytes). They are debug-only and not release artifacts.
-- Fork CI for final branch head `db9ad74769eee614121406ed0b89741f0018d8f8` is green:
-  Android CI [36301106422](https://github.com/Rareities/CloudBridge/actions/runs/36301106422),
-  PR Android Lint [36301106406](https://github.com/Rareities/CloudBridge/actions/runs/36301106406),
-  Translations [36301106399](https://github.com/Rareities/CloudBridge/actions/runs/36301106399),
-  push Android Lint [36301104446](https://github.com/Rareities/CloudBridge/actions/runs/36301104446),
-  and dependency verification [36301104437](https://github.com/Rareities/CloudBridge/actions/runs/36301104437)
+- Fork CI for final branch head `6cbf82088f1914e323b3ccf8fd02214f67950cb8` is green:
+  Android CI [36301552781](https://github.com/Rareities/CloudBridge/actions/runs/36301552781),
+  PR Android Lint [36301552740](https://github.com/Rareities/CloudBridge/actions/runs/36301552740),
+  Translations [36301552726](https://github.com/Rareities/CloudBridge/actions/runs/36301552726),
+  push Android Lint [36301549433](https://github.com/Rareities/CloudBridge/actions/runs/36301549433),
+  and dependency verification [36301549459](https://github.com/Rareities/CloudBridge/actions/runs/36301549459)
   all completed successfully. Android CI uploaded the JDK-17 debug artifact
-  [cloudbridge-oss-debug-build](https://github.com/Rareities/CloudBridge/actions/runs/36301106422/artifacts/10925781828)
-  (ID `10925781828`, digest `sha256:9abe38cde150758f7bf89594d9eabca75dc43f20380cf869489bf459c5d2a3a4`);
+  [cloudbridge-oss-debug-build](https://github.com/Rareities/CloudBridge/actions/runs/36301552781/artifacts/10926256720)
+  (ID `10926256720`, digest `sha256:a19a98b6d4c24f8a8ba537af2dbc76cecbe4a977254ea112d7ca17b75b7810ea`);
   this is debug provenance, not production signing or release attestation.
 - Release remains **NO-GO**: no production signer/continuity, Galaxy S26/One UI/API/firmware,
   live Proton/disposable-scope, race/multi-process, migration-runtime, or full-engine

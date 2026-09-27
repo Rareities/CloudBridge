@@ -9,7 +9,7 @@ packaging pass. Universal debug hashes are OSS
 `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52` and RS
 `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`. This remains an engineering snapshot: device, provider,
 migration, signing, race and release gates are **NOT RUN/NO-GO**. Fork CI at final evidence
-head `db9ad74769eee614121406ed0b89741f0018d8f8` is green; artifact `10925781828` is hosted
+head `6cbf82088f1914e323b3ccf8fd02214f67950cb8` is green; artifact `10926256720` is hosted
 JDK-17 debug provenance only, not a production attestation.
 
 **Status:** engineering snapshot only, not a supported-release contract. **Checked:** 2026-09-27. Refresh source, tests, CI, PRs, dependencies, and acceptance evidence before app-pin promotion or release. Source registration and declared SDK/ABI values do not alone establish runtime compatibility.

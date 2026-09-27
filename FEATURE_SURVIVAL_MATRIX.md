@@ -10,8 +10,8 @@ compilation and debug packaging pass. Universal debug hashes are OSS
 `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`. The matrix still does not claim feature acceptance:
 Bisync mutation/recovery, scheduling/device behavior, Obsidian lifecycle, provider/SAF
 acceptance, live Proton, migration, stress, signing and release gates remain partial or
-**NOT RUN**. Fork CI at final evidence head `db9ad74769eee614121406ed0b89741f0018d8f8`
-is green, including the hosted debug provenance step; artifact `10925781828` is not a
+**NOT RUN**. Fork CI at final evidence head `6cbf82088f1914e323b3ccf8fd02214f67950cb8`
+is green, including the hosted debug provenance step; artifact `10926256720` is not a
 production attestation.
 
 **Current committed checkpoint — 2026-09-27:** CloudBridge implementation commit

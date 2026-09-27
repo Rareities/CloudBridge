@@ -10,8 +10,8 @@ are OSS `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52` and R
 **NO-GO**: production signing/continuity, JDK-17 source-bound provenance on the local host,
 Galaxy S26/One UI/API/firmware, live Proton, migration runtime, race/multi-process, complete
 engine and provider acceptance are unavailable or incomplete. Fork CI for evidence head
-`db9ad74769eee614121406ed0b89741f0018d8f8` is green and uploaded debug artifact
-`10925781828`; that artifact is not a production signing/provenance attestation. No release/tag/public APK
+`6cbf82088f1914e323b3ccf8fd02214f67950cb8` is green and uploaded debug artifact
+`10926256720`; that artifact is not a production signing/provenance attestation. No release/tag/public APK
 publication is authorized by this evidence.
 
 **Decision as of 2026-09-26: NO-GO - no release candidate.** OSS debug APKs were built
