@@ -88,6 +88,19 @@ public class NotificationSinkPolicyTest {
     }
 
     @Test
+    public void sparseDetailListsHaveABoundedInspectionLimit() {
+        ArrayList<String> input = new ArrayList<>();
+        for (int i = 0; i < NotificationSinkPolicy.MAX_DETAIL_SCAN_ITEMS; i++) {
+            input.add("   ");
+        }
+        input.add("late detail must not force an unbounded scan");
+
+        ArrayList<String> safe = NotificationSinkPolicy.sanitizeDetails(input);
+
+        assertTrue(safe.isEmpty());
+    }
+
+    @Test
     public void reportPrependsNewestFirstAndSanitizesExistingRows() {
         String first = NotificationSinkPolicy.prependReport("", "first", "old password=old-secret");
         String second = NotificationSinkPolicy.prependReport(first, "second", "new line\ncontent");

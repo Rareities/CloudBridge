@@ -13,6 +13,8 @@ public final class NotificationSinkPolicy {
     public static final int MAX_CONTENT_CHARS = 2 * 1024;
     public static final int MAX_DETAILS_LINES = 24;
     public static final int MAX_DETAILS_TOTAL_CHARS = 8 * 1024;
+    /** Bound inspection as well as accepted output when callers provide sparse/blank lists. */
+    public static final int MAX_DETAIL_SCAN_ITEMS = MAX_DETAILS_LINES * 4;
     public static final int MAX_REPORT_ENTRIES = 50;
     public static final int MAX_REPORT_BYTES = 16 * 1024;
 
@@ -39,7 +41,11 @@ public final class NotificationSinkPolicy {
         }
 
         int totalChars = 0;
+        int inspected = 0;
         for (String detail : details) {
+            if (inspected++ >= MAX_DETAIL_SCAN_ITEMS) {
+                break;
+            }
             if (result.size() >= MAX_DETAILS_LINES || totalChars >= MAX_DETAILS_TOTAL_CHARS) {
                 break;
             }

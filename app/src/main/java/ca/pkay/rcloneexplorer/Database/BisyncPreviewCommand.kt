@@ -26,7 +26,8 @@ data class BisyncPreviewCommandRequest(
  * supports cloning compatible accepted listings. Unknown commits never inherit either capability.
  */
 object BisyncPreviewCommandBuilder {
-    const val PUBLISHED_PREVIEW_ENGINE = "fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0"
+    /** The immutable engine selected by gradle.properties and verified to expose --preview-json. */
+    const val PUBLISHED_PREVIEW_ENGINE = "cf3ad40d29d15919af116a5d1e64e0381e2ce3fd"
     const val LOCAL_STATE_CLONE_ENGINE = "81ac481705944ac125e2f8eeab823d78f6b1cfdb"
 
     private data class Capabilities(val summary: Boolean, val stateClone: Boolean)

@@ -11,6 +11,22 @@ import org.junit.Test
 
 class BisyncPreviewCommandBuilderTest {
     @Test
+    fun currentAppPinSupportsOnlyReadOnlyAbsentStatePreview() {
+        assertEquals(
+            "cf3ad40d29d15919af116a5d1e64e0381e2ce3fd",
+            BisyncPreviewCommandBuilder.PUBLISHED_PREVIEW_ENGINE
+        )
+        val configuredEngine = "rclone:1.76.0@${BisyncPreviewCommandBuilder.PUBLISHED_PREVIEW_ENGINE}"
+
+        assertTrue(BisyncPreviewCommandBuilder.supportsPreview(
+            configuredEngine, BisyncNativeState.ABSENT
+        ))
+        assertFalse(BisyncPreviewCommandBuilder.supportsPreview(
+            configuredEngine, BisyncNativeState.COMPATIBLE
+        ))
+    }
+
+    @Test
     fun admissionCapabilitiesFailClosedForCompatibleStateOnThePublishedPin() {
         val publishedEngine = "rclone:1.76.0@${BisyncPreviewCommandBuilder.PUBLISHED_PREVIEW_ENGINE}"
         val cloneEngine = "rclone:1.76.0@${BisyncPreviewCommandBuilder.LOCAL_STATE_CLONE_ENGINE}"
