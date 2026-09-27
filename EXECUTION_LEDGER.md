@@ -3,7 +3,7 @@
 ## Current committed verification checkpoint — 2026-09-27
 
 - CloudBridge implementation commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` and
-  documentation head `2b1d56d689006c82c089bd8f4d81c36d394f6cc9` are pushed to
+  documentation head `16e3b20d77bb6c0b0ba16eecb034eeccadc41e88` are pushed to
   `Rareities/CloudBridge:codex/luna-implementation`; fork-only draft PR #1 is open at
   https://github.com/Rareities/CloudBridge/pull/1. No upstream/original PR was created.
   Release publication remains a separate final-gate action.
