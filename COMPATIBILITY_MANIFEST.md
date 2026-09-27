@@ -13,8 +13,9 @@ APK hashes are OSS `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D0
 They are debug-only artifacts. The clean-tree provenance generator failed closed because it
 requires JDK 17 while this host exposes JDK 21.0.8.9; no current source-bound manifest is
 claimed. Signer continuity, instrumentation, Galaxy S26/One UI/API/firmware, live Proton,
-hosted CI, race/multi-process and release gates remain **NOT RUN/NO-GO**. No upstream/original
-PR has been created.
+hosted CI, race/multi-process and release gates remain **NOT RUN/NO-GO**. The fork-only draft
+PR is https://github.com/Rareities/CloudBridge/pull/1; no upstream/original PR has been
+created.
 
 **Previous committed implementation identity:** CloudBridge code commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
 on `Rareities/CloudBridge:codex/luna-implementation`; final branch head
