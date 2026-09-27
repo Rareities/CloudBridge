@@ -16,8 +16,17 @@
   `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52`
   (134902082 bytes) and RS
   `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`
-  (134902067 bytes). They are debug-only and not release artifacts. Fork CI for this
-  source head is pending; its result will be recorded before the final PR update.
+-  (134902067 bytes). They are debug-only and not release artifacts.
+- Fork CI for final branch head `db9ad74769eee614121406ed0b89741f0018d8f8` is green:
+  Android CI [36301106422](https://github.com/Rareities/CloudBridge/actions/runs/36301106422),
+  PR Android Lint [36301106406](https://github.com/Rareities/CloudBridge/actions/runs/36301106406),
+  Translations [36301106399](https://github.com/Rareities/CloudBridge/actions/runs/36301106399),
+  push Android Lint [36301104446](https://github.com/Rareities/CloudBridge/actions/runs/36301104446),
+  and dependency verification [36301104437](https://github.com/Rareities/CloudBridge/actions/runs/36301104437)
+  all completed successfully. Android CI uploaded the JDK-17 debug artifact
+  [cloudbridge-oss-debug-build](https://github.com/Rareities/CloudBridge/actions/runs/36301106422/artifacts/10925781828)
+  (ID `10925781828`, digest `sha256:9abe38cde150758f7bf89594d9eabca75dc43f20380cf869489bf459c5d2a3a4`);
+  this is debug provenance, not production signing or release attestation.
 - Release remains **NO-GO**: no production signer/continuity, Galaxy S26/One UI/API/firmware,
   live Proton/disposable-scope, race/multi-process, migration-runtime, or full-engine
   acceptance evidence exists. The debug provenance generator still fails closed locally on

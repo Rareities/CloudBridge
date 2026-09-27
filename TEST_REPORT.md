@@ -8,11 +8,12 @@
 | Android checks | `:app:lintOssDebug :app:lintRsDebug :app:compileOssDebugAndroidTestSources :app:compileRsDebugAndroidTestSources` | **PASS:** lint completed without unfiltered fatal findings and both Android-test source sets compiled; instrumentation is **NOT RUN**. |
 | Debug packaging | JDK 21.0.8.9, Android SDK 36, Go 1.26.8, NDK 29.0.14206865; `:app:assembleOssDebug :app:assembleRsDebug --offline --no-daemon --max-workers=2 -x :rclone:buildAll -x :rclone:checkoutRclone` | **PASS, debug-only:** OSS/RS four-ABI plus universal APKs assembled. Universal OSS: 134902082 bytes, `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52`; RS: 134902067 bytes, `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`. |
 | App/engine linkage | `gradle.properties` and `BisyncPreviewCommandBuilder` | **PASS:** both use exact rclone source `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; compatible-state preview remains fail-closed because that engine pin lacks the clone capability. |
+| Fork GitHub CI | Final branch head `db9ad74769eee614121406ed0b89741f0018d8f8`; [Android CI 36301106422](https://github.com/Rareities/CloudBridge/actions/runs/36301106422), [PR lint 36301106406](https://github.com/Rareities/CloudBridge/actions/runs/36301106406), [translations 36301106399](https://github.com/Rareities/CloudBridge/actions/runs/36301106399), [push lint 36301104446](https://github.com/Rareities/CloudBridge/actions/runs/36301104446), [dependency verification 36301104437](https://github.com/Rareities/CloudBridge/actions/runs/36301104437) | **PASS:** all five workflows completed successfully. Artifact [cloudbridge-oss-debug-build](https://github.com/Rareities/CloudBridge/actions/runs/36301106422/artifacts/10925781828), ID `10925781828`, digest `sha256:9abe38cde150758f7bf89594d9eabca75dc43f20380cf869489bf459c5d2a3a4`, is hosted JDK-17 debug provenance only. |
 | Release gates | Samsung/Proton/signing/provenance/full engine | **NOT RUN / NO-GO:** unavailable access is recorded as NOT RUN, not passed; debug artifacts are not publishable releases. |
 
-The implementation commit is `da38fdd47023c347a19c3db30fa96f0a172c0484` on the
-Rareities fork. Fork CI for this exact source head is pending and will be recorded before
-the fork-only PR body is refreshed. The prior checkpoint below is retained as history.
+The implementation commit is `da38fdd47023c347a19c3db30fa96f0a172c0484`; the final
+ledger/evidence head is `db9ad74769eee614121406ed0b89741f0018d8f8` on the Rareities fork.
+The prior checkpoint below is retained as history.
 
 ## Current committed verification — 2026-09-27
 

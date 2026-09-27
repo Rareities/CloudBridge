@@ -11,7 +11,11 @@ pass. Universal debug hashes are OSS
 `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`.
 This does not close any WP: instrumentation, migration runtime, provider/device, Samsung,
 live Proton, race/multi-process, production signing, hosted-CI provenance and release
-acceptance remain **NOT RUN/NO-GO**. The older checkpoint below is retained for provenance history.
+acceptance remain **NOT RUN/NO-GO**. Fork CI at final evidence head
+`db9ad74769eee614121406ed0b89741f0018d8f8` is green for Android, lint, translations and
+dependency verification; the hosted artifact is debug-only (`10925781828`, digest
+`sha256:9abe38cde150758f7bf89594d9eabca75dc43f20380cf869489bf459c5d2a3a4`). The older
+checkpoint below is retained for provenance history.
 
 **Current snapshot:** 2026-09-27. This records evidence for the current local checkouts, not release acceptance. Detailed package evidence and rollbacks are in `EXECUTION_LEDGER.md` and the separate rclone `PATCH_LEDGER.md`.
 
