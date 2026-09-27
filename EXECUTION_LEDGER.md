@@ -10,7 +10,7 @@
   release-signing claim is made. PR creation remains deferred until the user authorizes the
   final PR phase.
 - Current OSS and RS JVM suites both pass from this committed source with JDK 21/Android SDK 36:
-  **473 tests, 0 failures, 0 errors, 2 skipped per flavor**. Both flavor lint tasks pass with no
+  **475 tests, 0 failures, 0 errors, 2 skipped per flavor**. Both flavor lint tasks pass with no
   unfiltered errors; visible warnings remain and existing baseline-filtered findings are retained.
   OSS and RS Android-test sources compile. Instrumentation execution is **NOT RUN**: no ADB or
   acceptance device is connected.
@@ -46,7 +46,21 @@
   multi-process/device gates and production release remain **NOT RUN or NO-GO**. No release is
   published because the handoff requires those gates to pass first.
 
-## Latest bounded implementation evidence — 2026-09-27
+## Latest notification-sink correction — 2026-09-27
+
+- `WorkerNotification` now applies `NotificationSinkPolicy` to success, failure, cancellation and
+  ongoing-progress titles/content/details before the Android notification builder receives them.
+  `AppErrorNotificationManager` sanitizes the session-expiry display name while preserving the
+  raw remote identity only in the capability and re-auth intent extras.
+- Added two pure policy regressions for remote display-name and progress-detail canaries. The
+  complete OSS and RS JVM suites pass at **475 tests per flavor, 0 failures, 0 errors, 2 skips**.
+  Both flavor lint tasks pass with 0 unfiltered errors (visible warnings and baseline-filtered
+  findings remain). Both Android-test source sets compile; instrumentation execution is **NOT RUN**.
+- `:rclone:buildAll :app:assembleOssDebug :app:assembleRsDebug` passes against the exact app pin
+  `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; the APKs remain debug-only and are not release
+  artifacts. Provenance is regenerated after the final commit below.
+
+## Earlier bounded implementation evidence — 2026-09-27 (superseded by the final notification-sink checkpoint above)
 
 - Current-source OSS and RS JVM suites both pass after the bounded WP02/WP10/VCP changes: **439 tests, 0 failures, 0 errors, 2 skipped per flavor** with JDK 21/Gradle 8.13, offline, `-x :rclone:buildAll -x :rclone:checkoutRclone`. The selected diagnostics/VCP/notification policies pass 73 focused tests. OSS instrumentation sources compile successfully; instrumentation execution is **NOT RUN** because no ADB/device is connected.
 - WP02 bounded implementation now includes: structured diagnostic sanitation/aggregation, a bounded single-writer `Log2File` queue, validated native diagnostic argv with required auth values kept opaque, and bounded/redacted notification/report sinks. Focused tests: Log2File 3, NativeDiagnosticCommandPolicy 7, NotificationSinkPolicy 6, StructuredDiagnosticPolicy 5, VCP 46, terminal policy 6; all passed with zero failures. WP02 remains partial pending complete exported-route/hostile-intent/native-fault coverage and full process-lifetime integration.

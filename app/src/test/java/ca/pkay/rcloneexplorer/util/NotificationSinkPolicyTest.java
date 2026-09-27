@@ -29,6 +29,32 @@ public class NotificationSinkPolicyTest {
     }
 
     @Test
+    public void remoteDisplayNamesUseTheSameSafeTitleBoundary() {
+        String safe = NotificationSinkPolicy.sanitizeTitle(
+                "C:\\Users\\Alice\\private.txt password=remote-secret\n" + repeat('r', 300));
+
+        assertTrue(safe.length() <= NotificationSinkPolicy.MAX_TITLE_CHARS);
+        assertFalse(safe.contains("C:\\Users\\Alice"));
+        assertFalse(safe.contains("remote-secret"));
+        assertFalse(safe.contains("\n"));
+        assertTrue(safe.endsWith("…"));
+    }
+
+    @Test
+    public void progressDetailsAreSanitizedBeforeTheNotificationBuilderReceivesThem() {
+        ArrayList<String> raw = new ArrayList<>(Arrays.asList(
+                "checking C:\\Users\\Alice\\private.txt password=detail-secret",
+                repeat('d', NotificationSinkPolicy.MAX_CONTENT_CHARS + 20)));
+
+        ArrayList<String> safe = NotificationSinkPolicy.sanitizeDetails(raw);
+
+        assertFalse(safe.get(0).contains("C:\\Users\\Alice"));
+        assertFalse(safe.get(0).contains("detail-secret"));
+        assertTrue(safe.get(1).length() <= NotificationSinkPolicy.MAX_CONTENT_CHARS);
+        assertTrue(safe.get(1).endsWith("…"));
+    }
+
+    @Test
     public void oversizedRawInputHasBoundedRedactionWorkAndVisibleTruncation() {
         String safe = NotificationSinkPolicy.sanitizeContent(
                 "password=secret-canary " + repeat('x', 100_000));

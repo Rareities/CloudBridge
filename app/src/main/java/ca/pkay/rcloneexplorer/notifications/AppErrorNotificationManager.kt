@@ -17,6 +17,7 @@ import ca.pkay.rcloneexplorer.Activities.MainActivity
 import ca.pkay.rcloneexplorer.AppShortcutsHelper
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.NotificationSinkPolicy
 import ca.pkay.rcloneexplorer.util.PermissionManager
 import ca.pkay.rcloneexplorer.util.ShortcutCapabilities
 import ca.pkay.rcloneexplorer.util.StableNotificationIdentity
@@ -107,9 +108,10 @@ class AppErrorNotificationManager(var mContext: Context) {
             FLAG_IMMUTABLE or FLAG_UPDATE_CURRENT
         )
 
+        val safeRemoteName = NotificationSinkPolicy.sanitizeTitle(remoteName)
         val notificationText = mContext.getString(
             R.string.session_expired_notification_text,
-            remoteName
+            safeRemoteName
         )
 
         val b = NotificationCompat.Builder(mContext, APP_ERROR_CHANNEL_ID)

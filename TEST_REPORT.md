@@ -12,7 +12,8 @@ This section supersedes older snapshot rows below. CloudBridge implementation co
 
 | Scope | Environment / command | Result |
 |---|---|---|
-| CloudBridge OSS + RS JVM | JDK 21.0.8.9, Gradle 8.13, Android SDK 36; `:app:testOssDebugUnitTest :app:testRsDebugUnitTest` | **PASS:** 473 tests per flavor, 0 failures, 0 errors, 2 skipped per flavor. |
+| CloudBridge OSS + RS JVM | JDK 21.0.8.9, Gradle 8.13, Android SDK 36; `:app:testOssDebugUnitTest :app:testRsDebugUnitTest` | **PASS:** 475 tests per flavor, 0 failures, 0 errors, 2 skipped per flavor. |
+| Notification sink hardening | OSS/RS JVM policy regressions; current `WorkerNotification` and session-expiry call paths | **PASS:** caller-provided titles/content/details are bounded and redacted before notification construction; raw remote identity is retained only for re-auth capability/intent use. Device rendering and hostile external-intent coverage are **NOT RUN**. |
 | Android static/source checks | Both flavor lint tasks; OSS/RS Android-test source compilation | **PASS:** lint has no unfiltered errors; instrumentation source compiles. Instrumentation execution is **NOT RUN** without ADB/device. |
 | Native/debug packaging | JDK 17.0.20.1, Go 1.26.8, NDK 29.0.14206865; OSS and RS `assemble*Debug` | **PASS, debug-only:** four native ABIs and both debug flavors assemble. No production signer or release claim. |
 | OSS provenance | `create-debug-provenance.py` against clean final checkout | **PASS:** source-bound manifest records the final app branch checkout (documentation-only descendant of implementation `ddeee759`), rclone `cf3ad40d`, five OSS APKs/four ABIs, and toolchain metadata. `releaseAttestation=false`. |

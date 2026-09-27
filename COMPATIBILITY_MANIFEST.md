@@ -8,11 +8,16 @@ on `Rareities/CloudBridge:codex/luna-implementation`; final branch head
 clarifications. App-native rclone pin
 `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` from `Rareities/rclone:codex/luna-engine-final`
 (branch head `6533d01df0a639583d6910938e2d1fa97628ea7d`, test/documentation-only descendant).
-OSS/RS JVM suites are 473/473 with zero failures/errors and two skips per flavor; both debug
+OSS/RS JVM suites are 475/475 with zero failures/errors and two skips per flavor; both debug
 flavors assemble and both flavor lint tasks pass. The source-bound OSS debug manifest records
 five APKs/four ABIs and toolchain metadata. Instrumentation, Samsung Galaxy S26, live Proton,
 production signing and release acceptance are **NOT RUN/NO-GO**. PR creation is deferred by
 user instruction; no upstream/original PR is created or updated.
+
+The latest bounded notification correction sanitizes every `WorkerNotification` caller-provided
+title/content/detail path and the session-expiry display name; raw remote identity remains only
+in the re-auth capability/intent. This is source/JVM evidence, not device or hostile-intent
+acceptance.
 
 **Current-source follow-up (2026-09-26):** the active dirty development tree is schema v17, not
 v16. The checked 2026-09-25 evidence below remains historical unless explicitly refreshed here;
