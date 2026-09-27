@@ -4,10 +4,11 @@
 
 This section supersedes older snapshot rows below. CloudBridge implementation commit
 `ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to
-`Rareities/CloudBridge:codex/luna-implementation` (prior ledger checkpoint `5b608a2`, followed only
-by documentation-only provenance clarifications); the engine source pin is
+`Rareities/CloudBridge:codex/luna-implementation` (current documentation-only final head
+`36befc3a873e8bd3878eb16fc2cd6d26202ed6f2`); the engine source pin is
 `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` on
-`Rareities/rclone:codex/luna-engine-final` (branch head `4d6404e`, ledger-only descendant).
+`Rareities/rclone:codex/luna-engine-final` (branch head
+`6533d01df0a639583d6910938e2d1fa97628ea7d`, test/documentation-only descendant).
 
 | Scope | Environment / command | Result |
 |---|---|---|
@@ -16,7 +17,7 @@ by documentation-only provenance clarifications); the engine source pin is
 | Native/debug packaging | JDK 17.0.20.1, Go 1.26.8, NDK 29.0.14206865; OSS and RS `assemble*Debug` | **PASS, debug-only:** four native ABIs and both debug flavors assemble. No production signer or release claim. |
 | OSS provenance | `create-debug-provenance.py` against clean final checkout | **PASS:** source-bound manifest records the final app branch checkout (documentation-only descendant of implementation `ddeee759`), rclone `cf3ad40d`, five OSS APKs/four ABIs, and toolchain metadata. `releaseAttestation=false`. |
 | rclone core | Go 1.26.8, `go test -short -mod=readonly` on `backend/mega`, `cmd/bisync`, `fs/sync`, `fs/operations`, `fs/accounting`, `fs/cache` | **PASS** for these scopes. `go vet -mod=readonly ./...` **PASS**. |
-| rclone full suite | `go test -short -mod=readonly ./...` | **NOT PASS:** missing Windows test-server init scripts, missing usable `echo`/in-place POSIX `sort`, and a WebDAV range fixture. These environment-limited failures are retained. |
+| rclone full suite | `go test -short -mod=readonly -count=1 ./...` | **NOT PASS:** this Windows checkout lacks upstream `fstest/testserver/init.d` scripts for FTP, HDFS, SFTP, SIA, SMB, Swift and WebDAV. The test-only portability correction `dc80d83` removes the prior helper/sort false failures; missing fixtures remain environment-limited and are not waived. |
 | Samsung / Proton / release | Galaxy S26 One UI/API/firmware, live Proton disposable area, production signing and hosted CI | **NOT RUN / NO-GO**, not inferred from local passes. |
 
 **Snapshot:** 2026-09-27. **Overall status:** PARTIAL; this is not release acceptance.

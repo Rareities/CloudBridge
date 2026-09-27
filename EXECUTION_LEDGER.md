@@ -28,13 +28,15 @@
   preimages; enforces monotonic phase transitions and terminal immutability; serializes same-path
   instances; uses unique temporary/quarantine names; and never overwrites an older quarantine.
   Focused journal tests pass, including API-23 lint compatibility.
-- Rareities/rclone branch `codex/luna-engine-final` has ledger head `4d6404e`; the immutable
-  engine source used by the app remains pinned at
-  `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. Full `go vet -mod=readonly ./...` passes. Core
-  package reruns pass: `backend/mega`, `cmd/bisync`, `fs/sync`, `fs/operations`, `fs/accounting`
-  and `fs/cache`. The full short suite exits 1 because this Windows host lacks upstream fixture
-  init scripts, a usable `echo`/POSIX `sort` helper setup, and a WebDAV range fixture; these are
-  recorded as environment-limited failures, not passes or production regressions.
+- Rareities/rclone branch `codex/luna-engine-final` has current ledger/test head
+  `6533d01df0a639583d6910938e2d1fa97628ea7d`; the immutable engine source used by the app
+  remains pinned at `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. Full
+  `go vet -mod=readonly ./...` passes. Core package reruns pass: `backend/mega`, `cmd/bisync`,
+  `fs/sync`, `fs/operations`, `fs/accounting` and `fs/cache`. The full short suite exits 1 only
+  because this Windows checkout lacks upstream `fstest/testserver/init.d` scripts for FTP, HDFS,
+  SFTP, SIA, SMB, Swift and WebDAV; the test-only portability correction `dc80d83` removes the
+  prior helper/sort false failures. These missing fixtures remain environment-limited failures,
+  not passes or production regressions.
 - Exact Rareities/go-mega commit `24d3fadc8735096fafbaac00eb3a95a2017033e5` is published on
   `codex/luna-wp01-final`; its standalone short tests/vet and exact rclone `backend/mega` test
   pass. It remains a supporting candidate, not an accepted production dependency: race/live
@@ -52,7 +54,10 @@
 - WP12 VCP binder wait race is fixed with monitor-based connection/disconnection notification, timeout and interrupt preservation; the targeted VCP class passes 46/46. Capability-aware SAF flags and device provider acceptance remain open.
 - WP02 Slice A added `StructuredDiagnosticPolicy`, immutable sanitized `ErrorObject` fields, defensive `StatusObject` JSON ingestion, bounded error collection and omission reporting. Focused `:app:testOssDebugUnitTest --tests ca.pkay.rcloneexplorer.util.StructuredDiagnosticPolicyTest` passed **5 tests, 0 failures**. No worker/sink/Rclone integration was changed in this slice; WP02 remains partial.
 - The current source still has no accepted WP08–WP12 end-to-end/device/provider evidence. Samsung Galaxy S26/One UI/API/firmware and live Proton acceptance remain **NOT RUN**. WP13–WP15 audits keep release **NO-GO** pending production signing/provenance, hosted CI, migration/stress, rollback, device and provider evidence.
-- The app remains on the old clean rclone pin `fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0`; no dependency pin or upstream PR was changed. Any future implementation PR must target `Rareities/CloudBridge` only.
+- The app remains pinned to exact Rareities/rclone source `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`;
+  the fork branch's later `6533d01` test/documentation descendant is not part of the app pin.
+  No dependency pin or upstream PR was changed. Any future implementation PR must target
+  `Rareities/CloudBridge` only.
 
 ## Current-run correction — WP00/WP01 — 2026-09-27 (restarted task)
 
