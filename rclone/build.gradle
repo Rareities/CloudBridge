@@ -23,7 +23,9 @@
 //  To upgrade: change rCloneRef (or rCloneRepoUrl) and rebuild.
 
 
+import groovy.json.JsonOutput
 import java.nio.file.Paths
+import java.net.URI
 
 ext {
     NDK_VERSION = project.properties['de.schuelken.cloudbridge.ndkVersion']
@@ -57,6 +59,25 @@ ext {
     CACHE_PATH = Paths.get(PROJECT_DIR, 'cache').toString()
     GOPATH = Paths.get(CACHE_PATH, 'gopath').toString()
     OUTPUT_BASE_PATH = Paths.get(PROJECT_DIR, '..', 'app', 'lib').toAbsolutePath().toString()
+}
+
+def sanitizeRepositoryUrl = { String repositoryUrl ->
+    try {
+        def uri = new URI(repositoryUrl)
+        if (uri.scheme && uri.host) {
+            return new URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toASCIIString()
+        }
+    } catch (Exception ignored) {
+        // Fall through to safe handling for SCP-style Git URLs and local paths.
+    }
+
+    if (!(repositoryUrl ==~ /^[A-Za-z]:[\\/].*/)) {
+        def scpMatcher = repositoryUrl =~ /^(?:[^@\/]+@)?([^:\/]+):(.+)$/
+        if (scpMatcher.matches()) {
+            return "${scpMatcher[1]}:${scpMatcher[2].replaceAll(/[?#].*$/, '')}"
+        }
+    }
+    return 'configured repository (identifier omitted)'
 }
 
 def findSdkDir() {
@@ -261,7 +282,7 @@ task checkoutRclone(dependsOn: createRcloneModule) {
         def srcDir = Paths.get(CACHE_PATH, 'rclone-src').toFile()
 
         if (!srcDir.exists()) {
-            println "Cloning rclone from ${RCLONE_REPO_URL} (ref: ${RCLONE_REF}) ..."
+            println "Cloning rclone from ${sanitizeRepositoryUrl(RCLONE_REPO_URL)} (ref: ${RCLONE_REF}) ..."
             exec {
                 workingDir CACHE_PATH
                 commandLine 'git', 'clone', '--no-tags', RCLONE_REPO_URL, 'rclone-src'
@@ -281,12 +302,43 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             )
         }
 
-        // Always sync to the requested ref so upgrades work without manual cache clears
-        println "Syncing rclone source to ref: ${RCLONE_REF}"
+        // Refresh only the source refs used by the reachability check. Pruning ensures a
+        // deleted or force-updated remote ref left in the cache cannot validate an old pin.
+        println "Refreshing rclone branches and tags for ${RCLONE_REF}"
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'fetch', 'origin', '--tags'
+            commandLine 'git', 'fetch', '--prune', 'origin',
+                '+refs/heads/*:refs/cloudbridge/origin/heads/*',
+                '+refs/tags/*:refs/cloudbridge/origin/tags/*'
         }
+
+        def pinObjectResult = exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'cat-file', '-e', "${RCLONE_REF}^{commit}"
+            ignoreExitValue = true
+        }
+        if (pinObjectResult.exitValue != 0) {
+            throw new GradleException(
+                "Configured rclone commit ${RCLONE_REF} is absent after refreshing remote refs"
+            )
+        }
+
+        def reachableRefsOutput = new ByteArrayOutputStream()
+        exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'for-each-ref', "--contains=${RCLONE_REF}",
+                '--format=%(refname)', 'refs/cloudbridge/origin'
+            standardOutput = reachableRefsOutput
+        }
+        def reachableRemoteRefs = reachableRefsOutput.toString().readLines()
+            .collect { it.trim() }
+            .findAll { !it.isEmpty() }
+        if (reachableRemoteRefs.isEmpty()) {
+            throw new GradleException(
+                "Configured rclone commit ${RCLONE_REF} is not reachable from any refreshed origin branch or tag"
+            )
+        }
+
         exec {
             workingDir srcDir.absolutePath
             commandLine 'git', 'checkout', RCLONE_REF
@@ -306,7 +358,24 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             )
         }
         def version = getSourceVersion()
-        println "rclone source: repository=${resolvedOrigin} commit=${resolvedCommit} version=${version}"
+        def safeRepository = sanitizeRepositoryUrl(resolvedOrigin)
+        def provenanceFile = project.file("${project.buildDir}/rclone-provenance.json")
+        provenanceFile.parentFile.mkdirs()
+        def provenance = [
+            schemaVersion: 1,
+            artifactType: 'cloudbridge-rclone-source-provenance',
+            repository: safeRepository,
+            requestedCommit: RCLONE_REF.toLowerCase(java.util.Locale.ROOT),
+            resolvedCommit: resolvedCommit,
+            sourceVersion: version,
+            rclonePinVerifiedAgainstRefreshedRemoteRefs: true,
+            reachableRemoteRefCount: reachableRemoteRefs.size(),
+            reachableRemoteRefs: reachableRemoteRefs,
+            scope: 'Source checkout provenance only; not an APK build or release attestation.'
+        ]
+        provenanceFile.text = JsonOutput.prettyPrint(JsonOutput.toJson(provenance)) + System.lineSeparator()
+        println "rclone source: repository=${safeRepository} commit=${resolvedCommit} version=${version}"
+        println "rclone provenance: ${provenanceFile.absolutePath}"
     }
 }
 

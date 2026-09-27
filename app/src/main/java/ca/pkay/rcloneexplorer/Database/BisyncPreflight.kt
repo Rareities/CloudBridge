@@ -338,6 +338,10 @@ object BisyncPreflightPolicy {
 
 /** Native lsjson output is accepted only after confirmed exit, full drain, bounded size and strict parse. */
 object BisyncListingValidator {
+    private val NATIVE_MOD_TIME_PATTERN = Regex(
+        "^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\\.([0-9]{0,8}[1-9]))?(Z|([+-])([0-9]{2}):([0-9]{2}))$"
+    )
+
     @JvmStatic
     fun parseRootStat(
         json: String,
@@ -393,9 +397,12 @@ object BisyncListingValidator {
                 }
                 val path = entry.getString("Path")
                 val name = entry.getString("Name")
-                entry.getBoolean("IsDir")
-                entry.getLong("Size")
-                entry.getString("ModTime")
+                val isDirectory = entry.getBoolean("IsDir")
+                val size = (entry.opt("Size") as Number).toString().toLongOrNull()
+                if (size == null || (size < 0L && !(isDirectory && size == -1L)) ||
+                    !isNativeModTime(entry.getString("ModTime"))) {
+                    return BisyncListingEvidence(false, false, 0, BisyncPreflightReason.LISTING_INCOMPLETE)
+                }
                 val normalizedPath = Normalizer.normalize(path, Normalizer.Form.NFC).lowercase(Locale.ROOT)
                 if (path.isBlank() || path.contains('\u0000') || name.isBlank() || name.contains('\u0000') ||
                     name == "." || name == ".." ||
@@ -409,6 +416,35 @@ object BisyncListingValidator {
         } catch (_: JSONException) {
             BisyncListingEvidence(false, false, 0, BisyncPreflightReason.LISTING_INCOMPLETE)
         }
+    }
+
+    /** Validates Go time.Time JSON output (RFC3339Nano), including its canonical spelling. */
+    private fun isNativeModTime(value: String): Boolean {
+        val match = NATIVE_MOD_TIME_PATTERN.matchEntire(value) ?: return false
+        val year = match.groupValues[1].toInt()
+        val month = match.groupValues[2].toInt()
+        val day = match.groupValues[3].toInt()
+        val hour = match.groupValues[4].toInt()
+        val minute = match.groupValues[5].toInt()
+        val second = match.groupValues[6].toInt()
+        if (month !in 1..12 || hour !in 0..23 || minute !in 0..59 || second !in 0..59) return false
+        val leapYear = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+        val daysInMonth = when (month) {
+            2 -> if (leapYear) 29 else 28
+            4, 6, 9, 11 -> 30
+            else -> 31
+        }
+        if (day !in 1..daysInMonth) return false
+
+        // Go's `Z07:00` layout emits Z for a zero offset. RFC3339Nano also trims
+        // trailing zeroes from fractional seconds, as enforced by the pattern.
+        if (match.groupValues[8] != "Z") {
+            val offsetHour = match.groupValues[10].toInt()
+            val offsetMinute = match.groupValues[11].toInt()
+            if (offsetHour !in 0..23 || offsetMinute !in 0..59 ||
+                (offsetHour == 0 && offsetMinute == 0)) return false
+        }
+        return true
     }
 
     private fun safeRelativePath(path: String): Boolean = path.split('/', '\\').none { it == ".." || it == "." || it.isEmpty() }

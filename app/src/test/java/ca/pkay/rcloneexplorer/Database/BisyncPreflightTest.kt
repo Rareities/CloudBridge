@@ -52,6 +52,51 @@ class BisyncPreflightTest {
     }
 
     @Test
+    fun recursiveListingRejectsNegativeAndFractionalFileSizes() {
+        assertFalse(BisyncListingValidator.parseRecursiveList(listing(size = "-1"), true, false).complete)
+        assertFalse(BisyncListingValidator.parseRecursiveList(listing(size = "1.5"), true, false).complete)
+
+        // Native lsjson uses -1 as the directory size sentinel.
+        assertTrue(
+            BisyncListingValidator.parseRecursiveList(
+                listing(isDirectory = true, size = "-1"), true, false
+            ).complete
+        )
+    }
+
+    @Test
+    fun recursiveListingRequiresValidCanonicalNativeTimestamps() {
+        val invalidTimestamps = listOf(
+            "not-a-timestamp",
+            "2026-02-30T00:00:00Z",
+            "2026-01-01T00:00:00.100Z",
+            "2026-01-01T00:00:00+00:00",
+            "2026-01-01T00:00:60Z",
+            "2026-01-01T00:00:00.1234567890Z"
+        )
+        invalidTimestamps.forEachIndexed { index, timestamp ->
+            assertFalse(
+                "Accepted invalid timestamp: $timestamp",
+                BisyncListingValidator.parseRecursiveList(
+                    listing(path = "invalid-$index", modTime = timestamp), true, false
+                ).complete
+            )
+        }
+
+        val validTimestamps = listOf(
+            "2026-01-01T00:00:00Z",
+            "2026-01-01T23:59:59.123456789+13:00"
+        )
+        validTimestamps.forEachIndexed { index, timestamp ->
+            val parsed = BisyncListingValidator.parseRecursiveList(
+                listing(path = "valid-$index", modTime = timestamp), true, false
+            )
+            assertTrue("Rejected valid timestamp: $timestamp", parsed.complete)
+            assertEquals(1, parsed.itemCount)
+        }
+    }
+
+    @Test
     fun selectedFiltersAreBoundedAndValidatedWithoutChangingTheirRules() {
         val parsed = BisyncFilterParser.parse("+/vault/**\r\n-*.tmp\n")
         assertTrue(parsed.valid)
@@ -277,6 +322,16 @@ class BisyncPreflightTest {
         maxDeletePercent = maxDeletePercent,
         maxDeleteCount = maxDeleteCount
     )
+
+    private fun listing(
+        path: String = "a",
+        isDirectory: Boolean = false,
+        size: String = "1",
+        modTime: String = "2026-01-01T00:00:00Z"
+    ): String {
+        val name = path.substringAfterLast('/')
+        return """[{"Path":"$path","Name":"$name","IsDir":$isDirectory,"Size":$size,"ModTime":"$modTime"}]"""
+    }
 
     private fun hex(char: Char) = char.toString().repeat(64)
     private fun commit(char: Char) = char.toString().repeat(40)

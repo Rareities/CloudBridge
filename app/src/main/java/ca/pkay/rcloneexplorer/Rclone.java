@@ -87,6 +87,7 @@ import ca.pkay.rcloneexplorer.util.ConfigRevisionPolicy;
 import ca.pkay.rcloneexplorer.util.ConfigRevisionStore;
 import ca.pkay.rcloneexplorer.util.ConfigFileRestorer;
 import ca.pkay.rcloneexplorer.util.ConfigResetRecoveryPolicy;
+import ca.pkay.rcloneexplorer.util.ConfigEncryptionProbePolicy;
 import ca.pkay.rcloneexplorer.util.BackupArchiveStager;
 import ca.pkay.rcloneexplorer.util.ConfigMutationCommandPolicy;
 import ca.pkay.rcloneexplorer.util.RemoteDeleteTargetPolicy;
@@ -2734,21 +2735,34 @@ public class Rclone {
         }
     }
 
+    public ConfigEncryptionProbePolicy.Status getConfigEncryptionStatus() {
+        return probeConfigEncryption(isConfigFileCreated());
+    }
+
+    /** Compatibility adapter for callers that need a conservative yes/no password gate. */
     public Boolean isConfigEncrypted() {
-        if (!isConfigFileCreated()) {
-            return false;
-        }
+        boolean configFileExists = isConfigFileCreated();
+        return ConfigEncryptionProbePolicy.shouldTreatAsEncrypted(configFileExists,
+                probeConfigEncryption(configFileExists));
+    }
+
+    private ConfigEncryptionProbePolicy.Status probeConfigEncryption(boolean configFileExists) {
+        if (!configFileExists) return ConfigEncryptionProbePolicy.Status.UNKNOWN;
         String[] command = createCommand( "--ask-password=false", "listremotes");
+        AtomicBoolean passwordFailure = new AtomicBoolean(false);
         try {
             CapturedText result = runBoundedTextCommand(command, getRcloneEnv(), "list-remotes",
-                    MAX_CONFIG_JSON_CHARS, METADATA_COMMAND_TIMEOUT_MILLIS);
-            if (result.outcome.getState() != NativeExecutionHandle.TerminalState.FAILED) {
-                return false;
-            }
-            return result.outcome.getExitCode() != null && result.outcome.getExitCode() != 0;
+                    MAX_CONFIG_JSON_CHARS, METADATA_COMMAND_TIMEOUT_MILLIS,
+                    line -> {
+                        if (ConfigEncryptionProbePolicy.isRecognizedPasswordFailureLine(line)) {
+                            passwordFailure.set(true);
+                        }
+                    });
+            return ConfigEncryptionProbePolicy.classify(result.outcome.getState(),
+                    result.outcome.getExitCode(), passwordFailure.get());
         } catch (IOException e) {
             FLog.e(TAG, "Unable to inspect config encryption state", e);
-            return false;
+            return ConfigEncryptionProbePolicy.Status.UNKNOWN;
         }
     }
 

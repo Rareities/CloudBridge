@@ -511,6 +511,8 @@
     <string name="task_direction_unsupported_saved_value">Unsupported saved transfer mode (%1$d) — choose a replacement to save</string>
     <string name="task_direction_unsupported_description">Saved transfer mode %1$d is legacy or unknown to this editor. Saving with this placeholder preserves it; choosing a supported mode explicitly replaces it.</string>
     <string name="bisync_preview_menu_action">Review Bisync preview</string>
+    <string name="bisync_profile_menu_action">Bisync profile editor</string>
+    <string name="bisync_profile_title">Bisync profile</string>
     <string name="bisync_preview_title">Bisync preview</string>
     <string name="bisync_preview_disclaimer">Read-only review only. A preview can become stale as local or remote contents change. It never authorizes a sync. This screen cannot initialize, recover, write, delete, or apply changes.</string>
     <string name="bisync_preview_comparison_label">Compare files by</string>

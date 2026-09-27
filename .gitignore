@@ -81,3 +81,9 @@ package-lock.json
 
 # Local ZCode IDE state
 .zcode/
+
+# Codex task-local build/test caches and evidence (never publish)
+work/
+.android/
+.android-user/
+__pycache__/

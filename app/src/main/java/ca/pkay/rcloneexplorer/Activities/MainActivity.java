@@ -530,6 +530,7 @@ public class MainActivity extends AppCompatActivity
         switch (id) {
             case R.id.nav_remotes:
             case R.id.nav_tasks:
+            case R.id.nav_bisync_profiles:
             case R.id.nav_trigger:
             case R.id.nav_logs:
             case R.id.nav_permissions:
@@ -554,6 +555,9 @@ public class MainActivity extends AppCompatActivity
                 break;
             case R.id.nav_tasks:
                 startTasksFragment();
+                break;
+            case R.id.nav_bisync_profiles:
+                startActivity(new Intent(this, BisyncProfileActivity.class));
                 break;
             case R.id.nav_trigger:
                 startTriggerFragment();
