@@ -96,6 +96,13 @@ class FilterActivity : AppCompatActivity() {
         return true
     }
 
+    override fun onDestroy() {
+        if (::dbHandler.isInitialized) {
+            dbHandler.close()
+        }
+        super.onDestroy()
+    }
+
     private fun persistFilterChanges() {
         val updatedFilter = getFilterValues(existingFilter!!.id)
         if (updatedFilter != null) {

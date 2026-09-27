@@ -55,6 +55,18 @@ public class TriggerService extends Service {
         this.context = c;
     }
 
+    /**
+     * Releases the database helper used by the short-lived scheduling facade. The Android
+     * service instance also calls this from {@link #onDestroy()}; callers that construct the
+     * facade with {@link #TriggerService(Context)} must close it explicitly.
+     */
+    public void close() {
+        if (dbHandler != null) {
+            dbHandler.close();
+            dbHandler = null;
+        }
+    }
+
     public void queueTrigger(){
         synchronized (TriggerStateLock.MONITOR) {
             java.util.List<Trigger> triggers = dbHandler.getAllTrigger();
@@ -249,13 +261,16 @@ public class TriggerService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         createNotification();
         if (intent == null) {
+            close();
             stopForeground(true);
             return Service.START_NOT_STICKY;
         }
         long id = intent.getLongExtra(TRIGGER_ID, -1);
+        close();
         this.dbHandler = new DatabaseHandler(getBaseContext());
         this.context = getBaseContext();
         if (id <= 0) {
+            close();
             stopForeground(true);
             return Service.START_NOT_STICKY;
         }
@@ -309,6 +324,12 @@ public class TriggerService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    @Override
+    public void onDestroy() {
+        close();
+        super.onDestroy();
     }
 
     private void createNotification(){

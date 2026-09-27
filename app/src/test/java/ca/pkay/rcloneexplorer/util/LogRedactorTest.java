@@ -58,6 +58,18 @@ public class LogRedactorTest {
     }
 
     @Test
+    public void redactsAbsolutePathsThatContainSpaces() {
+        String source = "POSIX /storage/emulated/0/Private Vault/Notes.txt\n"
+                + "Windows C:\\Users\\Private Vault\\Notes.txt";
+
+        String redacted = LogRedactor.redact(source);
+
+        assertFalse(redacted.contains("/storage/emulated/0/Private Vault/Notes.txt"));
+        assertFalse(redacted.contains("C:\\Users\\Private Vault\\Notes.txt"));
+        assertTrue(redacted.contains("***redacted-path***"));
+    }
+
+    @Test
     public void redactsSignedObjectStoreQueryCredentials() {
         String source = "https://bucket.example.invalid/file?X-Amz-Signature=aws-signature-canary"
                 + "&X-Amz-Credential=aws-credential-canary&part=visible"

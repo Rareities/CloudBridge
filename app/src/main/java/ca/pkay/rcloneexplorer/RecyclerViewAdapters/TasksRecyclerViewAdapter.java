@@ -36,7 +36,9 @@ import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject;
 import ca.pkay.rcloneexplorer.Items.Task;
+import ca.pkay.rcloneexplorer.Items.Trigger;
 import ca.pkay.rcloneexplorer.R;
+import ca.pkay.rcloneexplorer.Services.TriggerService;
 import ca.pkay.rcloneexplorer.util.ShortcutCapabilities;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
 import es.dmoral.toasty.Toasty;
@@ -161,8 +163,18 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
     }
 
     private void copyTask(Task task) {
-        task.setTitle(task.getTitle() + context.getString(R.string.task_copy_suffix));
-        Task newTask = (new DatabaseHandler(context)).createTask(task, false);
+        // Do not mutate the object currently owned by the adapter. The original object is also
+        // the row rendered in the list; mutating it before insertion makes the UI show the copy's
+        // title for the original task until the next database reload.
+        Task copy = task.copy(-1L);
+        copy.setTitle(task.getTitle() + context.getString(R.string.task_copy_suffix));
+        DatabaseHandler db = new DatabaseHandler(context);
+        Task newTask;
+        try {
+            newTask = db.createTask(copy, false);
+        } finally {
+            db.close();
+        }
         tasks.add(newTask);
         notifyItemInserted(tasks.size() - 1);
     }
@@ -207,7 +219,26 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
                     copyTask(task);
                     break;
                 case R.id.action_delete_task:
-                    new DatabaseHandler(context).deleteTask(task.getId());
+                    List<Long> triggerIds = new ArrayList<>();
+                    DatabaseHandler db = new DatabaseHandler(context);
+                    try {
+                        for (Trigger trigger : db.getAllTrigger()) {
+                            if (trigger.getTriggerTarget() == task.getId()) {
+                                triggerIds.add(trigger.getId());
+                            }
+                        }
+                        db.deleteTask(task.getId());
+                    } finally {
+                        db.close();
+                    }
+                    TriggerService triggerService = new TriggerService(context);
+                    try {
+                        for (Long triggerId : triggerIds) {
+                            triggerService.cancelTrigger(triggerId);
+                        }
+                    } finally {
+                        triggerService.close();
+                    }
                     notifyDataSetChanged();
                     removeItem(task);
                     break;

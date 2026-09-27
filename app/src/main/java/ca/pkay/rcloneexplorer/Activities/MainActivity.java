@@ -227,7 +227,11 @@ public class MainActivity extends AppCompatActivity
         pinRemotesToDrawer();
         updatePermissionFragmentVisibility();
         TriggerService triggerService = new TriggerService(context);
-        triggerService.queueTrigger();
+        try {
+            triggerService.queueTrigger();
+        } finally {
+            triggerService.close();
+        }
 
         // Schedule Session Guardian Worker for proactive session health monitoring
         ca.pkay.rcloneexplorer.workmanager.SessionGuardianScheduler.schedule(this);
@@ -371,8 +375,9 @@ public class MainActivity extends AppCompatActivity
             return;
         }
 
+        TriggerService triggerService = new TriggerService(this);
         try {
-            boolean allSchedulesReconciled = new TriggerService(this).queueScheduleTriggers();
+            boolean allSchedulesReconciled = triggerService.queueScheduleTriggers();
             // Permission can be revoked while AlarmManager calls are in progress. Do not
             // clear the retry marker if the reconciliation became incomplete mid-pass.
             if (!TriggerPermissionRecoveryPolicy.canClearPending(
@@ -385,6 +390,8 @@ public class MainActivity extends AppCompatActivity
         } catch (RuntimeException e) {
             // Keep the durable marker so the next foreground resume retries idempotently.
             FLog.e(TAG, "Scheduled-trigger reconciliation failed after permission was restored", e);
+        } finally {
+            triggerService.close();
         }
     }
 

@@ -22,7 +22,14 @@ class ProfileRepository(context: Context) {
         }
     }
 
-    fun reconcileLegacyTasks(): Int = DatabaseHandler(context).reconcileLegacyProfiles()
+    fun reconcileLegacyTasks(): Int {
+        val handler = DatabaseHandler(context)
+        return try {
+            handler.reconcileLegacyProfiles()
+        } finally {
+            handler.close()
+        }
+    }
 
     fun getForLegacyTask(taskId: Long): ProfileRecord? {
         val handler = DatabaseHandler(context)

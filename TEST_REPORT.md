@@ -1,6 +1,41 @@
 # CloudBridge + Rareities/rclone test report
 
-## Current committed verification — 2026-09-27
+## Current dirty-source verification — 2026-09-27
+
+This is the latest local checkpoint and intentionally has no new commit yet because the
+user deferred commits/PRs until the coding, fixes, documentation and full package review
+are complete. It supersedes the older committed snapshot below for current-source counts.
+
+| Scope | Environment / command | Result |
+|---|---|---|
+| CloudBridge OSS + RS JVM | Temurin JDK 21.0.8.9, Gradle 8.13, Android SDK 36; `:app:testOssDebugUnitTest :app:testRsDebugUnitTest --offline --no-daemon --max-workers=2 -x :rclone:buildAll -x :rclone:checkoutRclone` | **PASS:** 487 tests per flavor, 0 failures, 0 errors, 2 skipped per flavor. |
+| Android static/source checks | `:app:lintOssDebug :app:lintRsDebug :app:compileOssDebugAndroidTestSources :app:compileRsDebugAndroidTestSources` | **PASS:** no unfiltered severity errors; warnings remain and baseline-filtered findings are retained. Android-test source compilation passes; instrumentation execution is **NOT RUN**. |
+| Native/debug packaging | Temurin JDK 21.0.8.9, Go 1.26.8, Gradle 8.13, SDK 36, NDK 29.0.14206865; `:rclone:buildAll :app:assembleOssDebug :app:assembleRsDebug --offline --no-daemon --max-workers=2 -x :rclone:checkoutRclone` | **PASS, debug-only:** both flavors assemble all four ABIs plus universal APK. Current universal OSS SHA-256 `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903`, 134902028 bytes; RS SHA-256 `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338`, 134902003 bytes. |
+| rclone independent core/vet | Go 1.26.8 Windows/amd64, `GOWORK=off`, `GOPROXY=off`, `GOSUMDB=off`, `CGO_ENABLED=0`; `go test -short -mod=readonly -count=1 ./backend/mega ./cmd/bisync ./fs/sync ./fs/operations ./fs/accounting ./fs/cache`; `go vet -mod=readonly ./...` | **PASS:** all six focused packages and the full vet scope passed. |
+| rclone full short suite | Go 1.26.8 Windows/amd64; `go test -short -mod=readonly -count=1 ./...` | **NOT PASS:** FTP, HDFS, SFTP, SIA, SMB, Swift and WebDAV test-server init scripts are unavailable in this checkout; the WebDAV range harness also ignored the requested range. These cases remain explicit environment/harness blockers, not waivers or passes. |
+| App-to-engine provenance | App immutable pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; local source is dirty | Pin is unchanged and verified locally. Clean-tree source-bound provenance is **PENDING** the final commit; debug APK hashes do not establish release provenance. |
+| Samsung / Proton / release | Galaxy S26 One UI/API/firmware, live Proton disposable area, production signing and hosted CI | **NOT RUN / NO-GO**, not inferred from local passes. |
+
+### Current debug artifact hashes
+
+These artifacts were produced from the intentionally dirty, uncommitted source checkpoint.
+They are useful for local inspection only; they are not signed release artifacts and have no
+clean-tree provenance manifest.
+
+| Flavor | ABI/artifact | Bytes | SHA-256 |
+|---|---|---:|---|
+| OSS | arm64-v8a | 41010174 | `086A4CE90FD6D40EDFF2395C030FDB91E80DC5965BB1BB4A24F3E7FFAF3ACCC0` |
+| OSS | armeabi-v7a | 42504636 | `F2BC953871B6379F9AF79A444DF25C1B1A355A3F0C37A1D41B5CCDB2C8036067` |
+| OSS | universal | 134902028 | `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903` |
+| OSS | x86_64 | 44522678 | `5896F7EB7E24C2B6FF035D6CEF5128CCACB089729FC7CE5C5183F3C4517A19A6` |
+| OSS | x86 | 42653153 | `EA980E4628D84E9BAA1992B3B1023391674454F0C94C138C3EEC8E6310C1769C` |
+| RS | arm64-v8a | 41010150 | `7190F7349B1ACB32C2091086C552BDC44B35ACF509DA999FF2B2AAC2BC2BE068` |
+| RS | armeabi-v7a | 42504613 | `666F19FC4BE22982424ECE1E4C7B122C26F535D78D02DE483B35C83F9599F01D` |
+| RS | universal | 134902003 | `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338` |
+| RS | x86_64 | 44522649 | `52C869B31EEA9D8F68352EC8958E50100A9273BCCCFA248E01CE4581A25BE251` |
+| RS | x86 | 42653138 | `6888149744E6DC82A4649F2C0AE0815D5A707AA5AA7E8A957529E4DE751B5F0E` |
+
+## Previous committed verification — 2026-09-27
 
 This section supersedes older snapshot rows below. CloudBridge implementation commit
 `ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to
@@ -18,8 +53,8 @@ the engine source pin is
 | Android static/source checks | Both flavor lint tasks; OSS/RS Android-test source compilation | **PASS:** lint has no unfiltered errors; instrumentation source compiles. Instrumentation execution is **NOT RUN** without ADB/device. |
 | Native/debug packaging | JDK 17.0.20.1, Go 1.26.8, NDK 29.0.14206865; OSS and RS `assemble*Debug` | **PASS, debug-only:** four native ABIs and both debug flavors assemble. No production signer or release claim. |
 | OSS provenance | `create-debug-provenance.py` against clean final checkout | **PASS:** source-bound manifest records the final app branch checkout (documentation-only descendant of implementation `ddeee759`), rclone `cf3ad40d`, five OSS APKs/four ABIs, and toolchain metadata. `releaseAttestation=false`. |
-| rclone core | Go 1.26.8, `go test -short -mod=readonly` on `backend/mega`, `cmd/bisync`, `fs/sync`, `fs/operations`, `fs/accounting`, `fs/cache` | **PASS** for these scopes. `go vet -mod=readonly ./...` **PASS**. |
-| rclone full suite | `go test -short -mod=readonly -count=1 ./...` | **NOT PASS:** this Windows checkout lacks upstream `fstest/testserver/init.d` scripts for FTP, HDFS, SFTP, SIA, SMB, Swift and WebDAV. The test-only portability correction `dc80d83` removes the prior helper/sort false failures; missing fixtures remain environment-limited and are not waived. |
+| rclone core | Go 1.26.8, `go test -short -mod=readonly -count=1` on `backend/mega`, `cmd/bisync`, `fs/sync`, `fs/operations`, `fs/accounting`, `fs/cache` | **PASS** for these scopes. `go vet -mod=readonly ./...` **PASS**. |
+| rclone full suite | `go test -short -mod=readonly -count=1 ./...` | **NOT PASS:** this Windows checkout lacks upstream `fstest/testserver/init.d` scripts for FTP, HDFS, SFTP, SIA, SMB, Swift and WebDAV; WebDAV also reports a range-behavior failure because its harness server ignored the requested range. The test-only portability correction `dc80d83` removes the prior helper/sort false failures; unavailable integration cases remain explicit and are not waived. |
 | Samsung / Proton / release | Galaxy S26 One UI/API/firmware, live Proton disposable area, production signing and hosted CI | **NOT RUN / NO-GO**, not inferred from local passes. |
 
 **Snapshot:** 2026-09-27. **Overall status:** PARTIAL; this is not release acceptance.

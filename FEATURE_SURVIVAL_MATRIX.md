@@ -1,11 +1,13 @@
 # CloudBridge feature-survival matrix
 
-**Current implementation checkpoint — 2026-09-27:** CloudBridge implementation commit
-`ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to the Rareities fork (ledger head
-`5b608a2`; later branch commits are documentation-only provenance clarifications) and pins
-Rareities/rclone `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. OSS/RS JVM suites pass 473 tests
-per flavor with zero failures/errors and two skips; both debug flavors package and lint. The
-matrix remains a survival/traceability record, not proof of feature acceptance: first-class
+**Current dirty-source checkpoint — 2026-09-27:** The latest uncommitted CloudBridge source
+still pins Rareities/rclone exactly at `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` and has
+not been committed or pushed. OSS/RS JVM suites pass **487 tests per flavor** with zero
+failures/errors and two skips; both debug flavors package and lint, and Android-test sources
+compile. The current APKs are debug-only; clean provenance, instrumentation, Samsung Galaxy
+S26/One UI/API/firmware, live Proton, migration, multi-process stress, signing and release
+gates remain **NOT RUN/NO-GO**. The matrix remains a survival/traceability record, not proof
+of feature acceptance: first-class
 Bisync mutation/recovery, scheduling/device behavior, Obsidian lifecycle, live Proton, migration,
 multi-process stress and production signing remain partial or **NOT RUN**. No release claim is
 made and PR creation is deferred until the final user-authorized phase.

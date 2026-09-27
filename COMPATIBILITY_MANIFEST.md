@@ -2,7 +2,19 @@
 
 **Status:** engineering snapshot only, not a supported-release contract. **Checked:** 2026-09-27. Refresh source, tests, CI, PRs, dependencies, and acceptance evidence before app-pin promotion or release. Source registration and declared SDK/ABI values do not alone establish runtime compatibility.
 
-**Current implementation identity:** CloudBridge code commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
+**Current dirty-source verification (2026-09-27):** The worktree contains the final uncommitted
+application fixes and documentation updates. Both OSS/RS JVM suites pass **487/487 tests per
+flavor, 0 failures, 0 errors, 2 skips**; both debug flavors assemble, both flavor lint tasks
+have no unfiltered severity errors, and Android-test sources compile. Current universal debug
+APK hashes are OSS `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903`
+(134902028 bytes) and RS
+`C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338` (134902003 bytes).
+They are dirty-source, debug-only artifacts; the clean-tree provenance manifest, signer
+continuity, instrumentation, Galaxy S26/One UI/API/firmware, live Proton, hosted CI, race /
+multi-process and release gates remain **PENDING/NOT RUN/NO-GO**. No new commit, push or PR has
+been made in this checkpoint.
+
+**Previous committed implementation identity:** CloudBridge code commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
 on `Rareities/CloudBridge:codex/luna-implementation`; final branch head
 `236b6a3bb48a485dcddb60880db352936d15883d` is the final notification-sink implementation
 checkpoint; later ledger-only commits may advance the branch. The generated source-bound

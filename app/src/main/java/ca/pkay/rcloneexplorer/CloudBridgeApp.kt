@@ -33,7 +33,12 @@ class CloudBridgeApp : Application(), Configuration.Provider {
         // process from a previous app lifetime cannot be proven stopped, so active rows become
         // conservative recovery state rather than being silently retried.
         try {
-            DatabaseHandler(this).reconcileLegacyProfiles()
+            val database = DatabaseHandler(this)
+            try {
+                database.reconcileLegacyProfiles()
+            } finally {
+                database.close()
+            }
             RunRepository(this).reconcileInterruptedRuns()
         } catch (e: Exception) {
             FLog.e("CloudBridgeApp", "Durable run-state reconciliation failed", e)

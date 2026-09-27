@@ -206,13 +206,19 @@ class DatabaseHandler(context: Context?) :
                 null,
                 sortOrder
             )
-            val results: MutableList<Task> = ArrayList()
-            while (cursor.moveToNext()) {
-                results.add(taskFromCursor(cursor))
+            return try {
+                val results: MutableList<Task> = ArrayList()
+                while (cursor.moveToNext()) {
+                    results.add(taskFromCursor(cursor))
+                }
+                results
+            } finally {
+                try {
+                    cursor.close()
+                } finally {
+                    db.close()
+                }
             }
-            cursor.close()
-            db.close()
-            return results
         }
 
     fun getTask(id: Long): Task? {
@@ -229,15 +235,19 @@ class DatabaseHandler(context: Context?) :
             null,
             sortOrder
         )
-        val results: MutableList<Task> = ArrayList()
-        while (cursor.moveToNext()) {
-            results.add(taskFromCursor(cursor))
+        return try {
+            val results: MutableList<Task> = ArrayList()
+            while (cursor.moveToNext()) {
+                results.add(taskFromCursor(cursor))
+            }
+            if (results.size == 0) null else results[0]
+        } finally {
+            try {
+                cursor.close()
+            } finally {
+                db.close()
+            }
         }
-        cursor.close()
-        db.close()
-        return if (results.size == 0) {
-            null
-        } else results[0]
     }
 
     /** Read a task using a caller-owned transaction so the profile/run snapshot cannot race an edit. */
@@ -352,22 +362,51 @@ class DatabaseHandler(context: Context?) :
     }
 
     fun deleteTask(id: Long): Int {
-        val db = writableDatabase
-        var retcode = 0
-        db.beginTransaction()
-        try {
-            val selection = Task.COLUMN_NAME_ID + " = ?"
-            val selectionArgs = arrayOf(id.toString())
-            retcode = db.delete(Task.TABLE_NAME, selection, selectionArgs)
-            if (retcode > 0) {
-                ProfileStore.retireLegacyTask(db, id)
+        synchronized(TriggerStateLock.MONITOR) {
+            val db = writableDatabase
+            var retcode = 0
+            db.beginTransaction()
+            try {
+                val selection = Task.COLUMN_NAME_ID + " = ?"
+                val selectionArgs = arrayOf(id.toString())
+                retcode = db.delete(Task.TABLE_NAME, selection, selectionArgs)
+                if (retcode > 0) {
+                    // Delete persisted schedules together with their target so a later scheduler
+                    // reconciliation cannot keep a dead task alive.
+                    db.delete(
+                        Trigger.TABLE_NAME,
+                        Trigger.COLUMN_NAME_TARGET + " = ?",
+                        selectionArgs
+                    )
+
+                    // A deleted task cannot be a follow-up target. Clear both references before
+                    // refreshing the affected durable profile snapshots.
+                    val affectedTasks = tasksFollowing(db, id)
+                    val unlink = ContentValues().apply {
+                        putNull(Task.COLUMN_NAME_ONFAIL_FOLLOWUP)
+                        putNull(Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP)
+                    }
+                    db.update(
+                        Task.TABLE_NAME,
+                        unlink,
+                        Task.COLUMN_NAME_ONFAIL_FOLLOWUP + " = ? OR " +
+                            Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP + " = ?",
+                        arrayOf(id.toString(), id.toString())
+                    )
+                    for (task in affectedTasks) {
+                        if (task.onFailFollowup == id) task.onFailFollowup = null
+                        if (task.onSuccessFollowup == id) task.onSuccessFollowup = null
+                    }
+                    refreshProfilesForTasks(db, affectedTasks)
+                    ProfileStore.retireLegacyTask(db, id)
+                }
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
+                db.close()
             }
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-            db.close()
+            return retcode
         }
-        return retcode
     }
 
     private fun getTaskContentValues(task: Task): ContentValues {
@@ -407,13 +446,19 @@ class DatabaseHandler(context: Context?) :
                     null,
                     sortOrder
             )
-            val results: MutableList<Trigger> = ArrayList()
-            while (cursor.moveToNext()) {
-                results.add(triggerFromCursor(cursor))
+            return try {
+                val results: MutableList<Trigger> = ArrayList()
+                while (cursor.moveToNext()) {
+                    results.add(triggerFromCursor(cursor))
+                }
+                results
+            } finally {
+                try {
+                    cursor.close()
+                } finally {
+                    db.close()
+                }
             }
-            cursor.close()
-            db.close()
-            return results
         }
 
     fun getTrigger(id: Long): Trigger? {
@@ -431,15 +476,19 @@ class DatabaseHandler(context: Context?) :
                 null,
                 sortOrder
         )
-        val results: MutableList<Trigger> = ArrayList()
-        while (cursor.moveToNext()) {
-            results.add(triggerFromCursor(cursor))
+        return try {
+            val results: MutableList<Trigger> = ArrayList()
+            while (cursor.moveToNext()) {
+                results.add(triggerFromCursor(cursor))
+            }
+            if (results.size == 0) null else results[0]
+        } finally {
+            try {
+                cursor.close()
+            } finally {
+                db.close()
+            }
         }
-        cursor.close()
-        db.close()
-        return if (results.size == 0) {
-            null
-        } else results[0]
     }
 
     fun createTrigger(triggerToStore: Trigger, withId: Boolean = false): Trigger {
@@ -547,13 +596,19 @@ class DatabaseHandler(context: Context?) :
                     null,
                     sortOrder
             )
-            val results: MutableList<Filter> = ArrayList()
-            while (cursor.moveToNext()) {
-                results.add(filterFromCursor(cursor))
+            return try {
+                val results: MutableList<Filter> = ArrayList()
+                while (cursor.moveToNext()) {
+                    results.add(filterFromCursor(cursor))
+                }
+                results
+            } finally {
+                try {
+                    cursor.close()
+                } finally {
+                    db.close()
+                }
             }
-            cursor.close()
-            db.close()
-            return results
         }
 
     fun getFilter(id: Long): Filter? {
@@ -571,15 +626,19 @@ class DatabaseHandler(context: Context?) :
                 null,
                 sortOrder
         )
-        val results: MutableList<Filter> = ArrayList()
-        while (cursor.moveToNext()) {
-            results.add(filterFromCursor(cursor))
+        return try {
+            val results: MutableList<Filter> = ArrayList()
+            while (cursor.moveToNext()) {
+                results.add(filterFromCursor(cursor))
+            }
+            if (results.size == 0) null else results[0]
+        } finally {
+            try {
+                cursor.close()
+            } finally {
+                db.close()
+            }
         }
-        cursor.close()
-        db.close()
-        return if (results.size == 0) {
-            null
-        } else results[0]
     }
 
     fun createFilter(filterToStore: Filter, withId: Boolean = false): Filter {
@@ -827,6 +886,26 @@ class DatabaseHandler(context: Context?) :
             taskProjection,
             Task.COLUMN_NAME_FILTER_ID + " = ?",
             arrayOf(filterId.toString()),
+            null,
+            null,
+            Task.COLUMN_NAME_ID + " ASC"
+        )
+        return try {
+            buildList {
+                while (cursor.moveToNext()) add(taskFromCursor(cursor))
+            }
+        } finally {
+            cursor.close()
+        }
+    }
+
+    private fun tasksFollowing(db: SQLiteDatabase, taskId: Long): List<Task> {
+        val cursor = db.query(
+            Task.TABLE_NAME,
+            taskProjection,
+            Task.COLUMN_NAME_ONFAIL_FOLLOWUP + " = ? OR " +
+                Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP + " = ?",
+            arrayOf(taskId.toString(), taskId.toString()),
             null,
             null,
             Task.COLUMN_NAME_ID + " ASC"

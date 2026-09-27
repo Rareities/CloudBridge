@@ -1,6 +1,29 @@
 # CloudBridge + rclone execution ledger
 
-## Final implementation pass — 2026-09-27 (PRs deferred by instruction)
+## Current dirty-source verification checkpoint — 2026-09-27
+
+- New commits, pushes, PRs and release actions remain intentionally deferred until the
+  final coding, package audit, documentation and verification pass is complete.
+- The current uncommitted source closes short-lived `DatabaseHandler` and `TriggerService`
+  instances across import/export, reconciliation, adapters, activities, fragments and
+  receivers; rejects a missing/null JSON `tasks` array before replacement; fixes task-copy
+  mutation; deletes dependent trigger rows and clears deleted-task follow-ups; normalizes
+  the follow-up “None” value; hardens malformed status/progress JSON; enforces durable
+  journal ownership including exact preimage paths and per-store transitions; and closes
+  the spaced absolute-path redaction gap. No engine pin or engine source changed.
+- Both current flavor JVM tasks pass **487 tests, 0 failures, 0 errors, 2 skips per
+  flavor**. Both flavor lint tasks have no unfiltered severity errors (warnings remain),
+  and OSS/RS Android-test sources compile. Instrumentation is **NOT RUN** without ADB/device.
+- Native/debug packaging passes with Temurin JDK 21.0.8.9, Go 1.26.8, Gradle 8.13, SDK 36 and
+  NDK 29.0.14206865. Current dirty-source universal APKs are OSS SHA-256
+  `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903` (134902028 bytes)
+  and RS SHA-256 `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338`
+  (134902003 bytes); they are debug-only and not release artifacts.
+- Provenance generation is pending the final clean source commit. No production signer,
+  hosted CI, Galaxy S26/One UI/API/firmware, live Proton, race/multi-process or release
+  acceptance evidence exists; those gates remain **NOT RUN/NO-GO**.
+
+## Previous committed implementation pass — 2026-09-27 (PRs deferred by instruction)
 
 - CloudBridge implementation commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
   (`cloudbridge: harden bisync safety and provenance`) and final notification-sink fix commit
@@ -32,11 +55,12 @@
   `6533d01df0a639583d6910938e2d1fa97628ea7d`; the immutable engine source used by the app
   remains pinned at `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. Full
   `go vet -mod=readonly ./...` passes. Core package reruns pass: `backend/mega`, `cmd/bisync`,
-  `fs/sync`, `fs/operations`, `fs/accounting` and `fs/cache`. The full short suite exits 1 only
-  because this Windows checkout lacks upstream `fstest/testserver/init.d` scripts for FTP, HDFS,
-  SFTP, SIA, SMB, Swift and WebDAV; the test-only portability correction `dc80d83` removes the
-  prior helper/sort false failures. These missing fixtures remain environment-limited failures,
-  not passes or production regressions.
+  `fs/sync`, `fs/operations`, `fs/accounting` and `fs/cache`. The full short suite remains
+  **NOT PASS**: this Windows checkout lacks upstream `fstest/testserver/init.d` scripts for
+  FTP, HDFS, SFTP, SIA, SMB, Swift and WebDAV, and the WebDAV range case also reports that its
+  harness server ignored the requested range. The test-only portability correction `dc80d83`
+  removes the prior helper/sort false failures; unavailable integration cases remain explicit
+  environment-limited failures, not passes or production regressions.
 - Exact Rareities/go-mega commit `24d3fadc8735096fafbaac00eb3a95a2017033e5` is published on
   `codex/luna-wp01-final`; its standalone short tests/vet and exact rclone `backend/mega` test
   pass. It remains a supporting candidate, not an accepted production dependency: race/live

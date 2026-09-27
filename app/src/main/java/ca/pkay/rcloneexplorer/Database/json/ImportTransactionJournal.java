@@ -233,6 +233,7 @@ public final class ImportTransactionJournal {
             boolean found = false;
             for (StorePreimage preimage : preimages) {
                 if (preimage.store == store) {
+                    validateStoreStatusTransition(phase, preimage.status, nextStatus);
                     updatedPreimages.add(new StorePreimage(store, preimage.relativePath, nextStatus));
                     found = true;
                 } else {
@@ -312,6 +313,7 @@ public final class ImportTransactionJournal {
             } catch (MissingPreimageException missing) {
                 throw new IOException(REASON_MISSING_PREIMAGE, missing);
             }
+            validateWriteAgainstPersisted(readPersistedTransaction(), transaction);
             byte[] bytes = encode(transaction);
             if (bytes.length > MAX_JOURNAL_BYTES) {
                 throw new IOException(REASON_OVERSIZED);
@@ -413,6 +415,54 @@ public final class ImportTransactionJournal {
         } finally {
             if (temporary.exists()) temporary.delete();
         }
+    }
+
+    /** Reads the current base journal, or its backup only when the base is absent. */
+    private Transaction readPersistedTransaction() throws IOException {
+        File source = journalFile.exists() ? journalFile : backupFile();
+        if (!source.exists()) return null;
+        try {
+            return decode(readBounded(source));
+        } catch (InvalidJournalException invalid) {
+            throw new IOException("Existing journal is invalid; refusing to overwrite it",
+                    invalid);
+        }
+    }
+
+    /** Prevents stale callers or a second active transaction from replacing durable state. */
+    private static void validateWriteAgainstPersisted(Transaction persisted,
+                                                       Transaction requested)
+            throws IOException {
+        if (persisted == null) return;
+        if (!persisted.transactionId.equals(requested.transactionId)) {
+            if (!isTerminal(persisted.phase)) {
+                throw new IOException("An active import transaction already owns the journal");
+            }
+            return;
+        }
+        if (persisted.createdAtEpochMillis != requested.createdAtEpochMillis) {
+            throw new IOException("Transaction metadata does not match the persisted journal");
+        }
+        try {
+            validatePhaseTransition(persisted.phase, requested.phase);
+            for (Store store : Store.values()) {
+                StorePreimage persistedPreimage = persisted.getPreimage(store);
+                StorePreimage requestedPreimage = requested.getPreimage(store);
+                if (!persistedPreimage.relativePath.equals(requestedPreimage.relativePath)) {
+                    throw new IllegalArgumentException(
+                            "Transaction preimage paths do not match persisted ownership");
+                }
+                StoreStatus current = persistedPreimage.status;
+                StoreStatus next = requestedPreimage.status;
+                validateStoreStatusTransition(requested.phase, current, next);
+            }
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Requested journal state regresses persisted state", invalid);
+        }
+    }
+
+    private static boolean isTerminal(Phase phase) {
+        return phase == Phase.COMMITTED || phase == Phase.ROLLED_BACK;
     }
 
     private Recovery quarantine(File source, String reason) throws IOException {
@@ -633,6 +683,36 @@ public final class ImportTransactionJournal {
         if (!allowed) {
             throw new IllegalArgumentException(
                     "Invalid transaction phase transition: " + current + " -> " + next);
+        }
+    }
+
+    /** Enforces per-store boundaries instead of only checking phase-wide enum membership. */
+    private static void validateStoreStatusTransition(Phase phase, StoreStatus current,
+                                                       StoreStatus next) {
+        if (current == next) return;
+        boolean allowed = false;
+        if (phase == Phase.APPLYING) {
+            allowed = (current == StoreStatus.PREIMAGE_READY
+                    && next == StoreStatus.APPLYING)
+                    || (current == StoreStatus.APPLYING
+                    && next == StoreStatus.APPLIED);
+        } else if (phase == Phase.ROLLING_BACK || phase == Phase.ROLLBACK_FAILED) {
+            allowed = (current == StoreStatus.PREIMAGE_READY
+                    && (next == StoreStatus.ROLLBACK_PENDING
+                    || next == StoreStatus.ROLLBACK_COMPLETE))
+                    || ((current == StoreStatus.APPLYING
+                    || current == StoreStatus.APPLIED)
+                    && next == StoreStatus.ROLLBACK_PENDING)
+                    || (current == StoreStatus.ROLLBACK_PENDING
+                    && (next == StoreStatus.ROLLBACK_COMPLETE
+                    || next == StoreStatus.ROLLBACK_FAILED))
+                    || (current == StoreStatus.ROLLBACK_FAILED
+                    && (next == StoreStatus.ROLLBACK_PENDING
+                    || next == StoreStatus.ROLLBACK_COMPLETE));
+        }
+        if (!allowed) {
+            throw new IllegalArgumentException(
+                    "Invalid store status transition: " + current + " -> " + next);
         }
     }
 

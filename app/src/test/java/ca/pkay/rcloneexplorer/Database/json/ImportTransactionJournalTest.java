@@ -92,6 +92,8 @@ public class ImportTransactionJournalTest {
                 .withPhase(ImportTransactionJournal.Phase.APPLYING)
                 .withPhase(ImportTransactionJournal.Phase.ROLLING_BACK)
                 .withStoreStatus(ImportTransactionJournal.Store.DATABASE,
+                        ImportTransactionJournal.StoreStatus.ROLLBACK_PENDING)
+                .withStoreStatus(ImportTransactionJournal.Store.DATABASE,
                         ImportTransactionJournal.StoreStatus.ROLLBACK_FAILED)
                 .withPhase(ImportTransactionJournal.Phase.ROLLBACK_FAILED);
         newJournal().write(transaction);
@@ -202,6 +204,88 @@ public class ImportTransactionJournalTest {
                 .startsWith(journalFile.getName() + ".quarantine."));
         assertFalse(journalFile.exists());
         assertArrayEquals(older, readAll(new File(journalFile.getPath() + ".quarantine")));
+    }
+
+    @Test
+    public void staleOrDifferentActiveTransactionCannotReplaceDurableState() throws Exception {
+        ImportTransactionJournal journal = newJournal();
+        ImportTransactionJournal.Transaction applying = prepared()
+                .withPhase(ImportTransactionJournal.Phase.APPLYING);
+        journal.write(applying);
+
+        try {
+            journal.write(prepared());
+            throw new AssertionError("A stale phase must not replace the active journal");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("regresses"));
+        }
+
+        ImportTransactionJournal.Transaction different =
+                ImportTransactionJournal.Transaction.prepared(
+                        "fedcba98-7654-3210-fedc-ba9876543210", 2L, paths)
+                        .withPhase(ImportTransactionJournal.Phase.APPLYING);
+        try {
+            journal.write(different);
+            throw new AssertionError("A second active transaction must not replace the journal");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("already owns"));
+        }
+
+        assertEquals(ImportTransactionJournal.RecoveryAction.RESUME_ROLLBACK,
+                newJournal().inspectForStartup().getAction());
+        assertEquals(applying.getTransactionId(),
+                newJournal().inspectForStartup().getTransaction().getTransactionId());
+    }
+
+    @Test
+    public void activeTransactionCannotSubstituteDifferentPreimagePaths() throws Exception {
+        ImportTransactionJournal journal = newJournal();
+        ImportTransactionJournal.Transaction applying = prepared()
+                .withPhase(ImportTransactionJournal.Phase.APPLYING);
+        journal.write(applying);
+
+        Map<ImportTransactionJournal.Store, String> alternatePaths =
+                new EnumMap<>(ImportTransactionJournal.Store.class);
+        for (ImportTransactionJournal.Store store : ImportTransactionJournal.Store.values()) {
+            String alternate = paths.get(store) + ".alternate";
+            writeBytes(new File(preimageRoot, alternate), "alternate".getBytes(StandardCharsets.UTF_8));
+            alternatePaths.put(store, alternate);
+        }
+        ImportTransactionJournal.Transaction substituted =
+                ImportTransactionJournal.Transaction.prepared(
+                        applying.getTransactionId(), applying.getCreatedAtEpochMillis(), alternatePaths)
+                        .withPhase(ImportTransactionJournal.Phase.APPLYING);
+        try {
+            journal.write(substituted);
+            throw new AssertionError("An active transaction must own its original preimage paths");
+        } catch (IOException expected) {
+            assertTrue(expected.getMessage().contains("regresses"));
+        }
+
+        ImportTransactionJournal.Transaction recovered = newJournal().inspectForStartup()
+                .getTransaction();
+        for (ImportTransactionJournal.Store store : ImportTransactionJournal.Store.values()) {
+            assertEquals(paths.get(store), recovered.getPreimage(store).getRelativePath());
+        }
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void applyingStoreCannotSkipDirectlyToApplied() {
+        prepared().withPhase(ImportTransactionJournal.Phase.APPLYING)
+                .withStoreStatus(ImportTransactionJournal.Store.DATABASE,
+                        ImportTransactionJournal.StoreStatus.APPLIED);
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void rollbackStoreCannotRegressFromAppliedToPreimageReady() {
+        prepared().withPhase(ImportTransactionJournal.Phase.APPLYING)
+                .withStoreStatus(ImportTransactionJournal.Store.DATABASE,
+                        ImportTransactionJournal.StoreStatus.APPLYING)
+                .withStoreStatus(ImportTransactionJournal.Store.DATABASE,
+                        ImportTransactionJournal.StoreStatus.APPLIED)
+                .withPhase(ImportTransactionJournal.Phase.ROLLING_BACK)
+                .withStoreStatus(ImportTransactionJournal.Store.DATABASE,
+                        ImportTransactionJournal.StoreStatus.PREIMAGE_READY);
     }
 
     private void assertRestartState(ImportTransactionJournal.Store store,

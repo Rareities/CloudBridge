@@ -64,10 +64,14 @@ public class Importer {
                 dbHandler.replaceAll(parsed.triggers, parsed.filters, parsed.tasks);
 
                 TriggerService triggerService = new TriggerService(context);
-                for (Long previousTriggerId : previousTriggerIds) {
-                    triggerService.cancelTrigger(previousTriggerId);
+                try {
+                    for (Long previousTriggerId : previousTriggerIds) {
+                        triggerService.cancelTrigger(previousTriggerId);
+                    }
+                    triggerService.queueTrigger();
+                } finally {
+                    triggerService.close();
                 }
-                triggerService.queueTrigger();
             }
         } finally {
             dbHandler.close();
@@ -103,7 +107,10 @@ public class Importer {
 
         ArrayList<Trigger> triggers = parseTriggers(array(reader, "trigger"));
         ArrayList<Filter> filters = parseFilters(array(reader, "filters"));
-        ArrayList<Task> tasks = parseTasks(array(reader, "tasks"));
+        // Tasks are the authoritative replacement set. A missing array must not be
+        // interpreted as an intentional empty set, otherwise a partial/old backup can
+        // erase every existing task during replaceAll(). An explicit [] remains valid.
+        ArrayList<Task> tasks = parseTasks(requiredArray(reader, "tasks"));
         validateReferences(triggers, filters, tasks);
         return new ParsedImport(triggers, filters, tasks);
     }
@@ -125,6 +132,13 @@ public class Importer {
             throw new JSONException("Import array exceeds the maximum size: " + name);
         }
         return result;
+    }
+
+    private static JSONArray requiredArray(JSONObject reader, String name) throws JSONException {
+        if (!reader.has(name) || reader.isNull(name)) {
+            throw new JSONException("Import is missing required array: " + name);
+        }
+        return array(reader, name);
     }
 
     private static ArrayList<Trigger> parseTriggers(JSONArray array) throws JSONException {

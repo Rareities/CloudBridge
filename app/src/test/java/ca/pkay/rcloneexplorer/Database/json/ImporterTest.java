@@ -18,6 +18,20 @@ public class ImporterTest {
         assertEquals(0, parsed.getTriggers().size());
     }
 
+    @Test
+    public void explicitEmptyTasksArrayIsAccepted() throws Exception {
+        Importer.ParsedImport parsed = Importer.parse(
+                "{\"tasks\":[],\"filters\":[],\"trigger\":[]}"
+        );
+
+        assertEquals(0, parsed.getTasks().size());
+    }
+
+    @Test(expected = JSONException.class)
+    public void missingTasksArrayIsRejectedBeforeReplacement() throws Exception {
+        Importer.validate("{\"filters\":[],\"trigger\":[]}");
+    }
+
     @Test(expected = JSONException.class)
     public void duplicateTaskIdsAreRejectedBeforeMutation() throws Exception {
         Importer.validate(

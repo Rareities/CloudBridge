@@ -37,7 +37,7 @@ public final class LogRedactor {
     private static final Pattern CONTENT_URI = Pattern.compile(
             "(?i)(content://)[^\\s\\r\\n,;\\]}]+");
     private static final Pattern ABSOLUTE_PATH = Pattern.compile(
-            "(?<![A-Za-z0-9/:])((?:/|[A-Za-z]:\\\\)[^\\s\\r\\n,;\\]}]+)");
+            "(?<![A-Za-z0-9/:])((?:/|[A-Za-z]:\\\\)[^\\r\\n,;\\]}\\\"'<>)]*)");
 
     private LogRedactor() {
     }

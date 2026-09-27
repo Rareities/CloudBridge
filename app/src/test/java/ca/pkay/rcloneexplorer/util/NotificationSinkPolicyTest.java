@@ -41,6 +41,15 @@ public class NotificationSinkPolicyTest {
     }
 
     @Test
+    public void notificationContentDoesNotLeakPathsWithSpaces() {
+        String safe = NotificationSinkPolicy.sanitizeContent(
+                "failed /storage/emulated/0/Private Vault/Notes.txt");
+
+        assertFalse(safe.contains("/storage/emulated/0/Private Vault/Notes.txt"));
+        assertTrue(safe.contains("***redacted-path***"));
+    }
+
+    @Test
     public void progressDetailsAreSanitizedBeforeTheNotificationBuilderReceivesThem() {
         ArrayList<String> raw = new ArrayList<>(Arrays.asList(
                 "checking C:\\Users\\Alice\\private.txt password=detail-secret",

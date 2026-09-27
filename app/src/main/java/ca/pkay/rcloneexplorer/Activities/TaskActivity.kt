@@ -296,8 +296,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskToPopulate.md5sum = switchMD5sum.isChecked
         taskToPopulate.deleteExcluded = switchDeleteExcluded.isChecked
         taskToPopulate.filterId = if(filterDropdown.selectedItemPosition == 0 || filterDropdown.selectedItemPosition == -1) null else filterItems[filterDropdown.selectedItemPosition - 1].id
-        taskToPopulate.onFailFollowup = (onFailDropdown.selectedItem as TaskNameIdPair).id
-        taskToPopulate.onSuccessFollowup = (onSuccessDropdown.selectedItem as TaskNameIdPair).id
+        taskToPopulate.onFailFollowup =
+            (onFailDropdown.selectedItem as? TaskNameIdPair)?.id?.takeIf { it > 0L }
+        taskToPopulate.onSuccessFollowup =
+            (onSuccessDropdown.selectedItem as? TaskNameIdPair)?.id?.takeIf { it > 0L }
         val transfersValue = resources.getStringArray(R.array.task_transfers_values)
             .getOrNull(transfersDropdown.selectedItemPosition)?.toIntOrNull() ?: -1
         taskToPopulate.transfers = if (transfersValue <= 0) null else transfersValue
@@ -486,7 +488,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         onFailDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
                 val pair = parentView?.selectedItem as TaskNameIdPair
-                existingTask?.onFailFollowup = pair.id
+                existingTask?.onFailFollowup = pair.id.takeIf { it > 0L }
             }
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
@@ -509,7 +511,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         onSuccessDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
                 val pair = parentView?.selectedItem as TaskNameIdPair
-                existingTask?.onSuccessFollowup = pair.id
+                existingTask?.onSuccessFollowup = pair.id.takeIf { it > 0L }
             }
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
@@ -668,6 +670,13 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 getString(R.string.description_sync_direction_sync_bidirectional)
         }
         syncDescription.text = text
+    }
+
+    override fun onDestroy() {
+        if (::dbHandler.isInitialized) {
+            dbHandler.close()
+        }
+        super.onDestroy()
     }
 
     companion object {
