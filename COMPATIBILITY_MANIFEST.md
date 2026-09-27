@@ -2,8 +2,9 @@
 
 **Status:** engineering snapshot only, not a supported-release contract. **Checked:** 2026-09-27. Refresh source, tests, CI, PRs, dependencies, and acceptance evidence before app-pin promotion or release. Source registration and declared SDK/ABI values do not alone establish runtime compatibility.
 
-**Current committed verification (2026-09-27):** CloudBridge commit
-`39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork. Both OSS/RS JVM
+**Current committed verification (2026-09-27):** CloudBridge implementation commit
+`39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork, with CI-only
+descendants through fork head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553`. Both OSS/RS JVM
 suites pass **487/487 tests per
 flavor, 0 failures, 0 errors, 2 skips**; both debug flavors assemble, both flavor lint tasks
 have no unfiltered severity errors, and Android-test sources compile. Current universal debug
@@ -12,8 +13,10 @@ APK hashes are OSS `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D0
 `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338` (134902003 bytes).
 They are debug-only artifacts. The clean-tree provenance generator failed closed because it
 requires JDK 17 while this host exposes JDK 21.0.8.9; no current source-bound manifest is
-claimed. Signer continuity, instrumentation, Galaxy S26/One UI/API/firmware, live Proton,
-hosted CI, race/multi-process and release gates remain **NOT RUN/NO-GO**. The fork-only draft
+claimed locally. Fork CI at head `5e32249` successfully ran the JDK-17 debug provenance step
+and uploaded artifact `10924834462`; that is debug provenance, not production attestation.
+Signer continuity, instrumentation, Galaxy S26/One UI/API/firmware, live Proton, race/multi-process
+and release gates remain **NOT RUN/NO-GO**. The fork-only draft
 PR is https://github.com/Rareities/CloudBridge/pull/1; no upstream/original PR has been
 created.
 

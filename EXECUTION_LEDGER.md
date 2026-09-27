@@ -1,9 +1,10 @@
 # CloudBridge + rclone execution ledger
 
-## Current committed verification checkpoint — 2026-09-27
+## Current committed verification checkpoint — 2026-09-27 (fork CI head `5e32249`)
 
 - CloudBridge implementation commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` and
-  documentation head `16e3b20d77bb6c0b0ba16eecb034eeccadc41e88` are pushed to
+  CI-only descendants through branch head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553` are
+  pushed to
   `Rareities/CloudBridge:codex/luna-implementation`; fork-only draft PR #1 is open at
   https://github.com/Rareities/CloudBridge/pull/1. No upstream/original PR was created.
   Release publication remains a separate final-gate action.
@@ -27,9 +28,18 @@
   `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903` (134902028 bytes)
   and RS SHA-256 `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338`
   (134902003 bytes); they are debug-only and not release artifacts.
+- Fork CI at head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553` is green: Android CI run
+  [36299262077](https://github.com/Rareities/CloudBridge/actions/runs/36299262077), PR Android
+  Lint run [36299262068](https://github.com/Rareities/CloudBridge/actions/runs/36299262068),
+  Translations run [36299262114](https://github.com/Rareities/CloudBridge/actions/runs/36299262114),
+  and dependency verification run
+  [36299259918](https://github.com/Rareities/CloudBridge/actions/runs/36299259918) all completed
+  successfully. Android CI generated and uploaded the JDK-17 debug provenance artifact
+  [cloudbridge-oss-debug-build](https://github.com/Rareities/CloudBridge/actions/runs/36299262077/artifacts/10924834462);
+  this is debug provenance, not production signing or release attestation.
 - The clean-tree debug provenance generator was run against the committed source and failed
   closed because it requires JDK 17 while this host exposes Temurin JDK 21.0.8.9. No current
-  source-bound provenance manifest is claimed. No production signer, hosted CI, Galaxy S26 /
+  local source-bound provenance manifest is claimed; hosted CI evidence is recorded above. No production signer, Galaxy S26 /
   One UI/API/firmware, live Proton, race/multi-process or release acceptance evidence exists;
   those gates remain **NOT RUN/NO-GO**.
 

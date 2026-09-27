@@ -4,8 +4,9 @@
 
 The master handoff is the canonical WP00-WP15 sequence: WP14 remains stress/device acceptance and WP15 final handoff. The addendum's migration, identity, signing, and rollback requirements are mandatory cross-cutting gates mapped to WP03, WP04, WP08, WP13, WP14, and WP15; they do not create a WP16 or replace master WP14. None of those migration gates is accepted. Current development source schema is v17; synthetic upgrade fixtures cover selected older versions, but no instrumentation run or provenance-backed historical image is recorded. The v8 sentinel-only fixture is not representative; the v13/v14 fixture source was corrected to seed the expected pre-v16 preflight schema, and v16-to-v17 filter-snapshot coverage was authored, but those migrations remain unverified at runtime. No released v8 artifact or accepted v8 migration path is established.
 
-**Latest committed verification checkpoint — 2026-09-27:** CloudBridge commit
-`39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork. The latest app
+**Latest committed verification checkpoint — 2026-09-27:** CloudBridge implementation commit
+`39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork, with CI-only
+descendants through fork head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553`. The latest app
 source passes **487 tests per flavor** with zero failures/errors and two explicit Windows skips; lint
 has no unfiltered severity errors, Android-test sources compile, and native/debug packaging
 passes for OSS and RS with the exact rclone pin
@@ -16,8 +17,10 @@ WP or acceptance gate: the worktree is clean at the pushed commit, but current c
 provenance is unavailable because the generator requires JDK 17 and this host has JDK 21;
 instrumentation, Samsung Galaxy S26/One UI/API/firmware, live
 Proton, migration runtime, multi-process/race, hosted CI, production signing and release
-acceptance remain **NOT RUN/NO-GO**. The clean-tree provenance generator failed closed because
-the host has JDK 21 while the generator requires JDK 17; no current source-bound manifest is claimed.
+acceptance remain **NOT RUN/NO-GO**. The local clean-tree provenance generator failed closed because
+the host has JDK 21 while the generator requires JDK 17; fork CI at head `5e32249` ran the JDK-17
+debug provenance step successfully and uploaded artifact `10924834462`, but no production
+source/signing attestation is claimed.
 
 | Requirement | Owning layer | Package(s) | Current status | Evidence still required |
 |---|---|---|---|---|
@@ -35,7 +38,7 @@ the host has JDK 21 while the generator requires JDK 17; no current source-bound
 | Safety and truthful failure reporting | Both, at owning layer | WP02-WP08, WP11-WP13 | **PARTIAL.** Current focused evidence is 21/21 WP02 helper/policy tests (incoming-share URI policy 3, redaction 6, synchronized bounded append 5, bounded persisted-log read 4, bounded RCD response read 3) plus 8/8 WP03 secret-generation/snapshot-retention tests: **29/29 total**. Own-app content-provider authorities are rejected before resolver access; RCD response bodies are bounded (4 MiB success / 64 KiB error) with a 30-second call timeout. Selected logging-source Java 8 compilation passed, but neither the share Activity nor full app integration was compiled. WP12 mutation callback evidence is historical to current edits. Full hostile callers, command/config/RC/process inventory, process-death, provider integration and current full Gradle verification remain open. | Full sink/input coverage, hostile-caller and URI-grant instrumentation, config-secret crash/restart matrix, process-death, OAuth/config, provider, storage-fault, and end-to-end lifecycle coverage. |
 | Acceptance device and live provider | External environment | WP14-WP15 | **NOT RUN.** No Samsung Galaxy S26/One UI/API/firmware run or live Proton run is recorded. | Record actual Galaxy S26 model, Android API, One UI version, and firmware; verify only disposable Proton data and retain evidence. |
 | Product identity, install migration and rollback | CloudBridge app/release | WP00, WP03, WP04, WP08, WP13-WP15 | **NOT ESTABLISHED.** Current build config uses application ID de.schuelken.cloudbridge (debug suffix .debug) and database schema v17; production signer continuity and a verified released source artifact are unknown. Synthetic schema upgrade fixtures cover selected versions but remain **NOT RUN** and none matches a provenance-backed historical release. The compatibility manifest lists no accepted in-place, side-by-side, or downgrade path. | Choose and verify the exact product identity/signature path; run sanitized source-to-target fixtures for database/config/tasks/alarms/SAF/native state; interrupt each migration boundary and prove restart/rollback before claiming support. |
-| PR, CI, signing, and release readiness | Both repositories | WP13-WP15 | **NOT READY / DRAFT PRS OPEN.** Fork-only draft PRs are open at [Rareities/CloudBridge#1](https://github.com/Rareities/CloudBridge/pull/1) and [Rareities/rclone#2](https://github.com/Rareities/rclone/pull/2); no upstream/original PR was created. Combined status and PR-triggered workflow queries return no entries, and release existence/branch protection are **NOT VERIFIED**. The rclone compare is divergent (31 commits ahead, 26 behind) and requires review before merge. | Reviewed narrow/appropriate base diffs; current CI; signer/certificate continuity; compatibility and migration evidence; provenance manifest; S26 and provider acceptance; final WP15 recommendation. |
+| PR, CI, signing, and release readiness | Both repositories | WP13-WP15 | **NOT READY / DRAFT PRS OPEN.** Fork-only draft PRs are open at [Rareities/CloudBridge#1](https://github.com/Rareities/CloudBridge/pull/1) and [Rareities/rclone#2](https://github.com/Rareities/rclone/pull/2); no upstream/original PR was created. CloudBridge fork CI at head `5e32249` is green, while production signer/certificate continuity, migration/device/provider acceptance and release gates remain **NOT VERIFIED**. The rclone compare is divergent (31 commits ahead, 26 behind) and requires review before merge. | Reviewed narrow/appropriate base diffs; current CI; signer/certificate continuity; compatibility and migration evidence; provenance manifest; S26 and provider acceptance; final WP15 recommendation. |
 
 ## Package snapshot
 

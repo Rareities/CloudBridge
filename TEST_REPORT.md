@@ -2,8 +2,9 @@
 
 ## Current committed verification — 2026-09-27
 
-This is the latest local checkpoint from CloudBridge commit
-`39a5593174553843bf7d7fdbadb84ff7dcd818c0`, pushed to
+This is the latest checkpoint from CloudBridge implementation commit
+`39a5593174553843bf7d7fdbadb84ff7dcd818c0`, with CI-only descendants through fork head
+`5e32249cd3df534aaf70ea9fa6f5844cf01ea553`, pushed to
 `Rareities/CloudBridge:codex/luna-implementation`. It supersedes the older snapshot below
 for current-source counts; no upstream/original PR was created.
 
@@ -12,11 +13,12 @@ for current-source counts; no upstream/original PR was created.
 | CloudBridge OSS + RS JVM | Temurin JDK 21.0.8.9, Gradle 8.13, Android SDK 36; `:app:testOssDebugUnitTest :app:testRsDebugUnitTest --offline --no-daemon --max-workers=2 -x :rclone:buildAll -x :rclone:checkoutRclone` | **PASS:** 487 tests per flavor, 0 failures, 0 errors, 2 skipped per flavor. |
 | Android static/source checks | `:app:lintOssDebug :app:lintRsDebug :app:compileOssDebugAndroidTestSources :app:compileRsDebugAndroidTestSources` | **PASS:** no unfiltered severity errors; warnings remain and baseline-filtered findings are retained. Android-test source compilation passes; instrumentation execution is **NOT RUN**. |
 | Native/debug packaging | Temurin JDK 21.0.8.9, Go 1.26.8, Gradle 8.13, SDK 36, NDK 29.0.14206865; `:rclone:buildAll :app:assembleOssDebug :app:assembleRsDebug --offline --no-daemon --max-workers=2 -x :rclone:checkoutRclone` | **PASS, debug-only:** both flavors assemble all four ABIs plus universal APK. Current universal OSS SHA-256 `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903`, 134902028 bytes; RS SHA-256 `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338`, 134902003 bytes. |
+| Fork GitHub CI | JDK 17/Go/Android SDK+NDK at head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553`; [Android CI run 36299262077](https://github.com/Rareities/CloudBridge/actions/runs/36299262077) | **PASS:** OSS debug unit tests/package, debug provenance generation and artifact upload completed successfully. Artifact [cloudbridge-oss-debug-build](https://github.com/Rareities/CloudBridge/actions/runs/36299262077/artifacts/10924834462) is debug-only; it is not a production-signed release. |
 | rclone independent core/vet | Go 1.26.8 Windows/amd64, `GOWORK=off`, `GOPROXY=off`, `GOSUMDB=off`, `CGO_ENABLED=0`; `go test -short -mod=readonly -count=1 ./backend/mega ./cmd/bisync ./fs/sync ./fs/operations ./fs/accounting ./fs/cache`; `go vet -mod=readonly ./...` | **PASS:** all six focused packages and the full vet scope passed. |
 | rclone full short suite | Go 1.26.8 Windows/amd64; `go test -short -mod=readonly -count=1 ./...` | **NOT PASS:** FTP, HDFS, SFTP, SIA, SMB, Swift and WebDAV test-server init scripts are unavailable in this checkout; the WebDAV range harness also ignored the requested range. These cases remain explicit environment/harness blockers, not waivers or passes. |
-| App-to-engine provenance | App immutable pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; clean app commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` | Pin is unchanged and verified locally. The clean-tree generator failed closed because it requires JDK 17 and this host has JDK 21.0.8.9; no current source-bound provenance manifest is claimed. Debug APK hashes do not establish release provenance. |
+| App-to-engine provenance | App immutable pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; fork CI head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553` | Pin is unchanged and verified locally. The local generator failed closed because this host has JDK 21, while the fork CI JDK-17 run generated and uploaded the debug provenance artifact. That artifact is source-bound debug evidence only; it does not establish production signing or release provenance. |
 | Samsung / Proton / release | Galaxy S26 One UI/API/firmware, live Proton disposable area, production signing and hosted CI | **NOT RUN / NO-GO**, not inferred from local passes. |
-| Fork-only review | Rareities-owned repositories | CloudBridge [PR #1](https://github.com/Rareities/CloudBridge/pull/1), rclone [PR #2](https://github.com/Rareities/rclone/pull/2) | **OPEN DRAFTS:** no upstream/original PR; connector reports no combined status checks or PR-triggered workflow runs. Do not merge or publish a release from these branches until the outstanding gates pass. |
+| Fork-only review | Rareities-owned repositories | CloudBridge [PR #1](https://github.com/Rareities/CloudBridge/pull/1), rclone [PR #2](https://github.com/Rareities/rclone/pull/2) | **OPEN DRAFTS:** CloudBridge fork CI at head `5e32249` is green; no upstream/original PR. Do not merge or publish a release from these branches until the outstanding device, provider, signing, migration and acceptance gates pass. |
 
 ### Current debug artifact hashes
 

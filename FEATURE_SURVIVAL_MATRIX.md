@@ -1,14 +1,16 @@
 # CloudBridge feature-survival matrix
 
-**Current committed checkpoint — 2026-09-27:** CloudBridge commit
-`39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork and still pins
+**Current committed checkpoint — 2026-09-27:** CloudBridge implementation commit
+`39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork, with CI-only
+descendants through fork head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553`, and still pins
 Rareities/rclone exactly at `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. OSS/RS JVM suites pass
 **487 tests per flavor** with zero
 failures/errors and two skips; both debug flavors package and lint, and Android-test sources
 compile. The current APKs are debug-only; clean provenance, instrumentation, Samsung Galaxy
 S26/One UI/API/firmware, live Proton, migration, multi-process stress, signing and release
-gates remain **NOT RUN/NO-GO**. The clean-tree provenance generator is **NOT RUN/PASS-BLOCKED**
-because this host has JDK 21 while it requires JDK 17. The matrix remains a survival/traceability record, not proof
+gates remain **NOT RUN/NO-GO**. The local clean-tree provenance generator is **NOT RUN/PASS-BLOCKED**
+because this host has JDK 21 while it requires JDK 17; fork CI successfully generated and uploaded
+debug provenance artifact `10924834462`, which is not a production attestation. The matrix remains a survival/traceability record, not proof
 of feature acceptance: first-class
 Bisync mutation/recovery, scheduling/device behavior, Obsidian lifecycle, live Proton, migration,
 multi-process stress and production signing remain partial or **NOT RUN**. No release claim is
