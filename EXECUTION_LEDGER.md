@@ -16,7 +16,8 @@
   acceptance device is connected.
 - Native checkout/build passes with Go 1.26.8, JDK 17.0.20.1, Gradle 8.13, Android SDK 36 and
   NDK 29.0.14206865. OSS and RS debug APKs assemble. The source-bound OSS debug manifest records
-  app commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`, rclone commit
+  the final checked-out app branch commit (a documentation-only descendant of implementation
+  commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`), rclone commit
   `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`, five APK artifacts, four ABIs, and the exact
   AGP/Kotlin/Gradle/JDK/Go/NDK/compile-SDK toolchain. It is explicitly debug-only and not a
   release attestation.
