@@ -1,5 +1,17 @@
 # CloudBridge + Rareities/rclone release readiness
 
+**Latest verification checkpoint — 2026-09-27:** CloudBridge source commit
+`da38fdd47023c347a19c3db30fa96f0a172c0484` is pushed to `Rareities/CloudBridge` and uses
+the exact app rclone pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. The full local JVM
+sweep passes 489 tests per OSS/RS flavor with zero failures/errors and two skips; lint,
+Android-test source compilation and OSS/RS debug packaging pass. Universal debug APK hashes
+are OSS `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52` and RS
+`7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`. These are not release artifacts. The decision remains
+**NO-GO**: production signing/continuity, JDK-17 source-bound provenance on the local host,
+Galaxy S26/One UI/API/firmware, live Proton, migration runtime, race/multi-process, complete
+engine and provider acceptance are unavailable or incomplete. No release/tag/public APK
+publication is authorized by this evidence.
+
 **Decision as of 2026-09-26: NO-GO - no release candidate.** OSS debug APKs were built
 and inspected, but no production-signed release APK or signing identity/artifact
 provenance is established, and core safety/provider/device gates remain open. This is

@@ -1,5 +1,28 @@
 # CloudBridge + rclone execution ledger
 
+## Latest implementation checkpoint — 2026-09-27 (source commit `da38fdd`)
+
+- The final app-side fix set is committed as `da38fdd47023c347a19c3db30fa96f0a172c0484`
+  on `Rareities/CloudBridge:codex/luna-implementation`. It aligns the Bisync preview
+  capability table with the exact Gradle rclone pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`
+  and bounds sparse/blank notification-detail scanning at 96 caller entries. Both changes
+  have focused regression coverage. No Rareities/rclone source was changed, and no
+  upstream/original PR was created.
+- The full local JVM sweep passes **489 tests per OSS and RS flavor, 0 failures, 0 errors,
+  2 skips per flavor**. Final lint, OSS/RS Android-test source compilation, and both OSS/RS
+  debug APK packaging tasks pass with JDK 21.0.8.9, Gradle 8.13, Android SDK 36, Go 1.26.8,
+  and NDK 29.0.14206865. Instrumentation remains **NOT RUN** without ADB/device.
+- Final local universal debug APK hashes are OSS
+  `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52`
+  (134902082 bytes) and RS
+  `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`
+  (134902067 bytes). They are debug-only and not release artifacts. Fork CI for this
+  source head is pending; its result will be recorded before the final PR update.
+- Release remains **NO-GO**: no production signer/continuity, Galaxy S26/One UI/API/firmware,
+  live Proton/disposable-scope, race/multi-process, migration-runtime, or full-engine
+  acceptance evidence exists. The debug provenance generator still fails closed locally on
+  JDK 21 because it requires JDK 17; hosted CI debug provenance is not a release attestation.
+
 ## Current committed verification checkpoint — 2026-09-27 (fork CI head `5e32249`)
 
 - CloudBridge implementation commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` and

@@ -1,5 +1,15 @@
 # Compatibility manifest
 
+**Latest source checkpoint — 2026-09-27:** Rareities/CloudBridge implementation commit
+`da38fdd47023c347a19c3db30fa96f0a172c0484` aligns the Bisync preview capability allowlist
+with the exact app engine pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` and bounds sparse
+notification-detail inspection. The full local JVM sweep passes 489 tests per OSS/RS flavor
+with zero failures/errors and two skips; lint, Android-test source compilation and debug
+packaging pass. Universal debug hashes are OSS
+`12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52` and RS
+`7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`. This remains an engineering snapshot: device, provider,
+migration, signing, hosted provenance, race and release gates are **NOT RUN/NO-GO**.
+
 **Status:** engineering snapshot only, not a supported-release contract. **Checked:** 2026-09-27. Refresh source, tests, CI, PRs, dependencies, and acceptance evidence before app-pin promotion or release. Source registration and declared SDK/ABI values do not alone establish runtime compatibility.
 
 **Current committed verification (2026-09-27):** CloudBridge implementation commit

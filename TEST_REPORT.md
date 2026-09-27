@@ -1,5 +1,19 @@
 # CloudBridge + Rareities/rclone test report
 
+## Latest source verification — 2026-09-27 (`da38fdd`)
+
+| Scope | Environment / command | Result |
+|---|---|---|
+| CloudBridge OSS + RS JVM | Temurin JDK 21.0.8.9; `:app:testOssDebugUnitTest :app:testRsDebugUnitTest --offline --no-daemon --max-workers=2 -x :rclone:buildAll -x :rclone:checkoutRclone` | **PASS:** 489 tests per flavor, 0 failures, 0 errors, 2 skips per flavor. |
+| Android checks | `:app:lintOssDebug :app:lintRsDebug :app:compileOssDebugAndroidTestSources :app:compileRsDebugAndroidTestSources` | **PASS:** lint completed without unfiltered fatal findings and both Android-test source sets compiled; instrumentation is **NOT RUN**. |
+| Debug packaging | JDK 21.0.8.9, Android SDK 36, Go 1.26.8, NDK 29.0.14206865; `:app:assembleOssDebug :app:assembleRsDebug --offline --no-daemon --max-workers=2 -x :rclone:buildAll -x :rclone:checkoutRclone` | **PASS, debug-only:** OSS/RS four-ABI plus universal APKs assembled. Universal OSS: 134902082 bytes, `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52`; RS: 134902067 bytes, `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`. |
+| App/engine linkage | `gradle.properties` and `BisyncPreviewCommandBuilder` | **PASS:** both use exact rclone source `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; compatible-state preview remains fail-closed because that engine pin lacks the clone capability. |
+| Release gates | Samsung/Proton/signing/provenance/full engine | **NOT RUN / NO-GO:** unavailable access is recorded as NOT RUN, not passed; debug artifacts are not publishable releases. |
+
+The implementation commit is `da38fdd47023c347a19c3db30fa96f0a172c0484` on the
+Rareities fork. Fork CI for this exact source head is pending and will be recorded before
+the fork-only PR body is refreshed. The prior checkpoint below is retained as history.
+
 ## Current committed verification — 2026-09-27
 
 This is the latest checkpoint from CloudBridge implementation commit
@@ -20,25 +34,25 @@ for current-source counts; no upstream/original PR was created.
 | Samsung / Proton / release | Galaxy S26 One UI/API/firmware, live Proton disposable area, production signing and hosted CI | **NOT RUN / NO-GO**, not inferred from local passes. |
 | Fork-only review | Rareities-owned repositories | CloudBridge [PR #1](https://github.com/Rareities/CloudBridge/pull/1), rclone [PR #2](https://github.com/Rareities/rclone/pull/2) | **OPEN DRAFTS:** CloudBridge fork CI at head `5e32249` is green; no upstream/original PR. Do not merge or publish a release from these branches until the outstanding device, provider, signing, migration and acceptance gates pass. |
 
-### Current debug artifact hashes
+### Latest local debug artifact hashes (`da38fdd`)
 
 These artifacts were produced from the verified application source and rebuilt successfully
-after commit `39a5593…`; they are debug-only and are not signed release artifacts. The
+after commit `da38fdd…`; they are debug-only and are not signed release artifacts. The
 repository provenance generator could not emit a current manifest because the host lacks its
 required JDK 17 toolchain.
 
 | Flavor | ABI/artifact | Bytes | SHA-256 |
 |---|---|---:|---|
-| OSS | arm64-v8a | 41010174 | `086A4CE90FD6D40EDFF2395C030FDB91E80DC5965BB1BB4A24F3E7FFAF3ACCC0` |
-| OSS | armeabi-v7a | 42504636 | `F2BC953871B6379F9AF79A444DF25C1B1A355A3F0C37A1D41B5CCDB2C8036067` |
-| OSS | universal | 134902028 | `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903` |
-| OSS | x86_64 | 44522678 | `5896F7EB7E24C2B6FF035D6CEF5128CCACB089729FC7CE5C5183F3C4517A19A6` |
-| OSS | x86 | 42653153 | `EA980E4628D84E9BAA1992B3B1023391674454F0C94C138C3EEC8E6310C1769C` |
-| RS | arm64-v8a | 41010150 | `7190F7349B1ACB32C2091086C552BDC44B35ACF509DA999FF2B2AAC2BC2BE068` |
-| RS | armeabi-v7a | 42504613 | `666F19FC4BE22982424ECE1E4C7B122C26F535D78D02DE483B35C83F9599F01D` |
-| RS | universal | 134902003 | `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338` |
-| RS | x86_64 | 44522649 | `52C869B31EEA9D8F68352EC8958E50100A9273BCCCFA248E01CE4581A25BE251` |
-| RS | x86 | 42653138 | `6888149744E6DC82A4649F2C0AE0815D5A707AA5AA7E8A957529E4DE751B5F0E` |
+| OSS | arm64-v8a | 41010231 | `102544806DB211166810C6354517D500871521C18801CCD1C74780A893C2B376` |
+| OSS | armeabi-v7a | 42504691 | `45E97A6D59B64797149642A4351CA2265AEDCAA327826ADAD7603BA421F67735` |
+| OSS | universal | 134902082 | `12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52` |
+| OSS | x86_64 | 44522733 | `A4352FCD75791E90E95DDCA43CCB9B75DCA319CF083ACB7BD477010735A29C57` |
+| OSS | x86 | 42653217 | `1276CB111C1F0FFB0522170CBA45082A0CF8884AFAE4C25B3E5CC7ECA6DC0589` |
+| RS | arm64-v8a | 41010213 | `41EC5696E3E8C172A48DD0152E8D1C24DA565B167F727A8F29B379450F460E0F` |
+| RS | armeabi-v7a | 42504668 | `1028B86CEF2316E8BDC266DB5434541CF7D79D6926F8A47B5767BE5E86B3795F` |
+| RS | universal | 134902067 | `7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E` |
+| RS | x86_64 | 44522714 | `104566BD689C1979B1314A6A9EA1BDF41789B005E63EB2D182DC5AACBE6512D7` |
+| RS | x86 | 42653200 | `086657B900F935AB712A9E180270EEC718A59B117458CDEB7E2B4970CB874298` |
 
 ## Previous committed verification — 2026-09-27
 

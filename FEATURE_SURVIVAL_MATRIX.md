@@ -1,5 +1,17 @@
 # CloudBridge feature-survival matrix
 
+**Latest implementation checkpoint — 2026-09-27:** source commit
+`da38fdd47023c347a19c3db30fa96f0a172c0484` is pushed to the Rareities fork. The app now
+tests the exact immutable rclone pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` in its
+read-only Bisync preview capability table and bounds sparse notification-detail scans.
+The full local JVM sweep passes 489 tests per OSS/RS flavor; lint, Android-test source
+compilation and debug packaging pass. Universal debug hashes are OSS
+`12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52` and RS
+`7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`. The matrix still does not claim feature acceptance:
+Bisync mutation/recovery, scheduling/device behavior, Obsidian lifecycle, provider/SAF
+acceptance, live Proton, migration, stress, signing and release gates remain partial or
+**NOT RUN**.
+
 **Current committed checkpoint — 2026-09-27:** CloudBridge implementation commit
 `39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork, with CI-only
 descendants through fork head `5e32249cd3df534aaf70ea9fa6f5844cf01ea553`, and still pins

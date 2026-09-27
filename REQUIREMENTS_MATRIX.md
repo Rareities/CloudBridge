@@ -1,5 +1,18 @@
 # CloudBridge + rclone requirements matrix
 
+**Latest source checkpoint — 2026-09-27:** implementation commit
+`da38fdd47023c347a19c3db30fa96f0a172c0484` is pushed to the Rareities/CloudBridge fork.
+The focused fix aligns the app Bisync preview allowlist with the exact Gradle rclone pin
+`cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` and bounds sparse notification-detail scans;
+both have regression tests. The full local JVM sweep is **489 tests per OSS/RS flavor,
+0 failures, 0 errors, 2 skips**; lint, Android-test source compilation and debug packaging
+pass. Universal debug hashes are OSS
+`12DCBC32B0F5022D889077E81198659960EB5007EA5C92B33DAD53C7717C4D52` and RS
+`7E33F1E7BBBAA9982F73300309ED1C7D6EA70CDA5A59E39197B943EB03C2BD5E`.
+This does not close any WP: instrumentation, migration runtime, provider/device, Samsung,
+live Proton, race/multi-process, production signing, hosted-CI provenance and release
+acceptance remain **NOT RUN/NO-GO**. The older checkpoint below is retained for provenance history.
+
 **Current snapshot:** 2026-09-27. This records evidence for the current local checkouts, not release acceptance. Detailed package evidence and rollbacks are in `EXECUTION_LEDGER.md` and the separate rclone `PATCH_LEDGER.md`.
 
 The master handoff is the canonical WP00-WP15 sequence: WP14 remains stress/device acceptance and WP15 final handoff. The addendum's migration, identity, signing, and rollback requirements are mandatory cross-cutting gates mapped to WP03, WP04, WP08, WP13, WP14, and WP15; they do not create a WP16 or replace master WP14. None of those migration gates is accepted. Current development source schema is v17; synthetic upgrade fixtures cover selected older versions, but no instrumentation run or provenance-backed historical image is recorded. The v8 sentinel-only fixture is not representative; the v13/v14 fixture source was corrected to seed the expected pre-v16 preflight schema, and v16-to-v17 filter-snapshot coverage was authored, but those migrations remain unverified at runtime. No released v8 artifact or accepted v8 migration path is established.
