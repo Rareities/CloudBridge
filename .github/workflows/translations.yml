@@ -38,6 +38,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        locale: [ca, de, zh-CN]
+        chunk: [1, 2, 3, 4]
         include:
           - locale: ca
             file: app/src/main/res/values-ca/strings.xml
@@ -55,6 +57,9 @@ jobs:
       - name: Prepare Profanity Check
         id: prep
         if: contains(needs.string-change-verification.outputs.files, matrix.file)
+        env:
+          TRANSLATION_CHUNK_INDEX: ${{ matrix.chunk }}
+          TRANSLATION_CHUNK_SIZE: 4500
         run: |
           sudo apt-get install -y xmlstarlet
           pip3 install alt-profanity-check
@@ -66,6 +71,11 @@ jobs:
             exit 1
           fi
           TRANSLATIONS=$(./scripts/generateFilelist.sh "${{ github.event.pull_request.commits }}" "$FILE_LIST")
+          if [ -n "$TRANSLATIONS" ]; then
+            echo 'has_text=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'has_text=false' >> "$GITHUB_OUTPUT"
+          fi
           {
             echo 'TRANSLATIONS<<TRANSLATIONS_EOF'
             printf '%s\n' "$TRANSLATIONS"
@@ -74,7 +84,7 @@ jobs:
         shell: sh
       - uses: fabasoad/translation-action@1476a9db97feaa816029bc027103eb89f3b017bf # v4.2.4
         id: google-translate
-        if: steps.prep.outcome == 'success'
+        if: steps.prep.outputs.has_text == 'true'
         with:
           provider: google
           lang: ${{ matrix.lang }}
@@ -90,7 +100,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: steps.google-translate.outcome == 'success'
         with:
-          name: Translations-${{ matrix.locale }}
+          name: Translations-${{ matrix.locale }}-${{ matrix.chunk }}
           path: |
             changed_texts.txt
             translated_texts.txt
