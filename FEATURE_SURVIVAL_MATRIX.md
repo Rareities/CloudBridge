@@ -1,7 +1,8 @@
 # CloudBridge feature-survival matrix
 
-**Current implementation checkpoint — 2026-09-27:** CloudBridge commit
-`ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to the Rareities fork and pins
+**Current implementation checkpoint — 2026-09-27:** CloudBridge implementation commit
+`ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to the Rareities fork (ledger head
+`5b608a2`) and pins
 Rareities/rclone `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. OSS/RS JVM suites pass 473 tests
 per flavor with zero failures/errors and two skips; both debug flavors package and lint. The
 matrix remains a survival/traceability record, not proof of feature acceptance: first-class

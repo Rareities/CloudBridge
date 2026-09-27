@@ -2,10 +2,12 @@
 
 ## Final implementation pass — 2026-09-27 (PRs deferred by instruction)
 
-- CloudBridge implementation branch is now pushed to `Rareities/CloudBridge` as commit
-  `ddeee759a034b71f0c08697f0cbf17cfba3320e8` (`cloudbridge: harden bisync safety and provenance`).
-  The commit is intentionally unsigned; no release-signing claim is made. PR creation remains
-  deferred until the user authorizes the final PR phase.
+- CloudBridge implementation commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
+  (`cloudbridge: harden bisync safety and provenance`) is pushed to
+  `Rareities/CloudBridge:codex/luna-implementation`; branch head `5b608a2` adds only the
+  reconciled ledgers below. The implementation commit is intentionally unsigned; no
+  release-signing claim is made. PR creation remains deferred until the user authorizes the
+  final PR phase.
 - Current OSS and RS JVM suites both pass from this committed source with JDK 21/Android SDK 36:
   **473 tests, 0 failures, 0 errors, 2 skipped per flavor**. Both flavor lint tasks pass with no
   unfiltered errors; visible warnings remain and existing baseline-filtered findings are retained.
@@ -24,8 +26,9 @@
   preimages; enforces monotonic phase transitions and terminal immutability; serializes same-path
   instances; uses unique temporary/quarantine names; and never overwrites an older quarantine.
   Focused journal tests pass, including API-23 lint compatibility.
-- Rareities/rclone branch `codex/luna-engine-final` remains verified at
-  `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; full `go vet -mod=readonly ./...` passes. Core
+- Rareities/rclone branch `codex/luna-engine-final` has ledger head `4d6404e`; the immutable
+  engine source used by the app remains pinned at
+  `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. Full `go vet -mod=readonly ./...` passes. Core
   package reruns pass: `backend/mega`, `cmd/bisync`, `fs/sync`, `fs/operations`, `fs/accounting`
   and `fs/cache`. The full short suite exits 1 because this Windows host lacks upstream fixture
   init scripts, a usable `echo`/POSIX `sort` helper setup, and a WebDAV range fixture; these are

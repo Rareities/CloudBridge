@@ -2,9 +2,11 @@
 
 **Status:** engineering snapshot only, not a supported-release contract. **Checked:** 2026-09-27. Refresh source, tests, CI, PRs, dependencies, and acceptance evidence before app-pin promotion or release. Source registration and declared SDK/ABI values do not alone establish runtime compatibility.
 
-**Current committed identity:** CloudBridge `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
-on `Rareities/CloudBridge:codex/luna-implementation`; app-native rclone pin
-`cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` from `Rareities/rclone:codex/luna-engine-final`.
+**Current implementation identity:** CloudBridge code commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
+on `Rareities/CloudBridge:codex/luna-implementation`; branch head `5b608a2` adds only
+the reconciled ledgers below. App-native rclone pin
+`cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` from `Rareities/rclone:codex/luna-engine-final`
+(branch head `4d6404e`, ledger-only descendant).
 OSS/RS JVM suites are 473/473 with zero failures/errors and two skips per flavor; both debug
 flavors assemble and both flavor lint tasks pass. The source-bound OSS debug manifest records
 five APKs/four ABIs and toolchain metadata. Instrumentation, Samsung Galaxy S26, live Proton,
