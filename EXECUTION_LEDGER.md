@@ -1,10 +1,14 @@
 # CloudBridge + rclone execution ledger
 
-## Current dirty-source verification checkpoint — 2026-09-27
+## Current committed verification checkpoint — 2026-09-27
 
-- New commits, pushes, PRs and release actions remain intentionally deferred until the
-  final coding, package audit, documentation and verification pass is complete.
-- The current uncommitted source closes short-lived `DatabaseHandler` and `TriggerService`
+- CloudBridge commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` is now pushed to
+  `Rareities/CloudBridge:codex/luna-implementation`; no upstream/original PR was created.
+  PR creation and release publication remain separate final-gate actions.
+- Rareities/rclone verification-ledger commit `cf4e787f7dbd8d2b01c86cdfb1f7577f00decb67`
+  is pushed to `Rareities/rclone:codex/luna-engine-final`; the app remains pinned to exact
+  engine source `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`.
+- The committed source closes short-lived `DatabaseHandler` and `TriggerService`
   instances across import/export, reconciliation, adapters, activities, fragments and
   receivers; rejects a missing/null JSON `tasks` array before replacement; fixes task-copy
   mutation; deletes dependent trigger rows and clears deleted-task follow-ups; normalizes
@@ -15,13 +19,15 @@
   flavor**. Both flavor lint tasks have no unfiltered severity errors (warnings remain),
   and OSS/RS Android-test sources compile. Instrumentation is **NOT RUN** without ADB/device.
 - Native/debug packaging passes with Temurin JDK 21.0.8.9, Go 1.26.8, Gradle 8.13, SDK 36 and
-  NDK 29.0.14206865. Current dirty-source universal APKs are OSS SHA-256
+  NDK 29.0.14206865. Current committed-source universal APKs are OSS SHA-256
   `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903` (134902028 bytes)
   and RS SHA-256 `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338`
   (134902003 bytes); they are debug-only and not release artifacts.
-- Provenance generation is pending the final clean source commit. No production signer,
-  hosted CI, Galaxy S26/One UI/API/firmware, live Proton, race/multi-process or release
-  acceptance evidence exists; those gates remain **NOT RUN/NO-GO**.
+- The clean-tree debug provenance generator was run against the committed source and failed
+  closed because it requires JDK 17 while this host exposes Temurin JDK 21.0.8.9. No current
+  source-bound provenance manifest is claimed. No production signer, hosted CI, Galaxy S26 /
+  One UI/API/firmware, live Proton, race/multi-process or release acceptance evidence exists;
+  those gates remain **NOT RUN/NO-GO**.
 
 ## Previous committed implementation pass — 2026-09-27 (PRs deferred by instruction)
 

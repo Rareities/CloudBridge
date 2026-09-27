@@ -2,17 +2,19 @@
 
 **Status:** engineering snapshot only, not a supported-release contract. **Checked:** 2026-09-27. Refresh source, tests, CI, PRs, dependencies, and acceptance evidence before app-pin promotion or release. Source registration and declared SDK/ABI values do not alone establish runtime compatibility.
 
-**Current dirty-source verification (2026-09-27):** The worktree contains the final uncommitted
-application fixes and documentation updates. Both OSS/RS JVM suites pass **487/487 tests per
+**Current committed verification (2026-09-27):** CloudBridge commit
+`39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork. Both OSS/RS JVM
+suites pass **487/487 tests per
 flavor, 0 failures, 0 errors, 2 skips**; both debug flavors assemble, both flavor lint tasks
 have no unfiltered severity errors, and Android-test sources compile. Current universal debug
 APK hashes are OSS `E4F93EBD3A7C75003D64B74AEB3BD40F349D72BEBAF5CCD43E523123E4D09903`
 (134902028 bytes) and RS
 `C8A9F0E0914D96205C36218902B5376C2F5396C8441B25003A3B27C4A4D72338` (134902003 bytes).
-They are dirty-source, debug-only artifacts; the clean-tree provenance manifest, signer
-continuity, instrumentation, Galaxy S26/One UI/API/firmware, live Proton, hosted CI, race /
-multi-process and release gates remain **PENDING/NOT RUN/NO-GO**. No new commit, push or PR has
-been made in this checkpoint.
+They are debug-only artifacts. The clean-tree provenance generator failed closed because it
+requires JDK 17 while this host exposes JDK 21.0.8.9; no current source-bound manifest is
+claimed. Signer continuity, instrumentation, Galaxy S26/One UI/API/firmware, live Proton,
+hosted CI, race/multi-process and release gates remain **NOT RUN/NO-GO**. No upstream/original
+PR has been created.
 
 **Previous committed implementation identity:** CloudBridge code commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
 on `Rareities/CloudBridge:codex/luna-implementation`; final branch head
@@ -47,14 +49,14 @@ is created. No package has master-level acceptance, and this mapping is not migr
 | Field | Current value | Evidence / limitation |
 |---|---|---|
 | CloudBridge repository | `https://github.com/Rareities/CloudBridge` | Read-only refresh recorded default branch `master` at `c492876258ca841232229249519abe92ff77c3a4` on 2026-09-25. This is not the local implementation checkpoint. |
-| Current local app branch | `codex/luna-implementation` | Implementation source is `ddeee759a034b71f0c08697f0cbf17cfba3320e8` plus final notification-sink fix `236b6a3bb48a485dcddb60880db352936d15883d`, pushed to the Rareities fork. The worktree is clean apart from ignored task-local caches/artifacts. The generated OSS provenance manifest records the exact final checkout; OSS and RS APKs are debug-signed and not release artifacts. |
+| Current local app branch | `codex/luna-implementation` | Final implementation commit `39a5593174553843bf7d7fdbadb84ff7dcd818c0` is pushed to the Rareities fork. The worktree is clean apart from ignored task-local caches/artifacts. The current generator could not emit a provenance manifest because this host has JDK 21 while the script requires JDK 17; OSS and RS APKs are debug-signed and not release artifacts. |
 | Application ID | `de.schuelken.cloudbridge` | `app/build.gradle`; debug variants append `.debug`. Existing signing continuity is not established. |
 | App version defaults | `1.0.1`, versionCode `20` before ABI offsets | `app/build.gradle`; environment overrides exist. Not approved as a release version. |
 | Minimum / compile / target SDK | 23 / 36 / 36 | `app/build.gradle`; declaration is not proof of API/device acceptance. |
 | Flavors / ABIs | `oss`, `rs`; `armeabi-v7a`, `arm64-v8a`, `x86`, `x86_64`, universal APK | `app/build.gradle`; both debug flavors package all four native ABIs. OSS provenance manifest records the five OSS APKs. APKs use the Android Debug signer; release provenance/signing is absent. |
 | Gradle / Java | Wrapper 8.13; checked-in Android workflow uses Temurin JDK 17 | Local verification used Temurin JDK 21.0.8. |
 | Go / NDK | Minimum Go 1.26.0; NDK 29.0.14206865 | `gradle.properties`; local rclone checks used Go 1.26.8 on Windows/amd64. |
-| Database schema | SQLite version 17 | Active development source at `058b63a` plus dirty WP04 changes; v16 introduced app-side Bisync preflight/preview and partial backup-manifest records, while v17 adds `run_filter_snapshot`. Android-test sources compile, but v17 migration instrumentation/runtime execution is **NOT RUN**. A production mutation gate, complete restore/recovery contract, supported source-to-target migration/rollback matrix, and on-device migration result remain absent. |
+| Database schema | SQLite version 17 | Final app commit `39a5593` plus the audited WP04 changes; v16 introduced app-side Bisync preflight/preview and partial backup-manifest records, while v17 adds `run_filter_snapshot`. Android-test sources compile, but v17 migration instrumentation/runtime execution is **NOT RUN**. A production mutation gate, complete restore/recovery contract, supported source-to-target migration/rollback matrix, and on-device migration result remain absent. |
 
 ## Cross-package migration, identity and rollback boundary
 
@@ -92,6 +94,7 @@ complete under the package numbering the user confirms.
 | Engine repository | `https://github.com/Rareities/rclone.git` | Configured in `gradle.properties`. |
 | App immutable engine ref | `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` | Configured in `gradle.properties`; `app/build.gradle` rejects a ref that is not a full 40-character SHA. Gradle refreshes origin refs, verifies reachability and exact checkout, and writes source provenance. This does not establish live provider/device acceptance. |
 | Declared engine version | `1.76.0` | Build property in `gradle.properties`. No release compatibility claim is made from the property alone; verify the built binary’s version/ref before release. |
+| Current Rareities/rclone fork head | `cf4e787f7dbd8d2b01c86cdfb1f7577f00decb67` on `codex/luna-engine-final` | Pushed verification-ledger descendant after the immutable app pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; source and branch are unsigned and not release evidence. |
 | Rareities/rclone implementation branch | `codex/luna-engine-final` at app pin `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; branch head `6533d01df0a639583d6910938e2d1fa97628ea7d` | Fork branch contains a test/documentation-only descendant after the exact app pin. The app pin was independently checked out/refreshed by Gradle. Both the source pin and branch head are unsigned; no release claim is made. |
 | Proton dependency versions at app pin | Proton-API-Bridge `v1.0.5`; go-proton-api `v1.0.4`; gopenpgp `v3.4.1` | Versions are in the pinned checkout's `go.mod`. WP09 package tests/vet used the pinned rclone source paired in an isolated temporary workspace with a local Proton API Bridge v1.0.5 candidate; that candidate was not promoted as a reviewed app dependency change and no live provider calls occurred. |
 
