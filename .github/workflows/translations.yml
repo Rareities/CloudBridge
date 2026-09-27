@@ -15,7 +15,7 @@ jobs:
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c # v46
-      - name: Verify build.gradle changed
+      - name: Detect changed translation files
         id: changeDetection
         env:
           ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
@@ -47,11 +47,11 @@ jobs:
           chmod +x ./scripts/checkProfanity.py
           chmod +x ./scripts/generateFilelist.sh
           FILE_LIST="${{needs.string-change-verification.outputs.files}}"
-          SIZE=$(echo "$FILE_LIST" | awk '{print NF}')
-          if [ "$SIZE" -ne 1 ]; then
-            echo "Only pass the amount of commits and one translation file! You passed: $SIZE"
+          if [ -z "$FILE_LIST" ]; then
+            echo "No changed translation files were provided."
             exit 1
           fi
+          # generateFilelist.sh accepts one or more translation files.
           TRANSLATIONS=$(./scripts/generateFilelist.sh ${{ github.event.pull_request.commits }} ${{needs.string-change-verification.outputs.files}})
           echo "TRANSLATIONS=$TRANSLATIONS" >> $GITHUB_OUTPUT
         shell: sh
