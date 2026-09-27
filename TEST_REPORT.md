@@ -1,5 +1,23 @@
 # CloudBridge + Rareities/rclone test report
 
+## Current committed verification — 2026-09-27
+
+This section supersedes older snapshot rows below. CloudBridge commit
+`ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to
+`Rareities/CloudBridge:codex/luna-implementation`; the engine pin is
+`Rareities/rclone:codex/luna-engine-final` at
+`cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`.
+
+| Scope | Environment / command | Result |
+|---|---|---|
+| CloudBridge OSS + RS JVM | JDK 21.0.8.9, Gradle 8.13, Android SDK 36; `:app:testOssDebugUnitTest :app:testRsDebugUnitTest` | **PASS:** 473 tests per flavor, 0 failures, 0 errors, 2 skipped per flavor. |
+| Android static/source checks | Both flavor lint tasks; OSS/RS Android-test source compilation | **PASS:** lint has no unfiltered errors; instrumentation source compiles. Instrumentation execution is **NOT RUN** without ADB/device. |
+| Native/debug packaging | JDK 17.0.20.1, Go 1.26.8, NDK 29.0.14206865; OSS and RS `assemble*Debug` | **PASS, debug-only:** four native ABIs and both debug flavors assemble. No production signer or release claim. |
+| OSS provenance | `create-debug-provenance.py` against clean commit | **PASS:** source-bound manifest records app `ddeee759`, rclone `cf3ad40d`, five OSS APKs/four ABIs, and toolchain metadata. `releaseAttestation=false`. |
+| rclone core | Go 1.26.8, `go test -short -mod=readonly` on `backend/mega`, `cmd/bisync`, `fs/sync`, `fs/operations`, `fs/accounting`, `fs/cache` | **PASS** for these scopes. `go vet -mod=readonly ./...` **PASS**. |
+| rclone full suite | `go test -short -mod=readonly ./...` | **NOT PASS:** missing Windows test-server init scripts, missing usable `echo`/in-place POSIX `sort`, and a WebDAV range fixture. These environment-limited failures are retained. |
+| Samsung / Proton / release | Galaxy S26 One UI/API/firmware, live Proton disposable area, production signing and hosted CI | **NOT RUN / NO-GO**, not inferred from local passes. |
+
 **Snapshot:** 2026-09-27. **Overall status:** PARTIAL; this is not release acceptance.
 Per-package execution ledgers contain detailed work-package records and must be read
 alongside this summary. WP14 acceptance is tracked gate by gate as **NOT RUN**; planning

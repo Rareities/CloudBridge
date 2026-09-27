@@ -1,5 +1,44 @@
 # CloudBridge + rclone execution ledger
 
+## Final implementation pass — 2026-09-27 (PRs deferred by instruction)
+
+- CloudBridge implementation branch is now pushed to `Rareities/CloudBridge` as commit
+  `ddeee759a034b71f0c08697f0cbf17cfba3320e8` (`cloudbridge: harden bisync safety and provenance`).
+  The commit is intentionally unsigned; no release-signing claim is made. PR creation remains
+  deferred until the user authorizes the final PR phase.
+- Current OSS and RS JVM suites both pass from this committed source with JDK 21/Android SDK 36:
+  **473 tests, 0 failures, 0 errors, 2 skipped per flavor**. Both flavor lint tasks pass with no
+  unfiltered errors; visible warnings remain and existing baseline-filtered findings are retained.
+  OSS and RS Android-test sources compile. Instrumentation execution is **NOT RUN**: no ADB or
+  acceptance device is connected.
+- Native checkout/build passes with Go 1.26.8, JDK 17.0.20.1, Gradle 8.13, Android SDK 36 and
+  NDK 29.0.14206865. OSS and RS debug APKs assemble. The source-bound OSS debug manifest records
+  app commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`, rclone commit
+  `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`, five APK artifacts, four ABIs, and the exact
+  AGP/Kotlin/Gradle/JDK/Go/NDK/compile-SDK toolchain. It is explicitly debug-only and not a
+  release attestation.
+- The provenance generator now rejects dirty app trees, validates the generated rclone
+  refreshed-ref evidence, validates numeric CI Go/NDK inputs, requires a JSON output, and records
+  toolchain metadata. CI checkout uses `persist-credentials: false`.
+- Import transaction journaling now rejects journal paths inside the preimage root and duplicate
+  preimages; enforces monotonic phase transitions and terminal immutability; serializes same-path
+  instances; uses unique temporary/quarantine names; and never overwrites an older quarantine.
+  Focused journal tests pass, including API-23 lint compatibility.
+- Rareities/rclone branch `codex/luna-engine-final` remains verified at
+  `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`; full `go vet -mod=readonly ./...` passes. Core
+  package reruns pass: `backend/mega`, `cmd/bisync`, `fs/sync`, `fs/operations`, `fs/accounting`
+  and `fs/cache`. The full short suite exits 1 because this Windows host lacks upstream fixture
+  init scripts, a usable `echo`/POSIX `sort` helper setup, and a WebDAV range fixture; these are
+  recorded as environment-limited failures, not passes or production regressions.
+- Exact Rareities/go-mega commit `24d3fadc8735096fafbaac00eb3a95a2017033e5` is published on
+  `codex/luna-wp01-final`; its standalone short tests/vet and exact rclone `backend/mega` test
+  pass. It remains a supporting candidate, not an accepted production dependency: race/live
+  MEGA checks, full cross-platform evidence, and independent release provenance are **NOT RUN**.
+- Samsung Galaxy S26/One UI/API/firmware acceptance, live Proton disposable-area/official-client
+  acceptance, production signing identity/continuity, hosted CI confirmation, migration/stress/
+  multi-process/device gates and production release remain **NOT RUN or NO-GO**. No release is
+  published because the handoff requires those gates to pass first.
+
 ## Latest bounded implementation evidence — 2026-09-27
 
 - Current-source OSS and RS JVM suites both pass after the bounded WP02/WP10/VCP changes: **439 tests, 0 failures, 0 errors, 2 skipped per flavor** with JDK 21/Gradle 8.13, offline, `-x :rclone:buildAll -x :rclone:checkoutRclone`. The selected diagnostics/VCP/notification policies pass 73 focused tests. OSS instrumentation sources compile successfully; instrumentation execution is **NOT RUN** because no ADB/device is connected.

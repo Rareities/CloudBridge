@@ -1,5 +1,14 @@
 # CloudBridge feature-survival matrix
 
+**Current implementation checkpoint — 2026-09-27:** CloudBridge commit
+`ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to the Rareities fork and pins
+Rareities/rclone `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd`. OSS/RS JVM suites pass 473 tests
+per flavor with zero failures/errors and two skips; both debug flavors package and lint. The
+matrix remains a survival/traceability record, not proof of feature acceptance: first-class
+Bisync mutation/recovery, scheduling/device behavior, Obsidian lifecycle, live Proton, migration,
+multi-process stress and production signing remain partial or **NOT RUN**. No release claim is
+made and PR creation is deferred until the final user-authorized phase.
+
 **Status:** WP12 inventory and disposition baseline, not a completed compatibility audit. **Checked:** 2026-09-25. `KEEP` records intended preservation, not proof of support or acceptance. No feature removal is authorized by this matrix. "Source present" is distinct from tested, provider-compatible, device-accepted, or released behavior. Migrations below describe only checked-in source/current evidence; **NOT RUN** is not a pass.
 
 **Current-source follow-up (2026-09-26):** active development `DatabaseInfo.DATABASE_VERSION` is
