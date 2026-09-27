@@ -4,8 +4,8 @@
 
 **Current implementation identity:** CloudBridge code commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
 on `Rareities/CloudBridge:codex/luna-implementation`; final branch head
-`36befc3a873e8bd3878eb16fc2cd6d26202ed6f2` adds only reconciled documentation/provenance
-clarifications. App-native rclone pin
+`236b6a3bb48a485dcddb60880db352936d15883d` is the final notification-sink/evidence head.
+App-native rclone pin
 `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` from `Rareities/rclone:codex/luna-engine-final`
 (branch head `6533d01df0a639583d6910938e2d1fa97628ea7d`, test/documentation-only descendant).
 OSS/RS JVM suites are 475/475 with zero failures/errors and two skips per flavor; both debug
@@ -34,7 +34,7 @@ is created. No package has master-level acceptance, and this mapping is not migr
 | Field | Current value | Evidence / limitation |
 |---|---|---|
 | CloudBridge repository | `https://github.com/Rareities/CloudBridge` | Read-only refresh recorded default branch `master` at `c492876258ca841232229249519abe92ff77c3a4` on 2026-09-25. This is not the local implementation checkpoint. |
-| Current local app branch | `codex/luna-implementation` | Implementation source is `ddeee759a034b71f0c08697f0cbf17cfba3320e8`; final branch head is documentation-only `36befc3a873e8bd3878eb16fc2cd6d26202ed6f2`, pushed to the Rareities fork. The worktree is clean apart from ignored task-local caches/artifacts. OSS and RS debug APKs were built from the implementation source and final provenance was regenerated at the final branch head; they are debug-signed and not release artifacts. |
+| Current local app branch | `codex/luna-implementation` | Implementation source is `ddeee759a034b71f0c08697f0cbf17cfba3320e8`; final notification-sink/evidence head is `236b6a3bb48a485dcddb60880db352936d15883d`, pushed to the Rareities fork. The worktree is clean apart from ignored task-local caches/artifacts. OSS and RS debug APKs were built from the implementation source and final provenance was regenerated at the final branch head; they are debug-signed and not release artifacts. |
 | Application ID | `de.schuelken.cloudbridge` | `app/build.gradle`; debug variants append `.debug`. Existing signing continuity is not established. |
 | App version defaults | `1.0.1`, versionCode `20` before ABI offsets | `app/build.gradle`; environment overrides exist. Not approved as a release version. |
 | Minimum / compile / target SDK | 23 / 36 / 36 | `app/build.gradle`; declaration is not proof of API/device acceptance. |
