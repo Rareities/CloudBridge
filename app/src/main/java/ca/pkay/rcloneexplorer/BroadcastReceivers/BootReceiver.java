@@ -15,6 +15,10 @@ public class BootReceiver extends BroadcastReceiver {
         }
         if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
             new TriggerService(context).queueTrigger();
+        } else if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+            // Rebuild every alarm identity after an app update so alarms created by the
+            // legacy 32-bit request-code scheme cannot keep running under ambiguous IDs.
+            new TriggerService(context).queueTrigger();
         } else if (Intent.ACTION_TIME_CHANGED.equals(intent.getAction())
                 || Intent.ACTION_TIMEZONE_CHANGED.equals(intent.getAction())) {
             new TriggerService(context).queueScheduleTriggers();

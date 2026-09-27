@@ -15,7 +15,11 @@ import androidx.annotation.IntDef;
 import androidx.preference.PreferenceManager;
 import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
+import ca.pkay.rcloneexplorer.util.NativeDiagnosticCommandPolicy;
+import ca.pkay.rcloneexplorer.util.SyncLog;
 import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
+import ca.pkay.rcloneexplorer.util.BoundedResponseReader;
+import ca.pkay.rcloneexplorer.util.BoundedByteArrayOutputStream;
 import ca.pkay.rcloneexplorer.util.EndpointConflictCoordinator;
 import ca.pkay.rcloneexplorer.util.EndpointResource;
 import ca.pkay.rcloneexplorer.Database.ResourceClaimLease;
@@ -55,8 +59,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -67,6 +74,10 @@ public class RcloneRcd {
 
     private static final String TAG = "RcloneRcd";
     private static final MediaType JSON = MediaType.parse("application/json");
+    private static final int JOB_CALLBACK_QUEUE_CAPACITY = 64;
+    private static final int MAX_RC_REQUEST_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_RC_RESPONSE_BYTES = 4 * 1024 * 1024;
+    private static final int MAX_RC_ERROR_BYTES = 64 * 1024;
 
     @Retention(RetentionPolicy.SOURCE)
     @IntDef({RUNNING, EXITED, ERROR})
@@ -78,7 +89,7 @@ public class RcloneRcd {
     private static final int ERROR = 1;
 
     private static String rcUser = "admin";
-    private static String rcPass = initPass();
+    private static volatile String rcPass;
 
     private final Context context;
     //private final Log2File log2File;
@@ -86,7 +97,7 @@ public class RcloneRcd {
     private final ConfigSecretStore configSecretStore;
     private final EndpointConflictCoordinator endpointConflictCoordinator;
     private volatile ConfigIdentitySnapshot configIdentityCache;
-    private volatile String configPassword;
+    private volatile ConfigSecretStore.BoundSecret configSecret;
 
     private final String configPath;
     private final String rclone;
@@ -100,6 +111,7 @@ public class RcloneRcd {
     final SparseArray<JobStatusResponse> lastStatus;
     private final ScheduledExecutorService jobMonitorService;
     private final ExecutorService jobStatusExecutor;
+    private final ThreadPoolExecutor jobCallbackExecutor;
     final JobsUpdateHandler jobsUpdateHandler;
 
     private ScheduledFuture<?> jobsUpdateFuture;
@@ -113,6 +125,20 @@ public class RcloneRcd {
         return Base64.encodeToString(values, Base64.NO_WRAP | Base64.URL_SAFE);
     }
 
+    private static String getRcPass() {
+        String password = rcPass;
+        if (password == null) {
+            synchronized (RcloneRcd.class) {
+                password = rcPass;
+                if (password == null) {
+                    password = initPass();
+                    rcPass = password;
+                }
+            }
+        }
+        return password;
+    }
+
     public RcloneRcd(Context context, JobsUpdateHandler handler) {
         this.context = context;
         this.jobsUpdateHandler = handler;
@@ -121,9 +147,9 @@ public class RcloneRcd {
         endpointConflictCoordinator = new EndpointConflictCoordinator(context);
         configSecretStore = new ConfigSecretStore(context);
         try {
-            configPassword = configSecretStore.load();
+            configSecret = configSecretStore.load();
         } catch (Exception e) {
-            configPassword = null;
+            configSecret = null;
             FLog.w(TAG, "Unable to unlock stored rclone config password for rcd");
         }
         mapper = new ObjectMapper();
@@ -140,7 +166,23 @@ public class RcloneRcd {
             t.setDaemon(true);
             return t;
         });
+        jobCallbackExecutor = newJobCallbackExecutor(2, JOB_CALLBACK_QUEUE_CAPACITY);
         jobMonitorService = Executors.newSingleThreadScheduledExecutor();
+    }
+
+    static ThreadPoolExecutor newJobCallbackExecutor(int threadCount, int queueCapacity) {
+        return new ThreadPoolExecutor(threadCount, threadCount, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(queueCapacity), r -> {
+                    Thread t = new Thread(r, "rcd-job-callback");
+                    t.setDaemon(true);
+                    return t;
+                }, (callback, executor) -> {
+                    if (executor.isShutdown()) {
+                        throw new RejectedExecutionException("RCD callback executor is shut down");
+                    }
+                    FLog.w(TAG, "RCD callback queue is full; applying caller-runs backpressure");
+                    callback.run();
+                });
     }
 
     /**
@@ -152,28 +194,28 @@ public class RcloneRcd {
             port = nextAvailablePort();
             String addr = "localhost:" + port;
             String tmpDir = context.getCacheDir().getAbsolutePath();
-            String logFile = context.getExternalFilesDir("logs").getAbsolutePath() + "/rcd.log";
             SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
             String transfers = pref.getString(context.getString(R.string.pref_key_transfers), "4");
+            boolean nativeLoggingRequested = pref.getBoolean(context.getString(R.string.pref_key_logs), false);
             ArrayList<String> parameters = new ArrayList<>(Arrays.asList(
                     rclone,
                     "--config", configPath,
                     "--rc-addr", addr,
                     "--rc-user", rcUser,
-                    "--rc-pass", rcPass,
+                    "--rc-pass", getRcPass(),
                     "--rc-serve",
                     // Transfer throughput tuning for VCP/rcd-driven operations.
                     "--transfers", transfers,
                     "--buffer-size", "16M",
                     "--multi-thread-streams", "4"));
-            if (pref.getBoolean(context.getString(R.string.pref_key_logs), false)) {
-                parameters.addAll(Arrays.asList(
-                        "--log-file", logFile,
-                        "--dump", "headers",
-                        "-vvv"));
+            if (nativeLoggingRequested) {
+                SyncLog.info(context, "Rclone daemon diagnostics",
+                        NativeDiagnosticCommandPolicy.DISABLED_NOTICE);
             }
             parameters.add("rcd");
-            rcd = NativeExecutionHandle.launch(parameters.toArray(new String[0]), getEnv(), "rcd");
+            String[] safeParameters = NativeDiagnosticCommandPolicy.withoutNativeDiagnostics(
+                    parameters.toArray(new String[0]));
+            rcd = NativeExecutionHandle.launch(safeParameters, getEnv(), "rcd");
             rcd.startDrainers();
         } catch (IOException e) {
             FLog.e(TAG, "startRcd: error", e);
@@ -221,11 +263,29 @@ public class RcloneRcd {
 
         environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
 
-        if (configPassword != null && !configPassword.isEmpty()) {
-            environmentValues.add("RCLONE_CONFIG_PASS=" + configPassword);
+        String password = currentConfigPassword();
+        if (password != null && !password.isEmpty()) {
+            environmentValues.add("RCLONE_CONFIG_PASS=" + password);
         }
 
         return environmentValues.toArray(new String[0]);
+    }
+
+    /** Refreshes the saved password after another app component changes its generation. */
+    private String currentConfigPassword() {
+        try {
+            ConfigSecretStore.BoundSecret secret = configSecret;
+            if (secret == null || !configSecretStore.isCurrent(secret)) {
+                secret = configSecretStore.load();
+                configSecret = secret;
+            }
+            return secret != null && configSecretStore.isCurrent(secret)
+                    ? secret.password() : null;
+        } catch (Exception e) {
+            configSecret = null;
+            FLog.w(TAG, "Unable to refresh saved rclone config password for rcd");
+            return null;
+        }
     }
 
     private String getDnsServers() {
@@ -258,7 +318,7 @@ public class RcloneRcd {
                 .append("http://")
                 .append(rcUser)
                 .append(':')
-                .append(rcPass)
+                .append(getRcPass())
                 .append("@127.0.0.1:")
                 .append(port)
                 .toString();
@@ -289,6 +349,7 @@ public class RcloneRcd {
         }
         jobMonitorService.shutdownNow();
         jobStatusExecutor.shutdownNow();
+        jobCallbackExecutor.shutdown();
         stopped = true;
         return confirmed;
     }
@@ -408,8 +469,12 @@ public class RcloneRcd {
     private OkHttpClient prepareClient() {
         if (null == okHttpClient) {
             OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                    .connectTimeout(10, TimeUnit.SECONDS)
+                    .readTimeout(15, TimeUnit.SECONDS)
+                    .writeTimeout(15, TimeUnit.SECONDS)
+                    .callTimeout(30, TimeUnit.SECONDS)
                     .authenticator((route, response) -> {
-                        String credential = Credentials.basic(rcUser, rcPass);
+                        String credential = Credentials.basic(rcUser, getRcPass());
                         return response.request().newBuilder()
                                 .header("Authorization", credential).build();
                     });
@@ -436,35 +501,52 @@ public class RcloneRcd {
                 .addPathSegments(method)
                 .build();
         byte[] callParams;
-        try {
-            callParams = mapper.writeValueAsBytes(params);
+        try (BoundedByteArrayOutputStream requestBuffer =
+                     new BoundedByteArrayOutputStream(MAX_RC_REQUEST_BYTES)) {
+            mapper.writeValue(requestBuffer, params);
+            callParams = requestBuffer.toByteArray();
         } catch (JsonProcessingException e) {
-            ErrorResponse response = new ErrorResponse();
-            response.operation = method;
-            response.error = e.getMessage();
-            throw new RcdOpException(response);
+            if (causedByRequestSizeLimit(e)) {
+                throw new RcdOpException(RcdExternalFailure.requestTooLarge());
+            }
+            throw new RcdOpException(RcdExternalFailure.requestEncodingFailed());
+        } catch (IOException e) {
+            if (causedByRequestSizeLimit(e)) {
+                throw new RcdOpException(RcdExternalFailure.requestTooLarge());
+            }
+            throw new RcdOpException(RcdExternalFailure.requestEncodingFailed());
         }
         RequestBody body = RequestBody.create(callParams, JSON);
         Request request = new Request.Builder().url(url).post(body).build();
 
         try (Response response = client.newCall(request).execute()) {
             try {
+                if (response.body() == null) {
+                    throw new IOException("Rclone RC response body is missing");
+                }
                 if (isErrorCode(response.code())) {
-                    ErrorResponse error = mapper.readValue(response.body().byteStream(), ErrorResponse.class);
+                    byte[] responseBytes = BoundedResponseReader.read(
+                            response.body().byteStream(), MAX_RC_ERROR_BYTES);
+                    ErrorResponse error = mapper.readValue(responseBytes, ErrorResponse.class);
+                    if (error == null) {
+                        throw new RcdOpException(RcdExternalFailure.invalidResponse());
+                    }
                     // The transport status is authoritative when deciding whether a mutation
                     // request was rejected or may have started without a job handle.
                     error.status = response.code();
                     throw new RcdOpException(error);
                 } else {
+                    byte[] responseBytes = BoundedResponseReader.read(
+                            response.body().byteStream(), MAX_RC_RESPONSE_BYTES);
                     if (typeReference != null) {
-                        return mapper.readValue(response.body().byteStream(), typeReference);
+                        return mapper.readValue(responseBytes, typeReference);
                     } else {
-                        return mapper.readValue(response.body().byteStream(), responseType);
+                        return mapper.readValue(responseBytes, responseType);
                     }
                 }
             } catch (JsonProcessingException e) {
-                FLog.e(TAG, "performRcCall: ", e);
-                throw new RuntimeException(e);
+                FLog.w(TAG, "performRcCall: malformed JSON response; details omitted");
+                throw new RcdOpException(RcdExternalFailure.invalidResponse());
             }
         } catch (IOException e) {
             throw new RcdIOException(e);
@@ -475,10 +557,19 @@ public class RcloneRcd {
         return 400 <= code;
     }
 
+    private static boolean causedByRequestSizeLimit(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof BoundedByteArrayOutputStream.SizeLimitExceededException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     ///
     /// Job Handling
     ///
-    private static class RunJobStatusHandler implements Runnable {
+    static class RunJobStatusHandler implements Runnable {
         private final JobStatusHandler handler;
         private final JobStatusResponse response;
 
@@ -489,7 +580,7 @@ public class RcloneRcd {
 
         @Override
         public void run() {
-            handler.handleJobStatus(response);
+            runJobStatusHandlerSafely(handler, response);
         }
     }
 
@@ -535,7 +626,7 @@ public class RcloneRcd {
                             }
                             if (null != handler) {
                                 FLog.v(TAG, "job finished: " + jobId);
-                                mainThread(handler, response);
+                                dispatchJobStatus(handler, response);
                             }
                             return -1; // terminal: do not re-queue
                         }
@@ -543,7 +634,7 @@ public class RcloneRcd {
                         return jobId; // still running: re-queue
                     } catch (RcdOpException e) {
                         FLog.e(TAG, "job error: ", e);
-                        if ("job not found".equals(e.getError())) {
+                        if (e.isJobNotFound()) {
                             return -1; // drop unknown job
                         }
                         return jobId; // transient error: retry next tick
@@ -574,6 +665,37 @@ public class RcloneRcd {
 
     void mainThread(final JobStatusHandler handler, final JobStatusResponse response) {
         mainThread(new RunJobStatusHandler(handler, response));
+    }
+
+    private void dispatchJobStatus(JobStatusHandler handler, JobStatusResponse response) {
+        if (handler.dispatchOnMainThread()) {
+            mainThread(handler, response);
+            return;
+        }
+        Runnable callback = () -> runJobStatusHandlerSafely(handler, response);
+        try {
+            jobCallbackExecutor.execute(callback);
+        } catch (RejectedExecutionException rejected) {
+            FLog.w(TAG, "RCD callback executor unavailable; dispatching on poller thread");
+            runJobStatusHandlerSafely(handler, response);
+        }
+    }
+
+    static void runJobStatusHandlerSafely(JobStatusHandler handler, JobStatusResponse response) {
+        RuntimeException failure = invokeJobStatusHandler(handler, response);
+        if (failure != null) {
+            FLog.e(TAG, "RCD job completion callback failed", failure);
+        }
+    }
+
+    static RuntimeException invokeJobStatusHandler(JobStatusHandler handler,
+                                                   JobStatusResponse response) {
+        try {
+            handler.handleJobStatus(response);
+            return null;
+        } catch (RuntimeException failure) {
+            return failure;
+        }
     }
 
     void mainThread(Runnable runnable) {
@@ -758,14 +880,22 @@ public class RcloneRcd {
     }
 
     private JobStatusHandler releaseClaimOnCompletion(ResourceClaimLease claim, JobStatusHandler handler) {
-        return response -> {
-            if (response != null && response.finished) {
-                claim.close();
-                synchronized (jobsHandlers) {
-                    jobsHandlers.remove(response.id);
+        return new JobStatusHandler() {
+            @Override
+            public void handleJobStatus(JobStatusResponse response) {
+                if (response != null && response.finished) {
+                    claim.close();
+                    synchronized (jobsHandlers) {
+                        jobsHandlers.remove(response.id);
+                    }
                 }
+                if (handler != null) handler.handleJobStatus(response);
             }
-            if (handler != null) handler.handleJobStatus(response);
+
+            @Override
+            public boolean dispatchOnMainThread() {
+                return handler == null || handler.dispatchOnMainThread();
+            }
         };
     }
 
@@ -1299,21 +1429,44 @@ public class RcloneRcd {
 
     public interface JobStatusHandler {
         void handleJobStatus(JobStatusResponse jobStatusResponse);
+
+        /** Preserve the historical main-thread callback unless a handler opts out. */
+        default boolean dispatchOnMainThread() {
+            return true;
+        }
     }
 
     public static class RcdOpException extends RuntimeException {
-        private ErrorResponse error;
+        private final ErrorResponse error;
+        private final RcdExternalFailure externalFailure;
 
         public RcdOpException(ErrorResponse error) {
-            super("Error when executing " + error.operation);
+            super("Rclone remote-control operation failed");
             this.error = error;
+            this.externalFailure = RcdExternalFailure.fromResponse(
+                    error == null ? null : error.getError(), error == null ? -1 : error.getStatus());
         }
 
-        private RcdOpException() {
+        protected RcdOpException(RcdExternalFailure externalFailure) {
+            super("Rclone remote-control request failed");
+            this.error = null;
+            this.externalFailure = externalFailure;
         }
 
+        /** Returns fixed, user-safe text; server-controlled response content is never exposed. */
         public String getError() {
-            return error.getError();
+            return externalFailure.getMessage();
+        }
+
+        /** Typed external classification for callers that need to present tailored safe text. */
+        public RcdExternalFailure getExternalFailure() {
+            return externalFailure;
+        }
+
+        /** Internal classification retains the exact protocol meaning without exposing it. */
+        boolean isJobNotFound() {
+            return error != null && error.getError() != null
+                    && "job not found".equalsIgnoreCase(error.getError().trim());
         }
 
         int getStatus() {
@@ -1322,15 +1475,8 @@ public class RcloneRcd {
     }
 
     public static class RcdIOException extends RcdOpException {
-        private IOException exception;
-
-        public RcdIOException(IOException exception) {
-            this.exception = exception;
-        }
-
-        @Override
-        public String getError() {
-            return exception.getClass().getSimpleName() + ": " + exception.getMessage();
+        public RcdIOException(IOException ignored) {
+            super(RcdExternalFailure.transportFailure());
         }
     }
 

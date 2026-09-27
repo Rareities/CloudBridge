@@ -46,6 +46,7 @@ import org.json.JSONException;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -61,6 +62,7 @@ import ca.pkay.rcloneexplorer.AppShortcutsHelper;
 import ca.pkay.rcloneexplorer.BuildConfig;
 import ca.pkay.rcloneexplorer.Database.json.Exporter;
 import ca.pkay.rcloneexplorer.Database.json.Importer;
+import ca.pkay.rcloneexplorer.Database.json.ImportRollbackCoordinator;
 import ca.pkay.rcloneexplorer.workmanager.SessionGuardianScheduler;
 import ca.pkay.rcloneexplorer.Database.json.SharedPreferencesBackup;
 import ca.pkay.rcloneexplorer.Dialogs.Dialogs;
@@ -78,12 +80,16 @@ import ca.pkay.rcloneexplorer.Rclone;
 import ca.pkay.rcloneexplorer.RemoteConfig.InternxtReauth;
 import ca.pkay.rcloneexplorer.RemoteConfig.RemoteConfigHelper;
 import ca.pkay.rcloneexplorer.RuntimeConfiguration;
+import ca.pkay.rcloneexplorer.Services.TriggerPermissionRecoveryPolicy;
 import ca.pkay.rcloneexplorer.Services.StreamingService;
 import ca.pkay.rcloneexplorer.Services.TriggerService;
 import ca.pkay.rcloneexplorer.util.ActivityHelper;
+import ca.pkay.rcloneexplorer.util.BackupArchiveStager;
+import ca.pkay.rcloneexplorer.util.BackupImportFormat;
 import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.PermissionManager;
 import ca.pkay.rcloneexplorer.util.SharedPreferencesUtil;
+import ca.pkay.rcloneexplorer.util.ShortcutCapabilities;
 import de.schuelken.cloudbridge.updates.UpdateChecker;
 import es.dmoral.toasty.Toasty;
 import java9.util.stream.Stream;
@@ -95,6 +101,8 @@ public class MainActivity extends AppCompatActivity
         InputDialog.OnPositive {
 
     private static final String TAG = "MainActivity";
+    private static final String PREF_PENDING_EXACT_ALARM_RECONCILIATION =
+            "internal_pending_exact_alarm_reconciliation";
     public static final String MAIN_ACTIVITY_START_LOG = "MAIN_ACTIVITY_START_LOG";
     public static final String MAIN_ACTIVITY_START_IMPORT = "MAIN_ACTIVITY_START_IMPORT";
     public static final String MAIN_ACTIVITY_START_EXPORT = "MAIN_ACTIVITY_START_EXPORT";
@@ -152,7 +160,15 @@ public class MainActivity extends AppCompatActivity
         findViewById(R.id.locked_config_btn).setOnClickListener(v -> askForConfigPassword());
 
         Intent intent = getIntent();
-        Bundle bundle = intent.getExtras();
+        String shortcutRemoteName = getStringExtraIfWellTyped(
+                intent, AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME);
+        if (shortcutRemoteName != null
+                && (!Intent.ACTION_MAIN.equals(intent.getAction())
+                || !ShortcutCapabilities.isValidIntent(this, intent.getAction(), shortcutRemoteName,
+                getStringExtraIfWellTyped(intent, ShortcutCapabilities.EXTRA_INTENT_CAPABILITY)))) {
+            FLog.w(TAG, "Rejected remote shortcut intent without a valid capability");
+            shortcutRemoteName = null;
+        }
 
         int lastVersionCode = sharedPreferences.getInt(getString(R.string.pref_key_version_code), -1);
         String lastVersionName = sharedPreferences.getString(getString(R.string.pref_key_version_name), "");
@@ -182,9 +198,9 @@ public class MainActivity extends AppCompatActivity
             } else {
                 startRemotesFragment();
             }
-        } else if (bundle != null && bundle.containsKey(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME)) {
-            String remoteName = bundle.getString(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME);
-            RemoteItem remoteItem = rclone.getRemoteItemFromName(remoteName);
+        } else if (shortcutRemoteName != null
+                && !MAIN_ACTIVITY_START_REAUTH.equals(intent.getAction())) {
+            RemoteItem remoteItem = rclone.getRemoteItemFromName(shortcutRemoteName);
             if (remoteItem != null) {
                 AppShortcutsHelper.reportAppShortcutUsage(this, remoteItem.getName());
                 startRemote(remoteItem, false);
@@ -231,8 +247,29 @@ public class MainActivity extends AppCompatActivity
             return;
         }
         String action = intent.getAction();
+        boolean internalAction = MAIN_ACTIVITY_START_LOG.equals(action)
+                || MAIN_ACTIVITY_START_IMPORT.equals(action)
+                || MAIN_ACTIVITY_START_EXPORT.equals(action)
+                || MAIN_ACTIVITY_START_REAUTH.equals(action);
+        if (!internalAction) {
+            return;
+        }
+
+        String target = MAIN_ACTIVITY_START_REAUTH.equals(action)
+                ? getStringExtraIfWellTyped(intent, AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME)
+                : action;
+        String capability = getStringExtraIfWellTyped(
+                intent, ShortcutCapabilities.EXTRA_INTENT_CAPABILITY);
+        if (!ShortcutCapabilities.consumeIntent(this, action, target, capability)) {
+            FLog.w(TAG, "Rejected internal activity intent without a valid capability");
+            return;
+        }
+
         if (MAIN_ACTIVITY_START_LOG.equals(action)) {
             startLogFragment();
+            if (navigationView != null) {
+                navigationView.setCheckedItem(R.id.nav_logs);
+            }
         } else if (MAIN_ACTIVITY_START_IMPORT.equals(action)) {
             //todo: Migrate import and export out of the main activity
             startConfigImportFlow();
@@ -244,6 +281,21 @@ public class MainActivity extends AppCompatActivity
         }
     }
 
+    /** Creates an action intent for trusted in-app controls; exported callers cannot mint its token. */
+    @NonNull
+    public static Intent createAuthorizedInternalActionIntent(@NonNull Context context,
+                                                               @NonNull String action) {
+        if (!MAIN_ACTIVITY_START_LOG.equals(action)
+                && !MAIN_ACTIVITY_START_IMPORT.equals(action)
+                && !MAIN_ACTIVITY_START_EXPORT.equals(action)) {
+            throw new IllegalArgumentException("Unsupported internal activity action");
+        }
+        String capability = ShortcutCapabilities.issueOrGetForIntent(context, action, action);
+        return new Intent(context, MainActivity.class)
+                .setAction(action)
+                .putExtra(ShortcutCapabilities.EXTRA_INTENT_CAPABILITY, capability);
+    }
+
     /**
      * Deep-link handler for the "Session expired" notification: opens the
      * remotes view and, if the named remote still exists and is an Internxt
@@ -251,7 +303,8 @@ public class MainActivity extends AppCompatActivity
      * have to find and long-press the remote themselves.
      */
     private void handleReauthIntent(@NonNull Intent intent) {
-        String remoteName = intent.getStringExtra(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME);
+        String remoteName = getStringExtraIfWellTyped(
+                intent, AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME);
         if (remoteName == null) {
             startRemotesFragment();
             return;
@@ -280,9 +333,58 @@ public class MainActivity extends AppCompatActivity
     protected void onResume() {
         super.onResume();
         updatePermissionFragmentVisibility();
-        if(MAIN_ACTIVITY_START_LOG.equals(getIntent().getAction())){
-            startLogFragment();
-            navigationView.setCheckedItem(R.id.nav_logs);
+        reconcileScheduledTriggersAfterPermissionChange();
+    }
+
+    @Nullable
+    private static String getStringExtraIfWellTyped(@NonNull Intent intent, @NonNull String key) {
+        try {
+            Bundle extras = intent.getExtras();
+            return extras == null ? null : ShortcutCapabilities.stringValue(extras.get(key));
+        } catch (RuntimeException malformedExtra) {
+            // An exported activity must reject broken/untrusted Parcelable bundles, not crash.
+            return null;
+        }
+    }
+
+    /**
+     * Exact-alarm denial cancels scheduled alarms. Remember that reconciliation is
+     * needed while denied, then retry only schedule triggers after permission returns.
+     */
+    private void reconcileScheduledTriggersAfterPermissionChange() {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+        boolean permissionGranted = new PermissionManager(this).grantedAlarms();
+        boolean reconciliationPending = preferences.getBoolean(
+                PREF_PENDING_EXACT_ALARM_RECONCILIATION, false);
+
+        if (!permissionGranted) {
+            if (!reconciliationPending && !preferences.edit()
+                    .putBoolean(PREF_PENDING_EXACT_ALARM_RECONCILIATION, true)
+                    .commit()) {
+                FLog.e(TAG, "Could not persist pending scheduled-trigger reconciliation");
+            }
+            return;
+        }
+
+        if (!TriggerPermissionRecoveryPolicy.shouldAttempt(
+                reconciliationPending, permissionGranted)) {
+            return;
+        }
+
+        try {
+            boolean allSchedulesReconciled = new TriggerService(this).queueScheduleTriggers();
+            // Permission can be revoked while AlarmManager calls are in progress. Do not
+            // clear the retry marker if the reconciliation became incomplete mid-pass.
+            if (!TriggerPermissionRecoveryPolicy.canClearPending(
+                    new PermissionManager(this).grantedAlarms(), allSchedulesReconciled)) {
+                return;
+            }
+            if (!preferences.edit().remove(PREF_PENDING_EXACT_ALARM_RECONCILIATION).commit()) {
+                FLog.e(TAG, "Could not persist completed scheduled-trigger reconciliation");
+            }
+        } catch (RuntimeException e) {
+            // Keep the durable marker so the next foreground resume retries idempotently.
+            FLog.e(TAG, "Scheduled-trigger reconciliation failed after permission was restored", e);
         }
     }
 
@@ -619,7 +721,7 @@ public class MainActivity extends AppCompatActivity
     public void exportConfigFile() {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/*");
+        intent.setType("application/zip");
         SimpleDateFormat date = new SimpleDateFormat("yyyy-MM-dd_HHmmss");
         String localTime = date.format(Calendar.getInstance().getTime());
 
@@ -743,26 +845,45 @@ public class MainActivity extends AppCompatActivity
         protected Boolean doInBackground(Uri... uris) {
 
             ContentResolver resolver = context.getContentResolver();
-            String mime = resolver.getType(uris[0]);
+            final BackupImportFormat.DetectedInput detectedInput;
+            try {
+                // SAF providers disagree about backup MIME types. Inspect the bytes, then keep
+                // this same stream so ZIP staging does not reopen a potentially mutable URI.
+                InputStream source = resolver.openInputStream(uris[0]);
+                detectedInput = BackupImportFormat.inspect(source);
+            } catch (IOException | NullPointerException e) {
+                statusCode = FAILURE_RCLONE_CONF_NOT_VALID;
+                FLog.e(TAG, "Unable to open selected config or backup", e);
+                return false;
+            }
 
-            if("application/zip".equals(mime)) {
+            if(detectedInput.isZipArchive()) {
                 String importedDatabase = null;
                 String importedPreferences = null;
                 String previousDatabase = null;
                 String previousPreferences = null;
+                BackupArchiveStager.StagedArchive stagedArchive = null;
                 File stagedConfig = null;
                 File previousConfig = null;
                 Rclone.ConfigTransaction configTransaction = null;
                 boolean storesChanged = false;
+                boolean importCommitted = false;
+                // [0] means rollback reached config restoration; [1] means the config file
+                // restored; [2] means its matching saved-password state restored. A partial
+                // restore must keep the only pre-import config snapshot for recovery.
+                final boolean[] configRestoreState = new boolean[3];
                 try {
                     try {
-                        // Read and validate every part before touching the current configuration.
-                        importedDatabase = rclone.readDatabaseJson(uris[0]);
-                        importedPreferences = rclone.readSharedPrefs(uris[0]);
+                        // Snapshot and validate the complete archive before parsing any component
+                        // or touching a store. All reads below use this one immutable local copy.
+                        stagedArchive = BackupArchiveStager.stage(
+                                detectedInput::getStream, context.getFilesDir());
+                        importedDatabase = rclone.readDatabaseJson(stagedArchive);
+                        importedPreferences = rclone.readSharedPrefs(stagedArchive);
                         Importer.validate(importedDatabase);
                         SharedPreferencesBackup.validate(importedPreferences);
 
-                        stagedConfig = rclone.stageConfigFileFromZip(uris[0]);
+                        stagedConfig = rclone.stageConfigFileFromZip(stagedArchive);
                         if(stagedConfig == null) {
                             statusCode = FAILURE_ZIP_INVALID_CONF;
                             return false;
@@ -781,6 +902,7 @@ public class MainActivity extends AppCompatActivity
                         configTransaction.commitStagedConfigFile(stagedConfig);
                         stagedConfig = null;
                         statusCode = SUCCESS_IMPORT;
+                        importCommitted = true;
                         return true;
                     } catch (JSONException e) {
                         statusCode = FAILURE_ZIP_INVALID_JSON;
@@ -789,30 +911,85 @@ public class MainActivity extends AppCompatActivity
                         FLog.e(TAG, "Backup import failed; attempting rollback", e);
                     }
 
-                    // If any later part failed, restore every store that may have changed.
-                    try {
-                        if (previousDatabase != null) {
-                            Importer.importJson(previousDatabase, context);
-                        }
-                        if (previousPreferences != null) {
-                            SharedPreferencesBackup.importJson(previousPreferences, context);
-                        }
-                        if (storesChanged && configTransaction != null) {
-                            configTransaction.restoreConfigSnapshot(previousConfig);
-                        }
-                    } catch (Exception rollbackError) {
+                    // Attempt each store independently so one failed restore does not suppress
+                    // recovery of the remaining stores. Keep the first cause and all later ones.
+                    final String databaseSnapshot = previousDatabase;
+                    final String preferenceSnapshot = previousPreferences;
+                    final boolean shouldRestoreStores = storesChanged;
+                    final Rclone.ConfigTransaction transaction = configTransaction;
+                    final File configSnapshot = previousConfig;
+                    Exception rollbackError = ImportRollbackCoordinator.restoreAll(
+                            () -> {
+                                if (databaseSnapshot != null) {
+                                    Importer.importJson(databaseSnapshot, context);
+                                }
+                            },
+                            () -> {
+                                if (preferenceSnapshot != null) {
+                                    SharedPreferencesBackup.importJson(preferenceSnapshot, context);
+                                }
+                            },
+                            () -> {
+                                if (shouldRestoreStores && transaction != null
+                                        && transaction.configWasReplaced()) {
+                                    configRestoreState[0] = true;
+                                    Exception configRestoreFailure = null;
+                                    try {
+                                        transaction.restoreConfigSnapshot(configSnapshot);
+                                        configRestoreState[1] = true;
+                                    } catch (Exception failure) {
+                                        configRestoreFailure = failure;
+                                    }
+                                    if (transaction.configSnapshotWasRestored()) {
+                                        try {
+                                            transaction.restoreConfigSecretSnapshot();
+                                            configRestoreState[2] = true;
+                                        } catch (Exception secretRestoreFailure) {
+                                            if (configRestoreFailure == null) {
+                                                configRestoreFailure = secretRestoreFailure;
+                                            } else {
+                                                configRestoreFailure.addSuppressed(secretRestoreFailure);
+                                            }
+                                        }
+                                    }
+                                    if (configRestoreFailure != null) throw configRestoreFailure;
+                                }
+                            });
+                    if (rollbackError != null) {
                         FLog.e(TAG, "Backup rollback failed; configuration may require recovery", rollbackError);
                         statusCode = FAILURE_UNSPECIFIED;
                     }
                     return false;
                 } finally {
+                    if (stagedArchive != null) {
+                        try {
+                            stagedArchive.close();
+                        } catch (IOException cleanupFailure) {
+                            FLog.e(TAG, "Unable to remove temporary staged backup archive",
+                                    cleanupFailure);
+                        }
+                    }
+                    try {
+                        detectedInput.close();
+                    } catch (IOException cleanupFailure) {
+                        FLog.e(TAG, "Unable to close selected backup stream", cleanupFailure);
+                    }
                     if (stagedConfig != null && stagedConfig.exists()) {
                         if (!stagedConfig.delete()) {
                             FLog.w(TAG, "Unable to remove staged backup config after import");
                         }
                     }
-                    if (previousConfig != null && previousConfig.exists() && !previousConfig.delete()) {
-                        FLog.w(TAG, "Unable to remove temporary pre-import config snapshot");
+                    if (previousConfig != null && previousConfig.exists()) {
+                        boolean configWasReplaced = configTransaction != null
+                                && configTransaction.configWasReplaced();
+                        if (!ImportRollbackCoordinator.canDiscardConfigSnapshot(importCommitted,
+                                configWasReplaced, configRestoreState[0], configRestoreState[1],
+                                configRestoreState[2])) {
+                            FLog.e(TAG, "Preserving pre-import config snapshot after incomplete rollback: "
+                                    + previousConfig.getName());
+                        } else if (!previousConfig.delete()) {
+                            FLog.w(TAG, "Unable to remove temporary pre-import config snapshot");
+                        }
                     }
                     if (configTransaction != null) {
                         configTransaction.close();
@@ -820,8 +997,11 @@ public class MainActivity extends AppCompatActivity
                 }
             }
 
+            // Raw rclone configs use the existing bounded validator/transaction path, but consume
+            // the exact same stream whose prefix selected this format. SAF URIs may be mutable or
+            // non-repeatable, so never reopen the provider after inspection.
             try {
-                boolean validRclone = rclone.copyConfigFile(uris[0]);
+                boolean validRclone = rclone.copyConfigFile(detectedInput.getStream());
                 if(validRclone) {
                     statusCode = SUCCESS_IMPORT;
                     return true;
@@ -831,6 +1011,12 @@ public class MainActivity extends AppCompatActivity
             } catch (IOException e) {
                 statusCode = FAILURE_RCLONE_CONF_NOT_VALID;
                 return false;
+            } finally {
+                try {
+                    detectedInput.close();
+                } catch (IOException cleanupFailure) {
+                    FLog.e(TAG, "Unable to close selected config stream", cleanupFailure);
+                }
             }
         }
 

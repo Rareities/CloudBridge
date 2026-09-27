@@ -55,18 +55,22 @@ public class Importer {
     public static void importJson(String json, Context context) throws JSONException {
         ParsedImport parsed = parse(json);
         DatabaseHandler dbHandler = new DatabaseHandler(context);
-        synchronized (TriggerStateLock.MONITOR) {
-            ArrayList<Long> previousTriggerIds = new ArrayList<>();
-            for (Trigger trigger : dbHandler.getAllTrigger()) {
-                previousTriggerIds.add(trigger.getId());
-            }
-            dbHandler.replaceAll(parsed.triggers, parsed.filters, parsed.tasks);
+        try {
+            synchronized (TriggerStateLock.MONITOR) {
+                ArrayList<Long> previousTriggerIds = new ArrayList<>();
+                for (Trigger trigger : dbHandler.getAllTrigger()) {
+                    previousTriggerIds.add(trigger.getId());
+                }
+                dbHandler.replaceAll(parsed.triggers, parsed.filters, parsed.tasks);
 
-            TriggerService triggerService = new TriggerService(context);
-            for (Long previousTriggerId : previousTriggerIds) {
-                triggerService.cancelTrigger(previousTriggerId);
+                TriggerService triggerService = new TriggerService(context);
+                for (Long previousTriggerId : previousTriggerIds) {
+                    triggerService.cancelTrigger(previousTriggerId);
+                }
+                triggerService.queueTrigger();
             }
-            triggerService.queueTrigger();
+        } finally {
+            dbHandler.close();
         }
     }
 

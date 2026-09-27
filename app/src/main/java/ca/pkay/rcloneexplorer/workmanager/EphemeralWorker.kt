@@ -24,6 +24,8 @@ import ca.pkay.rcloneexplorer.notifications.prototypes.WorkerNotification
 import ca.pkay.rcloneexplorer.notifications.support.StatusObject
 import ca.pkay.rcloneexplorer.util.FLog
 import ca.pkay.rcloneexplorer.util.NativeExecutionHandle
+import ca.pkay.rcloneexplorer.util.NotificationSinkPolicy
+import ca.pkay.rcloneexplorer.util.StagedUploadSourceCleanup
 import ca.pkay.rcloneexplorer.util.SyncLog
 import ca.pkay.rcloneexplorer.util.TransferLocks
 import ca.pkay.rcloneexplorer.util.WifiConnectivitiyUtil
@@ -59,11 +61,13 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
         const val UPLOAD_FILE = "UPLOAD_FILE"
         const val UPLOAD_TARGETPATH = "UPLOAD_TARGETPATH"
+        const val UPLOAD_STAGED_SOURCE = "UPLOAD_STAGED_SOURCE"
 
         const val MOVE_FILE = "MOVE_FILE"
         const val MOVE_TARGETPATH = "MOVE_TARGETPATH"
 
         const val DELETE_FILE = "DELETE_FILE"
+        const val DELETE_CONFIG_REVISION = "DELETE_CONFIG_REVISION"
     }
 
     internal enum class FAILURE_REASON {
@@ -83,13 +87,14 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private var sConnectivityChanged = false
 
     private var sRcloneProcess: NativeExecutionHandle? = null
+    @Volatile private var stagedUploadSourceCleanup: StagedUploadSourceCleanup? = null
     private val nativeLaunchLock = Any()
     private val receiverLock = Any()
     private var receiverRegistered = false
     @Volatile private var stopRequested = false
     private val statusObject = StatusObject(mContext)
     private var failureReason = FAILURE_REASON.NO_FAILURE
-    private var endNotificationAlreadyPosted = false
+    private val terminalNotificationPolicy = EphemeralTerminalNotificationPolicy()
     private var silentRun = false
     private val ongoingNotificationID = Random.nextInt()
     private var lastNotificationUpdateMs = 0L
@@ -98,20 +103,62 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private var mTitle: String = mNotificationManager?.initialTitle ?: ""
 
     override fun doWork(): Result {
+        stagedUploadSourceCleanup = createStagedUploadSourceCleanup()
+        return try {
+            val result = try {
+                doWorkInternal()
+            } catch (e: Exception) {
+                terminalNotificationPolicy.updateIfPending {
+                    if (failureReason == FAILURE_REASON.NO_FAILURE) {
+                        failureReason = FAILURE_REASON.RCLONE_ERROR
+                    }
+                }
+                log("Unexpected worker failure: ${e.message ?: e.javaClass.simpleName}")
+                try {
+                    finishWork()
+                } catch (finishError: Exception) {
+                    log("Unable to complete worker cleanup: ${finishError.message ?: finishError.javaClass.simpleName}")
+                }
+                Result.failure()
+            }
+            // Also handles validation returns that occur before native execution starts.
+            try {
+                postSync()
+            } catch (notificationError: Exception) {
+                log("Unable to publish terminal notification: ${notificationError.message ?: notificationError.javaClass.simpleName}")
+            }
+            if (failureReason == FAILURE_REASON.NO_FAILURE) result else Result.failure()
+        } finally {
+            stagedUploadSourceCleanup?.cleanupAfter(sRcloneProcess)
+        }
+    }
+
+    private fun createStagedUploadSourceCleanup(): StagedUploadSourceCleanup? {
+        if (!inputData.getBoolean(UPLOAD_STAGED_SOURCE, false)) return null
+        val stagedPath = inputData.getString(UPLOAD_FILE) ?: return null
+        return StagedUploadSourceCleanup(mContext.cacheDir, File(stagedPath))
+    }
+
+    private fun doWorkInternal(): Result {
 
         registerBroadcastReceivers()
-
-        updateForegroundNotification(mNotificationManager?.updateNotification(
-            mTitle,
-            mTitle,
-            ArrayList(),
-            0,
-            ongoingNotificationID
-        ))
 
         if (inputData.keyValueMap.containsKey(EPHEMERAL_TYPE)){
             val type = Type.valueOf(inputData.getString(EPHEMERAL_TYPE) ?: "")
             mNotificationManager = prepareNotificationManager(type)
+            mTitle = mNotificationManager?.initialTitle ?: ""
+            updateForegroundNotification(mNotificationManager?.updateNotification(
+                mTitle,
+                mTitle,
+                ArrayList(),
+                0,
+                ongoingNotificationID
+            ))
+            val deleteConfigRevision = inputData.getString(DELETE_CONFIG_REVISION)
+            if (type == Type.DELETE && !SnackbarDeletePolicy.hasConfigRevision(deleteConfigRevision)) {
+                log("Refusing queued delete without a valid remote config revision")
+                return Result.failure()
+            }
 
             val remoteItem = getRemoteitemFromParcel(REMOTE)
             if(remoteItem == null){
@@ -149,7 +196,8 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                         launchOwnedIfRunning { Rclone(mContext).uploadFileOwned(
                             remoteItem,
                             target,
-                            file
+                            file,
+                            stagedUploadSourceCleanup
                         ) }
                     }
                     Type.MOVE -> {
@@ -177,7 +225,8 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
                         launchOwnedIfRunning { Rclone(mContext).deleteItemsOwned(
                             remoteItem,
-                            fileItem
+                            fileItem,
+                            deleteConfigRevision
                         ) }
                     }
                     }
@@ -207,6 +256,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
             // Indicate whether the work finished successfully with the Result
             return if (failureReason == FAILURE_REASON.NO_FAILURE) Result.success() else Result.failure()
         }
+        failureReason = FAILURE_REASON.NO_TASK
         log("Critical: No valid ephemeral type passed!")
         return Result.failure()
     }
@@ -214,12 +264,15 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     override fun onStopped() {
         synchronized(nativeLaunchLock) {
             stopRequested = true
+            terminalNotificationPolicy.updateIfPending {
+                terminalNotificationPolicy.requestCancellation()
+                failureReason = FAILURE_REASON.CANCELLED
+            }
             sRcloneProcess?.cancel()
         }
         super.onStopped()
         SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_sync_cancelled))
         SyncLog.info(mContext, mTitle, statusObject.toString())
-        failureReason = FAILURE_REASON.CANCELLED
         finishWork()
     }
 
@@ -315,52 +368,65 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     private fun postSync() {
-        if (endNotificationAlreadyPosted) {
-            return
-        }
         if (silentRun) {
             return
         }
 
-        val notificationId = System.currentTimeMillis().toInt()
+        val (reasonAtClaim, terminalOutcome) = synchronized(terminalNotificationPolicy) {
+            val reason = failureReason
+            val nativeOutcome = sRcloneProcess?.getOutcome()
+            val outcome = terminalNotificationPolicy.claim(
+                reason != FAILURE_REASON.NO_FAILURE && reason != FAILURE_REASON.CANCELLED,
+                reason == FAILURE_REASON.CANCELLED,
+                nativeOutcome?.isConfirmed() == true,
+                nativeOutcome?.isSuccess() == true
+            )
+            if (outcome == EphemeralTerminalNotificationPolicy.Outcome.FAILURE
+                && reason == FAILURE_REASON.NO_FAILURE) {
+                failureReason = FAILURE_REASON.RCLONE_ERROR
+            }
+            reason to outcome
+        }
+        when (terminalOutcome) {
+            EphemeralTerminalNotificationPolicy.Outcome.SUCCESS -> {
+                showSuccessNotification(System.currentTimeMillis().toInt())
+                return
+            }
+            EphemeralTerminalNotificationPolicy.Outcome.CANCELLED -> {
+                showCancelledNotification(System.currentTimeMillis().toInt())
+                return
+            }
+            EphemeralTerminalNotificationPolicy.Outcome.ALREADY_CLAIMED -> return
+            EphemeralTerminalNotificationPolicy.Outcome.FAILURE -> Unit
+        }
 
-        var content = mContext.getString(R.string.operation_failed_unknown, mTitle)
-        when (failureReason) {
-            FAILURE_REASON.NO_FAILURE -> {
-                showSuccessNotification(notificationId)
-                return
-            }
-            FAILURE_REASON.CANCELLED -> {
-                showCancelledNotification(notificationId)
-                endNotificationAlreadyPosted = true
-                return
-            }
-            FAILURE_REASON.NO_TASK -> {
-                content = getString(R.string.operation_failed_notask)
-            }
-            FAILURE_REASON.CONNECTIVITY_CHANGED -> {
-                content = mContext.getString(R.string.operation_failed_data_change, mTitle)
-            }
-            FAILURE_REASON.NO_UNMETERED -> {
-                content = mContext.getString(R.string.operation_failed_no_unmetered, mTitle)
-            }
-            FAILURE_REASON.NO_CONNECTION -> {
-                content = mContext.getString(R.string.operation_failed_no_connection, mTitle)
-            }
-            FAILURE_REASON.RCLONE_ERROR -> {
-                content = mContext.getString(R.string.operation_failed_unknown_rclone_error, mTitle)
-            }
+        val notificationId = System.currentTimeMillis().toInt()
+        val notificationFailureReason = if (reasonAtClaim == FAILURE_REASON.NO_FAILURE) {
+            FAILURE_REASON.RCLONE_ERROR
+        } else {
+            reasonAtClaim
+        }
+        val content = when (notificationFailureReason) {
+            FAILURE_REASON.NO_FAILURE,
+            FAILURE_REASON.CANCELLED,
+            FAILURE_REASON.RCLONE_ERROR -> mContext.getString(R.string.operation_failed_unknown_rclone_error, mTitle)
+            FAILURE_REASON.NO_TASK -> getString(R.string.operation_failed_notask)
+            FAILURE_REASON.CONNECTIVITY_CHANGED -> mContext.getString(R.string.operation_failed_data_change, mTitle)
+            FAILURE_REASON.NO_UNMETERED -> mContext.getString(R.string.operation_failed_no_unmetered, mTitle)
+            FAILURE_REASON.NO_CONNECTION -> mContext.getString(R.string.operation_failed_no_connection, mTitle)
         }
         showFailNotification(notificationId, content)
-        endNotificationAlreadyPosted = true
         finishWork()
     }
 
     private fun showCancelledNotification(notificationId: Int) {
-        val content = mContext.getString(R.string.operation_failed_cancelled)
-        SyncLog.info(mContext, mTitle, content)
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(mTitle)
+        val content = NotificationSinkPolicy.sanitizeContent(
+            mContext.getString(R.string.operation_failed_cancelled)
+        )
+        SyncLog.info(mContext, safeTitle, content)
         mNotificationManager?.showCancelledNotification(
-            mTitle,
+            safeTitle,
             content,
             notificationId,
             0
@@ -372,10 +438,13 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
         //Todo: This should be context dependend on the type. It is currently not!
 
 
-        var message = mNotificationManager?.generateSuccessMessage(statusObject, getCurrentFile())?: "error"
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(mTitle)
+        var message = NotificationSinkPolicy.sanitizeContent(
+            mNotificationManager?.generateSuccessMessage(statusObject, getCurrentFile()) ?: "error"
+        )
 
         mNotificationManager?.showSuccessNotification(
-            mTitle,
+            safeTitle,
             message,
             notificationId
         )
@@ -389,26 +458,20 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     }
 
     private fun showFailNotification(notificationId: Int, content: String, wasCancelled: Boolean = false) {
-        var text = content
         //Todo: check if we should also add errors on success
-        statusObject.printErrors()
         val errors = statusObject.getAllErrorMessages()
-        if (errors.isNotEmpty()) {
-            text += """
-                        
-                        
-                        
-                        ${statusObject.getAllErrorMessages()}
-                        """.trimIndent()
-        }
+        val safeTitle = NotificationSinkPolicy.sanitizeTitle(mTitle)
+        val text = NotificationSinkPolicy.sanitizeContent(
+            if (errors.isEmpty()) content else "$content\n\n$errors"
+        )
 
         var notifyTitle = mContext.getString(R.string.operation_failed)
         if (wasCancelled) {
             notifyTitle = mContext.getString(R.string.operation_failed_cancelled)
         }
-        SyncLog.error(mContext, notifyTitle, "$mTitle: $text")
+        SyncLog.error(mContext, notifyTitle, "$safeTitle: $text")
         mNotificationManager?.showFailedNotification(
-            mTitle,
+            safeTitle,
             text,
             notificationId,
            0
@@ -440,12 +503,16 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     // Creates an instance of ForegroundInfo which can be used to update the
     // ongoing notification.
     private fun updateForegroundNotification(notification: Notification?) {
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            notification?.let {
-                setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC))
-            }
+        notification ?: return
+        val foregroundInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ForegroundInfo(ongoingNotificationID, notification, FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        } else {
+            ForegroundInfo(ongoingNotificationID, notification)
         }
+        // A synchronous Worker must not start native work until WorkManager confirms that
+        // foreground promotion succeeded; otherwise Android can stop the transfer shortly
+        // after it starts (or reject it outright on newer platform versions).
+        requireForegroundPromotion(setForegroundAsync(foregroundInfo))
     }
 
 
@@ -475,11 +542,10 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private val connectivityChangeBroadcastReceiver: BroadcastReceiver =
         object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if(endNotificationAlreadyPosted){
-                    return
+                terminalNotificationPolicy.updateIfPending {
+                    sConnectivityChanged = true
+                    failureReason = FAILURE_REASON.CONNECTIVITY_CHANGED
                 }
-                sConnectivityChanged = true
-                failureReason = FAILURE_REASON.CONNECTIVITY_CHANGED
             }
         }
 

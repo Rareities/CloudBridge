@@ -152,7 +152,7 @@ public class DocumentsContractAccess implements ItemAccess<SafFastItem> {
                 results.add(item);
             }
         } catch (Exception e) {
-            Log.w("DocumentsContractAccess", "Failed query: " + e);
+            Log.w(TAG, "provider_query.failed category=" + SafDavDiagnostics.category(e));
         }
         return results;
     }
@@ -207,7 +207,7 @@ public class DocumentsContractAccess implements ItemAccess<SafFastItem> {
         } catch (IllegalArgumentException e) {
             throw new ItemNotFoundException(e);
         } catch (Exception e) {
-            Log.w("DocumentsContractAccess", "Failed query: " + e);
+            Log.w(TAG, "provider_query.failed category=" + SafDavDiagnostics.category(e));
             throw new FileAccessError(e);
         }
         throw new ItemNotFoundException();
@@ -276,7 +276,7 @@ public class DocumentsContractAccess implements ItemAccess<SafFastItem> {
         String path = uri.getPath();
         int treeIndex = path.indexOf("/tree/");
         if (0 != treeIndex) {
-            throw new SafException("Unsupported DocumentsProvider: " + uri.toString());
+            throw new SafException("Unsupported DocumentsProvider");
         }
         int sep;
         if (-1 != (sep = path.indexOf(':', 6)) || -1 != (sep = path.indexOf('/', 6))) {
@@ -303,7 +303,7 @@ public class DocumentsContractAccess implements ItemAccess<SafFastItem> {
                 throw new RuntimeException("UTF-8 not available");
             }
         }
-        throw new SafException("Unsupported DocumentsProvider: " + uri.toString());
+        throw new SafException("Unsupported DocumentsProvider");
     }
 
     // /tree/primary:DCIM

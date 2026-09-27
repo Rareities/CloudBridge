@@ -161,6 +161,7 @@
     <string name="app_not_configured">CloudBridge is not configured</string>
     <string name="open_app_to_configure">Please open the app to set it up first</string>
     <string name="error_retrieving_files">Error retrieving files</string>
+    <string name="share_staging_limit_exceeded">This share exceeds CloudBridge’s staging limits (up to 4 GiB per file, 8 GiB total, and 128 files).</string>
     <string name="background_service_broadcast" translatable="false">ca.pkay.rcexplorer.BACKGROUND_SERVICE_BROADCAST</string>
     <string name="background_service_broadcast_data_remote" translatable="false">ca.pkay.rcexplorer.BACKGROUND_SERVICE_BROADCAST_DATA_REMOTE</string>
     <string name="background_service_broadcast_data_path" translatable="false">ca.pkay.rcexplorer.BACKGROUND_SERVICE_BROADCAST_DATA_PATH</string>
@@ -168,6 +169,9 @@
     <string name="sync_service_notification_channel_description">Background service for sync</string>
     <string name="moving_info">Moving…</string>
     <string name="deleting_info">Deleting…</string>
+    <string name="delete_remote_identity_unavailable">The remote configuration changed or could not be verified. Reopen the remote and try again. No items were deleted.</string>
+    <string name="delete_target_invalid">This selection contains an item that cannot be deleted safely.</string>
+    <string name="reset_app_rclone_busy_or_failed">CloudBridge could not safely reset while remote work is active or config recovery failed. Try again when it finishes.</string>
     <string name="operation_failed">Sync failed</string>
     <string name="operation_failed_unknown">%1$s could not be synchronized due to an unknown error</string>
     <string name="operation_failed_no_unmetered">Couldn\'t sync %1$s because of no Wi-Fi connection</string>
@@ -176,6 +180,7 @@
     <string name="operation_failed_unknown_rclone_error">%1$s could not be synchronized due to an unknown rclone-error</string>
     <string name="operation_failed_cancelled">Sync was cancelled</string>
     <string name="operation_failed_notask">There was no task to start!</string>
+    <string name="operation_failed_legacy_request">A queued sync was blocked because it has no safe run identity. Start it again from CloudBridge.</string>
     <string name="operation_failed_unsupported_direction">%1$s could not be synchronized because its sync direction is not supported by this version</string>
     <string name="moving_service">Moving Service</string>
     <string name="delete_service">Delete Service</string>
@@ -601,6 +606,7 @@
     <string name="save">Save</string>
     <string name="dynamic_config_suffixselector_suffix_hint">Size Suffix</string>
     <string name="dynamic_config_suffixselector_value_hint">Value</string>
+    <string name="dynamic_config_required_field">This field is required</string>
     <string name="operation_no_identical_title">Sync aborted</string>
     <string name="operation_no_identical">You cannot run the same task in parallel: %s</string>
     <string name="intro_permission_changed_title">Permissions required!</string>

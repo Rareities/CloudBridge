@@ -33,6 +33,7 @@ The bullets below describe source-level capabilities, not completed WP12 or devi
 - **File Management** (list, view, download, upload, move, rename, delete files and folders)
 - **Streaming and serving source paths** include FTP, HTTP, WebDAV and DLNA; protocol security, lifecycle, device compatibility and runtime acceptance are still under review.
 - **Integration** (Access local storage devices and share files with the application to store them on a remote)
+- Android share intents are staged privately before destination selection. Duplicate names are disambiguated; names are bounded to 240 Unicode code points and 255 UTF-8 bytes; a share is limited to 128 files, 4 GiB per file and 8 GiB total. Aborted pre-enqueue shares are cleaned, all upload workers are submitted in one WorkManager operation, and workers remove staged copies at terminal completion. Enqueue is batched; remote uploads still have independent outcomes.
 - **Provider options** through rclone; CloudBridge setup and provider compatibility vary and are not all acceptance-tested in this fork
 - **Material 3 Design** (Dark theme)
 - **Configured Android ABIs** include ARM, ARM64, x86 and x64; this build configuration does not prove a packaged artifact or runtime compatibility.

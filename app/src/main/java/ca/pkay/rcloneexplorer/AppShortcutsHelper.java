@@ -22,6 +22,7 @@ import java.util.Set;
 
 import ca.pkay.rcloneexplorer.Activities.MainActivity;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
+import ca.pkay.rcloneexplorer.util.ShortcutCapabilities;
 
 public class AppShortcutsHelper {
 
@@ -47,9 +48,7 @@ public class AppShortcutsHelper {
         for (RemoteItem remoteItem : remotes) {
             String id = getUniqueIdFromString(remoteItem.getName());
 
-            Intent intent = new Intent(Intent.ACTION_MAIN, Uri.EMPTY, context, MainActivity.class);
-            intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-            intent.putExtra(APP_SHORTCUT_REMOTE_NAME, remoteItem.getName());
+            Intent intent = createRemoteShortcutIntent(context, remoteItem);
 
             ShortcutInfo shortcut = new ShortcutInfo.Builder(context, id)
                     .setShortLabel(remoteItem.getDisplayName())
@@ -160,9 +159,7 @@ public class AppShortcutsHelper {
             return;
         }
 
-        Intent intent = new Intent(Intent.ACTION_MAIN, Uri.EMPTY, context, MainActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        intent.putExtra(APP_SHORTCUT_REMOTE_NAME, remoteItem.getName());
+        Intent intent = createRemoteShortcutIntent(context, remoteItem);
 
         ShortcutInfo shortcut = new ShortcutInfo.Builder(context, id)
                 .setShortLabel(remoteItem.getDisplayName())
@@ -177,12 +174,20 @@ public class AppShortcutsHelper {
         return ShortcutManagerCompat.isRequestPinShortcutSupported(context);
     }
 
+    private static Intent createRemoteShortcutIntent(Context context, RemoteItem remoteItem) {
+        String remoteName = remoteItem.getName();
+        String capability = ShortcutCapabilities.issueOrGetForIntent(
+                context, Intent.ACTION_MAIN, remoteName);
+        return new Intent(Intent.ACTION_MAIN, Uri.EMPTY, context, MainActivity.class)
+                .setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                .putExtra(APP_SHORTCUT_REMOTE_NAME, remoteName)
+                .putExtra(ShortcutCapabilities.EXTRA_INTENT_CAPABILITY, capability);
+    }
+
     public static void addRemoteToHomeScreen(Context context, RemoteItem remoteItem) {
         String id = getUniqueIdFromString(remoteItem.getName());
 
-        Intent intent = new Intent(Intent.ACTION_MAIN, Uri.EMPTY, context, MainActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        intent.putExtra(APP_SHORTCUT_REMOTE_NAME, remoteItem.getName());
+        Intent intent = createRemoteShortcutIntent(context, remoteItem);
 
         ShortcutInfoCompat shortcutInfo = new ShortcutInfoCompat.Builder(context, id)
                 .setShortLabel(remoteItem.getDisplayName())

@@ -24,7 +24,15 @@ class ProviderOption {
     var valueStr: String = ""
     var type: String = ""
 
+    /** rclone's Option.Hide bit that excludes an option from config UIs. */
+    fun isHiddenFromConfigurator(): Boolean = hide and HIDE_CONFIGURATOR != 0
+
     companion object {
+        // Keep in sync with rclone/fs/registry.go OptionHideCommandLine and
+        // OptionHideConfigurator. Hide is a bitmask, not a boolean.
+        const val HIDE_COMMAND_LINE = 1
+        const val HIDE_CONFIGURATOR = 1 shl 1
+
         fun newInstance(data: JSONObject): ProviderOption? {
 
             try {
@@ -33,7 +41,12 @@ class ProviderOption {
                 item.name = data.optString("Name")
                 item.help = data.optString("Help")
                 item.provider = data.optString("Type")
-                item.default = data.optString("Default")
+                val defaultValue = data.opt("Default")
+                item.default = if (defaultValue == null || defaultValue == JSONObject.NULL) {
+                    ""
+                } else {
+                    defaultValue.toString()
+                }
                 //item.value = data.get("Value")
                 item.shortOpt = data.optString("ShortOpt")
                 item.hide = data.optInt("Hide")
@@ -59,7 +72,8 @@ class ProviderOption {
 
                 return item
             } catch (e: Exception) {
-                FLog.e(tag(), "%s", data.toString(4))
+                // Provider metadata may include values. Never log the JSON body.
+                FLog.e(tag(), "Unable to parse provider option metadata")
             }
 
             return null

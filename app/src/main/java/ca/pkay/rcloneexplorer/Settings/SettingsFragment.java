@@ -22,6 +22,7 @@ import java.io.File;
 
 import ca.pkay.rcloneexplorer.Activities.MainActivity;
 import ca.pkay.rcloneexplorer.R;
+import ca.pkay.rcloneexplorer.Rclone;
 import es.dmoral.toasty.Toasty;
 
 public class SettingsFragment extends Fragment {
@@ -110,10 +111,11 @@ public class SettingsFragment extends Fragment {
     private void performReset() {
         Context context = requireContext();
 
-        // 1. Delete rclone.conf
-        File rcloneConf = new File(context.getFilesDir(), "rclone.conf");
-        if (rcloneConf.exists()) {
-            rcloneConf.delete();
+        // 1. Invalidate queued remote targets and refuse to reset during active native work.
+        if (!new Rclone(context).deleteConfigForReset()) {
+            Toasty.error(context, context.getString(R.string.reset_app_rclone_busy_or_failed),
+                    Toast.LENGTH_LONG, true).show();
+            return;
         }
 
         // 2. Delete all files in filesDir (tokens, caches, etc.)
@@ -167,14 +169,12 @@ public class SettingsFragment extends Fragment {
     }
 
     private Intent getImportIntent() {
-        Intent i = new Intent(this.getContext(), MainActivity.class);
-        i.setAction(MAIN_ACTIVITY_START_IMPORT);
-        return i;
+        return MainActivity.createAuthorizedInternalActionIntent(
+                requireContext(), MAIN_ACTIVITY_START_IMPORT);
     }
 
     private Intent getExportIntent() {
-        Intent i = new Intent(this.getContext(), MainActivity.class);
-        i.setAction(MAIN_ACTIVITY_START_EXPORT);
-        return i;
+        return MainActivity.createAuthorizedInternalActionIntent(
+                requireContext(), MAIN_ACTIVITY_START_EXPORT);
     }
 }

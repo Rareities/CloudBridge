@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.work.Configuration
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler
 import ca.pkay.rcloneexplorer.Database.RunRepository
+import ca.pkay.rcloneexplorer.util.BackupArchiveStager
+import ca.pkay.rcloneexplorer.util.FLog
 
 /**
  * Application entry point.
@@ -20,6 +22,13 @@ class CloudBridgeApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        // Remove bounded leftovers from an interrupted backup import before a new import can
+        // create another private snapshot. The stager only matches its own exact temp names.
+        try {
+            BackupArchiveStager.cleanupOrphanedArchives(filesDir)
+        } catch (e: Exception) {
+            FLog.e("CloudBridgeApp", "Staged backup cleanup failed", e)
+        }
         // Reconcile legacy numeric tasks before any scheduler/worker can claim them. A native
         // process from a previous app lifetime cannot be proven stopped, so active rows become
         // conservative recovery state rather than being silently retried.
@@ -27,7 +36,7 @@ class CloudBridgeApp : Application(), Configuration.Provider {
             DatabaseHandler(this).reconcileLegacyProfiles()
             RunRepository(this).reconcileInterruptedRuns()
         } catch (e: Exception) {
-            Log.e("CloudBridgeApp", "Durable run-state reconciliation failed", e)
+            FLog.e("CloudBridgeApp", "Durable run-state reconciliation failed", e)
         }
     }
 

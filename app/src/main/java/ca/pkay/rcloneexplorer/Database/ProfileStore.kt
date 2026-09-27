@@ -143,8 +143,31 @@ internal object ProfileStore {
         return requireNotNull(getById(db, profileId))
     }
 
-    private fun profileSpec(db: SQLiteDatabase, task: Task, engineRef: String): ProfileSpec {
+    internal fun profileSpec(db: SQLiteDatabase, task: Task, engineRef: String): ProfileSpec {
         val filterId = task.filterId ?: return LegacyProfileMapper.fromTask(task, engineRef)
+        return profileSpecForFilterSnapshot(
+            task,
+            engineRef,
+            filterSnapshot(db, filterId)
+        )
+    }
+
+    /** Builds the exact profile identity for immutable rules already captured on a run. */
+    internal fun profileSpecForFilterSnapshot(
+        task: Task,
+        engineRef: String,
+        filterSnapshot: String?
+    ): ProfileSpec {
+        if (task.filterId == null) return LegacyProfileMapper.fromTask(task, engineRef)
+        if (filterSnapshot == null || filterSnapshot.length > MAX_FILTER_FINGERPRINT_CHARS) {
+            return LegacyProfileMapper.fromTask(task, engineRef, selectedFilterMissing = true)
+        }
+        return LegacyProfileMapper.fromTask(task, engineRef, selectedFilterRaw = filterSnapshot)
+    }
+
+    /** Reads rules inside the caller's transaction so queue identity and payload use one snapshot. */
+    internal fun filterSnapshot(db: SQLiteDatabase, filterId: Long?): String? {
+        if (filterId == null) return null
         val cursor = db.query(
             Filter.TABLE_NAME,
             arrayOf(Filter.COLUMN_NAME_FILTERS),
@@ -156,16 +179,8 @@ internal object ProfileStore {
             "1"
         )
         return try {
-            if (!cursor.moveToFirst() || cursor.isNull(0)) {
-                LegacyProfileMapper.fromTask(task, engineRef, selectedFilterMissing = true)
-            } else {
-                val filterRaw = cursor.getString(0)
-                if (filterRaw.length > MAX_FILTER_FINGERPRINT_CHARS) {
-                    LegacyProfileMapper.fromTask(task, engineRef, selectedFilterMissing = true)
-                } else {
-                    LegacyProfileMapper.fromTask(task, engineRef, selectedFilterRaw = filterRaw)
-                }
-            }
+            if (!cursor.moveToFirst() || cursor.isNull(0)) return null
+            cursor.getString(0).takeIf { it.length <= MAX_FILTER_FINGERPRINT_CHARS }
         } finally {
             cursor.close()
         }
@@ -239,6 +254,7 @@ internal object ProfileStore {
         val values = ContentValues()
         values.put(RUN_COLUMN_STATE, RunState.RECOVERY_REQUIRED.wireValue)
         values.put(RUN_COLUMN_REASON, reason)
+        values.putNull(DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT)
         values.put(RUN_COLUMN_FINISHED_AT, System.currentTimeMillis())
         values.put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
         val cursor = db.query(

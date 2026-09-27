@@ -3,6 +3,11 @@ package ca.pkay.rcloneexplorer;
 import org.junit.Before;
 import org.junit.Test;
 
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+
 import static org.junit.Assert.*;
 
 public class VirtualContentProviderTest {
@@ -12,6 +17,99 @@ public class VirtualContentProviderTest {
     @Before
     public void setUp() throws Exception {
         provider = new VirtualContentProvider();
+    }
+
+    @Test
+    public void awaitRcdServiceWaitsForConnectionCallback() throws Exception {
+        Object monitor = new Object();
+        AtomicBoolean connected = new AtomicBoolean(false);
+        CountDownLatch waitStarted = new CountDownLatch(1);
+        Thread connector = new Thread(() -> {
+            try {
+                if (waitStarted.await(1, TimeUnit.SECONDS)) {
+                    synchronized (monitor) {
+                        connected.set(true);
+                        monitor.notifyAll();
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        connector.start();
+
+        boolean result = VirtualContentProvider.awaitRcdServiceConnection(monitor, 1000, () -> {
+            waitStarted.countDown();
+            return connected.get();
+        });
+
+        connector.join(1000);
+        assertTrue(result);
+        assertFalse(connector.isAlive());
+    }
+
+    @Test
+    public void awaitRcdServiceRechecksStateAfterDisconnectNotification() throws Exception {
+        Object monitor = new Object();
+        AtomicBoolean connected = new AtomicBoolean(false);
+        CountDownLatch waitStarted = new CountDownLatch(1);
+        Thread serviceLifecycle = new Thread(() -> {
+            try {
+                if (!waitStarted.await(1, TimeUnit.SECONDS)) return;
+                synchronized (monitor) {
+                    // A disconnect/spurious notification must not look like a successful bind.
+                    monitor.notifyAll();
+                }
+                Thread.sleep(20);
+                synchronized (monitor) {
+                    connected.set(true);
+                    monitor.notifyAll();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        serviceLifecycle.start();
+
+        boolean result = VirtualContentProvider.awaitRcdServiceConnection(monitor, 1000, () -> {
+            waitStarted.countDown();
+            return connected.get();
+        });
+
+        serviceLifecycle.join(1000);
+        assertTrue(result);
+        assertFalse(serviceLifecycle.isAlive());
+    }
+
+    @Test
+    public void awaitRcdServiceTimesOutWhenConnectionNeverArrives() {
+        Object monitor = new Object();
+
+        assertFalse(VirtualContentProvider.awaitRcdServiceConnection(monitor, 30, () -> false));
+    }
+
+    @Test
+    public void awaitRcdServicePreservesInterruption() throws Exception {
+        Object monitor = new Object();
+        CountDownLatch waitStarted = new CountDownLatch(1);
+        AtomicBoolean result = new AtomicBoolean(true);
+        AtomicBoolean interrupted = new AtomicBoolean(false);
+        Thread waiter = new Thread(() -> {
+            result.set(VirtualContentProvider.awaitRcdServiceConnection(monitor, 1000, () -> {
+                waitStarted.countDown();
+                return false;
+            }));
+            interrupted.set(Thread.currentThread().isInterrupted());
+        });
+        waiter.start();
+
+        assertTrue(waitStarted.await(1, TimeUnit.SECONDS));
+        waiter.interrupt();
+        waiter.join(1000);
+
+        assertFalse(waiter.isAlive());
+        assertFalse(result.get());
+        assertTrue(interrupted.get());
     }
 
     @Test
@@ -71,6 +169,89 @@ public class VirtualContentProviderTest {
         VirtualContentProvider.getTargetDocumentId(
                 VirtualContentProvider.getRootedDocumentId("remote:/dir/item"),
                 VirtualContentProvider.getRootedDocumentId("remotes/remote:/"));
+    }
+
+    @Test
+    public void cacheSubtreeIdentityUsesPathBoundaries() {
+        assertTrue(VirtualContentProvider.isSameOrDescendantCacheId(
+                "remote:/notes/today.md", "remote:/notes"));
+        assertFalse(VirtualContentProvider.isSameOrDescendantCacheId(
+                "remote:/notes-old/today.md", "remote:/notes"));
+        assertTrue(VirtualContentProvider.isSameOrDescendantCacheId(
+                "remote:/notes/today.md", "rclone/remotes/remote:/"));
+    }
+
+    @Test
+    public void subtreeInvalidationRemovesStickyDescendantsButPreservesSibling() {
+        VirtualContentProvider.FsState state = new VirtualContentProvider.FsState();
+        RcloneRcd.ListItem descendant = new RcloneRcd.ListItem();
+        descendant.name = "descendant.md";
+        RcloneRcd.ListItem sibling = new RcloneRcd.ListItem();
+        sibling.name = "sibling.md";
+        state.put("remote:/notes/descendant.md", descendant, 1);
+        state.put("remote:/notes-old/sibling.md", sibling, 1);
+
+        state.removeSubtree("remote:/notes");
+
+        assertFalse(state.getStickies().containsKey("remote:/notes/descendant.md"));
+        assertTrue(state.getStickies().containsKey("remote:/notes-old/sibling.md"));
+    }
+
+    @Test
+    public void concurrentCacheSearchAndSubtreeInvalidationRemainSafe() throws Exception {
+        VirtualContentProvider.FsState state = new VirtualContentProvider.FsState();
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread writer = new Thread(() -> {
+            try {
+                start.await();
+                for (int i = 0; i < 1000; i++) {
+                    RcloneRcd.ListItem item = new RcloneRcd.ListItem();
+                    item.name = "item";
+                    state.put("remote:/folder/" + i, item, 1);
+                    state.removeSubtree("remote:/folder");
+                }
+            } catch (Throwable e) {
+                failure.compareAndSet(null, e);
+            }
+        });
+        Thread reader = new Thread(() -> {
+            try {
+                start.await();
+                for (int i = 0; i < 1000; i++) {
+                    state.search("item");
+                    state.getStickies();
+                }
+            } catch (Throwable e) {
+                failure.compareAndSet(null, e);
+            }
+        });
+        writer.start();
+        reader.start();
+        start.countDown();
+        writer.join();
+        reader.join();
+
+        assertNull(failure.get());
+    }
+
+    @Test
+    public void filesystemCacheRetainsRecentlyUsedEntriesAtItsByteLimit() {
+        VirtualContentProvider.FsState state = new VirtualContentProvider.FsState();
+        String recentlyUsed = "remote:/lru/recent";
+        RcloneRcd.ListItem item = new RcloneRcd.ListItem();
+        item.name = "entry";
+        state.put(recentlyUsed, item, 0);
+        for (int i = 0; i < 1332; i++) {
+            state.put("remote:/lru/" + i, item, 0);
+        }
+
+        state.get(recentlyUsed); // Promote the oldest entry before overflowing the cache.
+        state.put("remote:/lru/newest", item, 0);
+
+        assertTrue(state.search("").containsKey(recentlyUsed));
+        assertFalse(state.search("").containsKey("remote:/lru/0"));
+        assertTrue(state.search("").containsKey("remote:/lru/newest"));
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -222,7 +403,7 @@ public class VirtualContentProviderTest {
     @Test
     public void queryChildDocumentsRejectsMalformedParentBeforeProviderAccess() throws Exception {
         try {
-            provider.queryChildDocuments("rclone/remotes/remote:/notes/../outside", null, null);
+            provider.queryChildDocuments("rclone/remotes/remote:/notes/../outside", null, (String) null);
             fail("Expected malformed parent to fail before provider/backend resolution");
         } catch (java.io.FileNotFoundException expected) {
             assertTrue(expected.getCause() instanceof IllegalArgumentException);

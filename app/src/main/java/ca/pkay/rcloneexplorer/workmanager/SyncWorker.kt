@@ -15,11 +15,15 @@ import androidx.work.ForegroundInfo
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler
+import ca.pkay.rcloneexplorer.Database.RunRecord
 import ca.pkay.rcloneexplorer.Database.RunRejectedException
 import ca.pkay.rcloneexplorer.Database.RunRepository
 import ca.pkay.rcloneexplorer.Database.RunState
+import ca.pkay.rcloneexplorer.Database.RunTaskIdentity
 import ca.pkay.rcloneexplorer.Database.TriggerStateLock
 import ca.pkay.rcloneexplorer.Items.RemoteItem
+import ca.pkay.rcloneexplorer.Items.Filter
+import ca.pkay.rcloneexplorer.Items.FilterEntry
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Log2File
@@ -99,13 +103,14 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private var receiverRegistered = false
     @Volatile private var stopRequested = false
     private val statusObject = StatusObject(mContext)
-    private var failureReason = FAILURE_REASON.NO_FAILURE
-    private var endNotificationAlreadyPosted = false
+    @Volatile private var failureReason = FAILURE_REASON.NO_FAILURE
+    @Volatile private var terminalHandlingStarted = false
     private var silentRun = false
     private val ongoingNotificationID = Random().nextInt()
     private var durableRunId: String? = null
     private var durableRunOwnerToken: String? = null
     private var durableRunClaimed = false
+    private var claimedRunSnapshot: RunRecord? = null
     private var durableRunFinished = false
     private var nativeExitCode: Int? = null
     private var nativeCompletionUnconfirmed = false
@@ -125,25 +130,25 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             var task: Task? = null
             durableRunId = inputData.getString(RUN_ID)
             durableRunOwnerToken = inputData.getString(RUN_OWNER_TOKEN)
-
-            if (inputData.keyValueMap.containsKey(TASK_ID)) {
-                val id = inputData.getLong(TASK_ID, -1)
-                task = mDatabase.getTask(id)
-                if (task != null) {
-                    if (durableRunId == null || durableRunOwnerToken == null) {
-                        try {
-                            val compatibilityRun = mRunRepository.queueLegacyTask(id)
-                            durableRunId = compatibilityRun.runId
-                            durableRunOwnerToken = compatibilityRun.ownerToken
-                        } catch (e: RunRejectedException) {
-                            failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
-                            log("Legacy task was not admitted: " + e.message)
-                        }
-                    }
-                }
+            val hasPersistentTask = inputData.keyValueMap.containsKey(TASK_ID)
+            val hasEphemeralTask = inputData.keyValueMap.containsKey(TASK_EPHEMERAL)
+            if ((hasPersistentTask || hasEphemeralTask) &&
+                !DurableRunRequestPolicy.isValidRequest(
+                    hasPersistentTask,
+                    hasEphemeralTask,
+                    durableRunId,
+                    durableRunOwnerToken
+                )) {
+                failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
+                log("Sync request lacks one unambiguous task payload and durable run owner")
             }
 
-            if (inputData.keyValueMap.containsKey(TASK_EPHEMERAL)) {
+            if (failureReason == FAILURE_REASON.NO_FAILURE && hasPersistentTask) {
+                val id = inputData.getLong(TASK_ID, -1)
+                task = mDatabase.getTask(id)
+            }
+
+            if (failureReason == FAILURE_REASON.NO_FAILURE && hasEphemeralTask) {
                 val taskString = inputData.getString(TASK_EPHEMERAL) ?: ""
                 if (taskString.isNotEmpty()) {
                     try {
@@ -167,24 +172,37 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             }
 
             if (task == null) {
-                failureReason = FAILURE_REASON.NO_TASK
-                finishUnstartableQueuedRun("Sync request data was missing or invalid")
+                if (failureReason == FAILURE_REASON.NO_FAILURE) {
+                    failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
+                }
+                // Do not mutate a durable run from an unvalidated task payload. In particular,
+                // a missing or stale TASK_ID must not fail another run using its run token.
+                log("Sync task payload could not be validated; durable run state was left unchanged")
                 postSync()
                 return Result.failure()
             }
 
-            mTask = task
             if (failureReason == FAILURE_REASON.NO_FAILURE) {
                 if (durableRunId == null || durableRunOwnerToken == null) {
                     failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
                     log("Sync request has no durable run owner")
                 } else {
                     try {
-                        mRunRepository.claim(durableRunId!!, durableRunOwnerToken!!)
+                        val taskIdentity = if (hasPersistentTask) {
+                            RunTaskIdentity.LegacyTask(task.id)
+                        } else {
+                            RunTaskIdentity.EphemeralTask(task)
+                        }
+                        claimedRunSnapshot = mRunRepository.claim(
+                            durableRunId!!,
+                            durableRunOwnerToken!!,
+                            taskIdentity
+                        )
                         durableRunClaimed = true
+                        mTask = task
                     } catch (e: RunRejectedException) {
                         failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
-                        log("Durable run claim was rejected")
+                        log("Durable run owner or task identity was rejected")
                     }
                 }
             }
@@ -313,8 +331,17 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             val transferLocks = TransferLocks.acquire(mContext, "sync")
             var locksAttachedToExecution = false
             try {
-                val taskFilter = if(mTask.filterId != null ) mDatabase.getFilter(mTask.filterId!!) else null;
-                val taskFilterList = taskFilter?.getFilters() ?: ArrayList()
+                val taskFilterList: ArrayList<FilterEntry> = if (mTask.filterId == null) {
+                    ArrayList()
+                } else {
+                    val rawSnapshot = claimedRunSnapshot?.filterSnapshot
+                    if (rawSnapshot == null) {
+                        failureReason = FAILURE_REASON.RUN_NOT_ADMITTED
+                        log("Sync: immutable filter snapshot is unavailable; native launch was blocked")
+                        return
+                    }
+                    Filter(mTask.filterId!!).apply { setFiltersRaw(rawSnapshot) }.getFilters()
+                }
                 val isCloudToCloud = mTask.direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
                         || mTask.direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
                 if (stopRequested || isStopped) {
@@ -438,8 +465,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         }
     }
 
+    @Synchronized
     private fun postSync() {
-        if (endNotificationAlreadyPosted) {
+        if (terminalHandlingStarted) {
             return
         }
         if (!nativeLaunchAttempted &&
@@ -461,8 +489,18 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 log("Unable to persist the terminal run state")
             }
         }
+        // Serialize stop/completion races and suppress duplicate notifications or follow-ups.
+        // The durable outcome is attempted first so a transient persistence exception can retry.
+        terminalHandlingStarted = true
         if (!::mTask.isInitialized) {
-            endNotificationAlreadyPosted = true
+            if (failureReason == FAILURE_REASON.RUN_NOT_ADMITTED) {
+                val message = getString(R.string.operation_failed_legacy_request)
+                SyncLog.error(mContext, mContext.getString(R.string.operation_failed), message)
+                mNotificationManager.showBlockedRequestNotification(
+                    message,
+                    System.currentTimeMillis().toInt()
+                )
+            }
             return
         }
         if (silentRun) {
@@ -476,16 +514,13 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             FAILURE_REASON.NO_FAILURE -> {
                 showSuccessNotification(notificationId)
                 followupTask(mTask.onSuccessFollowup)
-                endNotificationAlreadyPosted = true
                 return
             }
             FAILURE_REASON.CANCELLED -> {
                 showCancelledNotification(notificationId)
-                endNotificationAlreadyPosted = true
                 return
             }
             FAILURE_REASON.TRIGGER_DISABLED -> {
-                endNotificationAlreadyPosted = true
                 return
             }
             FAILURE_REASON.NO_TASK -> {
@@ -513,7 +548,6 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         }
         followupTask(mTask.onFailFollowup)
         showFailNotification(notificationId, content)
-        endNotificationAlreadyPosted = true
         finishWork()
     }
 
@@ -558,24 +592,6 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             conflictItems = null,
             unknownItems = null
         )
-    }
-
-    private fun finishUnstartableQueuedRun(reason: String) {
-        val runId = durableRunId ?: return
-        val ownerToken = durableRunOwnerToken ?: return
-        try {
-            val finished = mRunRepository.finishQueuedBeforeExecution(
-                runId,
-                ownerToken,
-                RunState.BLOCKED,
-                reason
-            )
-            if (!finished) {
-                log("Unstartable request no longer owns a queued run; leaving its state unchanged")
-            }
-        } catch (failure: Exception) {
-            FLog.e(TAG, "Unable to persist blocked sync request", failure)
-        }
     }
 
     private fun showCancelledNotification(notificationId: Int) {
@@ -633,18 +649,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     }
 
     private fun showFailNotification(notificationId: Int, content: String, wasCancelled: Boolean = false) {
-        var text = content
         //Todo: check if we should also add errors on success
-        statusObject.printErrors()
         val errors = statusObject.getAllErrorMessages()
-        if (errors.isNotEmpty()) {
-            text += """
-                        
-                        
-                        
-                        ${statusObject.getAllErrorMessages()}
-                        """.trimIndent()
-        }
+        val text = if (errors.isEmpty()) content else "$content\n\n$errors"
 
         var notifyTitle = mContext.getString(R.string.operation_failed)
         if (wasCancelled) {
@@ -770,7 +777,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private val connectivityChangeBroadcastReceiver: BroadcastReceiver =
         object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if(endNotificationAlreadyPosted){
+                if(terminalHandlingStarted){
                     return
                 }
                 sConnectivityChanged = true

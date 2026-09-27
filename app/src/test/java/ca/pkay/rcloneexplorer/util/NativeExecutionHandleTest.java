@@ -6,6 +6,7 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -16,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.UUID;
 
 import org.junit.Test;
 
@@ -136,12 +138,13 @@ public class NativeExecutionHandleTest {
 
         assertEquals(NativeExecutionHandle.TerminalState.CANCELLED, outcome.getState());
         assertTrue(outcome.isConfirmed());
+        assertTrue(handle.isExitConfirmed());
         assertEquals(1, resource.closeCount.get());
         assertFalse(process.isAlive());
     }
 
     @Test
-    public void unconfirmedExitRetainsOwnershipAndDoesNotReleaseResource() {
+    public void unconfirmedExitAcceptsLateResourcesUntilTheReaperConfirmsExit() throws Exception {
         ScriptedProcess process = new ScriptedProcess(0, true, true);
         NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "unconfirmed-test", 10);
         CountingResource resource = new CountingResource();
@@ -151,8 +154,16 @@ public class NativeExecutionHandleTest {
 
         assertEquals(NativeExecutionHandle.TerminalState.UNCONFIRMED, outcome.getState());
         assertFalse(outcome.isConfirmed());
+        assertFalse(handle.isExitConfirmed());
         assertEquals(0, resource.closeCount.get());
-        assertFalse(handle.attachResource(new CountingResource()));
+
+        CountingResource lateResource = new CountingResource();
+        assertTrue(handle.attachResource(lateResource));
+        assertEquals(0, lateResource.closeCount.get());
+        process.complete(0);
+        assertTrue(resource.closed.await(2, TimeUnit.SECONDS));
+        assertTrue(lateResource.closed.await(2, TimeUnit.SECONDS));
+        assertTrue(handle.isExitConfirmed());
     }
 
     @Test
@@ -165,12 +176,51 @@ public class NativeExecutionHandleTest {
         assertEquals(NativeExecutionHandle.TerminalState.UNCONFIRMED,
                 handle.await(5, null, null).getState());
         assertFalse(handle.hasConfirmedReap());
+        assertFalse(handle.isExitConfirmed());
         assertEquals(0, resource.closeCount.get());
 
         process.complete(0);
         assertTrue(resource.closed.await(2, TimeUnit.SECONDS));
         assertTrue(handle.hasConfirmedReap());
+        assertTrue(handle.isExitConfirmed());
         assertEquals(1, resource.closeCount.get());
+    }
+
+    @Test
+    public void stagedSourceCleanupWaitsForLateConfirmedReap() throws Exception {
+        ScriptedProcess process = new ScriptedProcess(0, true, true);
+        NativeExecutionHandle handle = NativeExecutionHandle.adopt(process, "late-share-reap-test", 10);
+        File cache = new File(System.getProperty("java.io.tmpdir"), "share-cache-" + UUID.randomUUID());
+        assertTrue(cache.mkdir());
+        File invocationDirectory = new File(cache, "share-" + UUID.randomUUID());
+        assertTrue(invocationDirectory.mkdir());
+        File stagedFile = new File(invocationDirectory, "staged.bin");
+        assertTrue(stagedFile.createNewFile());
+
+        StagedUploadSourceCleanup cleanup = new StagedUploadSourceCleanup(cache, stagedFile);
+        CountingResource resourceReleasedLast = new CountingResource();
+
+        try {
+            assertEquals(NativeExecutionHandle.TerminalState.UNCONFIRMED,
+                    handle.await(5, null, null).getState());
+            assertFalse(handle.isExitConfirmed());
+            assertTrue("cleanup may attach until the late reaper starts releasing resources",
+                    cleanup.attachTo(handle));
+            assertTrue(handle.attachResource(resourceReleasedLast));
+            cleanup.close();
+            assertTrue("staged bytes must remain while the native process may read them", stagedFile.isFile());
+
+            process.complete(0);
+            assertTrue(resourceReleasedLast.closed.await(2, TimeUnit.SECONDS));
+            assertTrue(handle.isExitConfirmed());
+            assertFalse("late confirmed reaping should trigger the attached cleanup", stagedFile.exists());
+            assertFalse(invocationDirectory.exists());
+        } finally {
+            process.complete(0);
+            if (stagedFile.exists()) stagedFile.delete();
+            if (invocationDirectory.exists()) invocationDirectory.delete();
+            if (cache.exists()) cache.delete();
+        }
     }
 
     @Test
@@ -235,6 +285,80 @@ public class NativeExecutionHandleTest {
             throw new AssertionError("Missing native command unexpectedly launched");
         } catch (IOException expected) {
             // The caller keeps responsibility for resources acquired before launch.
+        }
+    }
+
+    @Test
+    public void ownedLaunchFailureAfterChildCreationDoesNotReleaseClaim() {
+        CountingResource owner = new CountingResource();
+        Process[] escapedChild = new Process[1];
+
+        try {
+            NativeExecutionHandle.launchOwned(
+                    new String[]{"cloudbridge-native-test"}, null, "ambiguous-launch-test", owner,
+                    (command, environment) -> {
+                        // Model an OS child created before Java fails to construct/return Process.
+                        escapedChild[0] = new ScriptedProcess(0, true, false);
+                        throw new IOException("process handle construction failed after child start");
+                    });
+            throw new AssertionError("Ambiguous launch unexpectedly returned a handle");
+        } catch (IOException expected) {
+            assertTrue(escapedChild[0].isAlive());
+            assertEquals("the durable claim must remain held without exit evidence", 0,
+                    owner.closeCount.get());
+        } finally {
+            if (escapedChild[0] instanceof ScriptedProcess) {
+                ((ScriptedProcess) escapedChild[0]).complete(0);
+            }
+            // The production owner intentionally has no release authority without a Process handle.
+            // Close this in-memory test fixture only after asserting the fail-closed behavior.
+            try {
+                owner.close();
+            } catch (Exception impossible) {
+                throw new AssertionError(impossible);
+            }
+        }
+    }
+
+    @Test
+    public void ownedLaunchAttachesClaimBeforeReturningHandle() throws Exception {
+        CountingResource owner = new CountingResource();
+        ScriptedProcess process = new ScriptedProcess(0, true, false);
+
+        NativeExecutionHandle handle = NativeExecutionHandle.launchOwned(
+                new String[]{"cloudbridge-native-test"}, null, "owned-launch-test", owner,
+                (command, environment) -> process);
+
+        assertFalse(handle.isExitConfirmed());
+        assertEquals(0, owner.closeCount.get());
+        NativeExecutionHandle.Outcome outcome = handle.cancelAndAwait(null, null);
+        assertTrue(outcome.isConfirmed());
+        assertEquals(1, owner.closeCount.get());
+    }
+
+    @Test
+    public void stagedSourceRemainsQuarantinedWhenLaunchMayHaveStartedWithoutHandle() throws Exception {
+        File cache = new File(System.getProperty("java.io.tmpdir"), "share-cache-" + UUID.randomUUID());
+        assertTrue(cache.mkdir());
+        File invocationDirectory = new File(cache, "share-" + UUID.randomUUID());
+        assertTrue(invocationDirectory.mkdir());
+        File stagedFile = new File(invocationDirectory, "staged.bin");
+        assertTrue(stagedFile.createNewFile());
+
+        StagedUploadSourceCleanup cleanup = new StagedUploadSourceCleanup(cache, stagedFile);
+        try {
+            cleanup.markLaunchAttempted();
+            assertFalse(cleanup.cleanupAfter(null));
+            assertTrue("without a handle, possible native launch must preserve source bytes",
+                    stagedFile.isFile());
+
+            cleanup.confirmNoProcessStarted();
+            assertFalse("confirmed no-child launch failure can safely clean staging", stagedFile.exists());
+            assertFalse(invocationDirectory.exists());
+        } finally {
+            if (stagedFile.exists()) stagedFile.delete();
+            if (invocationDirectory.exists()) invocationDirectory.delete();
+            if (cache.exists()) cache.delete();
         }
     }
 

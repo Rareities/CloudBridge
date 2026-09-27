@@ -10,6 +10,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -55,16 +56,31 @@ public class TriggerService extends Service {
     }
 
     public void queueTrigger(){
-        for(Trigger t : dbHandler.getAllTrigger()){
-            queueSingleTrigger(t);
+        synchronized (TriggerStateLock.MONITOR) {
+            java.util.List<Trigger> triggers = dbHandler.getAllTrigger();
+            for(Trigger t : triggers){
+                queueCurrentTrigger(t);
+            }
+            // Upgrade legacy PendingIntents only after every current trigger has a new,
+            // collision-free identity. Old identities used (int) triggerId and could alias.
+            for (Trigger trigger : triggers) {
+                cancelLegacyTriggerAlarm(trigger.getId());
+            }
         }
     }
 
-    public void queueScheduleTriggers(){
-        for(Trigger t : dbHandler.getAllTrigger()){
-            if(t.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
-                queueSingleTrigger(t);
+    /** @return true only when every scheduled trigger was armed or required no alarm. */
+    public boolean queueScheduleTriggers(){
+        synchronized (TriggerStateLock.MONITOR) {
+            boolean allReconciled = true;
+            for(Trigger t : dbHandler.getAllTrigger()){
+                if(t.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
+                    if (!queueCurrentTrigger(t)) {
+                        allReconciled = false;
+                    }
+                }
             }
+            return allReconciled;
         }
     }
 
@@ -75,52 +91,62 @@ public class TriggerService extends Service {
                 cancelTrigger(trigger.getId());
                 return;
             }
-            if(current.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
-                queueSingleScheduleTrigger(current);
-            } else {
-                queueSingleIntervalTrigger(current);
-            }
+            queueCurrentTrigger(current);
         }
 
     }
 
+    /** Reconcile a trigger from a snapshot read while holding TriggerStateLock.MONITOR. */
+    private boolean queueCurrentTrigger(Trigger trigger) {
+        if(trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
+            return queueSingleScheduleTrigger(trigger);
+        } else {
+            queueSingleIntervalTrigger(trigger);
+            return true;
+        }
+    }
+
     @SuppressLint("ScheduleExactAlarm") // this is caught by the PermissionManager itself
-    private void queueSingleScheduleTrigger(Trigger trigger){
+    private boolean queueSingleScheduleTrigger(Trigger trigger){
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         PendingIntent pi = getIntent(trigger);
         am.cancel(pi);
-        if(trigger.isEnabled()){
-            long now = System.currentTimeMillis();
-            Long nextOccurrence = ScheduleTimeCalculator.nextOccurrence(
-                    now,
-                    trigger.getTime(),
-                    trigger.getWeekdays()
-            );
-            if(nextOccurrence == null) {
-                return;
-            }
-
-            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-            boolean allowWhileIdle = sharedPreferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
-
-            if((new PermissionManager(context)).grantedAlarms()) {
-                if (allowWhileIdle) {
-                    am.setExactAndAllowWhileIdle(
-                            AlarmManager.RTC_WAKEUP,
-                            nextOccurrence,
-                            pi
-                    );
-                } else {
-                    am.setExact(
-                            AlarmManager.RTC_WAKEUP,
-                            nextOccurrence,
-                            pi
-                    );
-                }
-            } else {
-                new AppErrorNotificationManager(context).showNotification();
-            }
+        if (!trigger.isEnabled()) {
+            return true;
         }
+
+        long now = System.currentTimeMillis();
+        Long nextOccurrence = ScheduleTimeCalculator.nextOccurrence(
+                now,
+                trigger.getTime(),
+                trigger.getWeekdays()
+        );
+        if(nextOccurrence == null) {
+            return true;
+        }
+
+        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
+        boolean allowWhileIdle = sharedPreferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
+
+        if((new PermissionManager(context)).grantedAlarms()) {
+            if (allowWhileIdle) {
+                am.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        nextOccurrence,
+                        pi
+                );
+            } else {
+                am.setExact(
+                        AlarmManager.RTC_WAKEUP,
+                        nextOccurrence,
+                        pi
+                );
+            }
+            return true;
+        }
+
+        new AppErrorNotificationManager(context).showNotification();
+        return false;
     }
 
     private void queueSingleIntervalTrigger(Trigger trigger){
@@ -143,10 +169,23 @@ public class TriggerService extends Service {
     }
 
     public void cancelTrigger(long triggerID){
+        if (triggerID <= 0) {
+            return;
+        }
         synchronized (TriggerStateLock.MONITOR) {
             AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
             am.cancel(getIntent(triggerID));
+            cancelLegacyTriggerAlarm(triggerID);
         }
+    }
+
+    private void cancelLegacyTriggerAlarm(long triggerID) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        PendingIntent legacy = PendingIntent.getBroadcast(context, (int) triggerID,
+                getLegacyIntent(triggerID),
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        am.cancel(legacy);
+        legacy.cancel();
     }
 
     private void startTask(Trigger trigger){
@@ -171,9 +210,7 @@ public class TriggerService extends Service {
 
     private PendingIntent getIntent(Trigger trigger){
         long triggerId = trigger.getId();
-        Intent i = new Intent(context, TriggerReceiver.class);
-        i.setAction(TRIGGER_RECIEVE);
-        i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        Intent i = getIdentityIntent(triggerId);
         i.putExtra(TRIGGER_ID, triggerId);
         // A broadcast already delivered before an edit must not run the newly edited task.
         i.putExtra(ALARM_TARGET_ID, trigger.getTriggerTarget());
@@ -181,16 +218,31 @@ public class TriggerService extends Service {
         i.putExtra(ALARM_TIME, trigger.getTime());
         i.putExtra(ALARM_WEEKDAYS, trigger.getWeekdays());
 
-        // Known WP10 blocker: narrowing a long ID can collide with another PendingIntent identity.
-        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        return PendingIntent.getBroadcast(context, 0, i,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     private PendingIntent getIntent(long triggerId){
+        Intent intent = getIdentityIntent(triggerId);
+        intent.putExtra(TRIGGER_ID, triggerId);
+        return PendingIntent.getBroadcast(context, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private Intent getIdentityIntent(long triggerId) {
         Intent i = new Intent(context, TriggerReceiver.class);
         i.setAction(TRIGGER_RECIEVE);
         i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        i.putExtra(TRIGGER_ID, triggerId);
-        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        i.setData(Uri.parse(TriggerAlarmIdentityPolicy.dataUri(triggerId)));
+        return i;
+    }
+
+    private Intent getLegacyIntent(long triggerId) {
+        Intent intent = new Intent(context, TriggerReceiver.class);
+        intent.setAction(TRIGGER_RECIEVE);
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        intent.putExtra(TRIGGER_ID, triggerId);
+        return intent;
     }
 
     @Override
@@ -203,6 +255,10 @@ public class TriggerService extends Service {
         long id = intent.getLongExtra(TRIGGER_ID, -1);
         this.dbHandler = new DatabaseHandler(getBaseContext());
         this.context = getBaseContext();
+        if (id <= 0) {
+            stopForeground(true);
+            return Service.START_NOT_STICKY;
+        }
         synchronized (TriggerStateLock.MONITOR) {
             Trigger t = dbHandler.getTrigger(id);
 

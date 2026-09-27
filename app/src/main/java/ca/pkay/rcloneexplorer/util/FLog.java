@@ -110,23 +110,30 @@ public abstract class FLog {
         }
     }
 
-    private static String withThrowable(String message, Throwable throwable) {
+    static String withThrowable(String message, Throwable throwable) {
         if (throwable == null) {
-            return message;
+            return LogRedactor.redact(message);
         }
         String detail = throwable.getMessage();
         if (detail == null || detail.isEmpty()) {
-            return message + " [" + throwable.getClass().getSimpleName() + "]";
+            return LogRedactor.redact(
+                    message + " [" + throwable.getClass().getSimpleName() + "]");
         }
-        return message + " [" + throwable.getClass().getSimpleName() + ": "
-                + LogRedactor.redact(detail) + "]";
+        return LogRedactor.redact(message + " [" + throwable.getClass().getSimpleName() + ": "
+                + detail + "]");
     }
     
     private static final boolean isLoggable(String tag, int level){
-        if(BuildConfig.DEBUG) {
-            return Log.isLoggable(tag, level) || level != Log.INFO && Log.isLoggable(LOGGING_MIN_LEVEL_TAG, level);
-        } else {
-            return Log.isLoggable(tag, level);
+        try {
+            if(BuildConfig.DEBUG) {
+                return Log.isLoggable(tag, level) || level != Log.INFO && Log.isLoggable(LOGGING_MIN_LEVEL_TAG, level);
+            } else {
+                return Log.isLoggable(tag, level);
+            }
+        } catch (RuntimeException unavailableLogger) {
+            // Logging is diagnostic only. Mock Android stubs in local JVM tests (or a
+            // malfunctioning platform logger) must never break the operation being logged.
+            return false;
         }
     }
 }

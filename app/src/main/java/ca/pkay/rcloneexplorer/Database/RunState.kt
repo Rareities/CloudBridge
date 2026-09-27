@@ -45,7 +45,9 @@ data class RunRecord(
     val conflictItems: Long?,
     val unknownItems: Long?,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    /** Exact filter text captured at queue time; cleared when the run leaves active execution. */
+    val filterSnapshot: String? = null
 )
 
 class RunRejectedException(message: String) : IllegalStateException(message)

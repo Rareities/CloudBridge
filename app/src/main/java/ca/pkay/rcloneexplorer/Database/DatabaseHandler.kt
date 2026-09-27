@@ -183,6 +183,12 @@ class DatabaseHandler(context: Context?) :
             sqLiteDatabase.execSQL(SQL_CREATE_INDEX_ACTIVE_BISYNC_BACKUP_PROFILE)
             sqLiteDatabase.execSQL(SQL_CREATE_INDEX_BISYNC_BACKUP_HISTORY)
         }
+        // Runs first appeared in v10. Upgrades from v9 or earlier create the table from
+        // SQL_CREATE_TABLE_RUNS above, which already contains the current nullable column.
+        // Only databases that had a v10-v16 run table need the additive migration.
+        if (oldVersion in 10 until 17) {
+            sqLiteDatabase.execSQL(DatabaseInfo.SQL_UPDATE_RUN_ADD_FILTER_SNAPSHOT)
+        }
     }
 
     val allTasks: List<Task>
@@ -658,12 +664,12 @@ class DatabaseHandler(context: Context?) :
         importedTasks: List<Task>
     ) {
         val db = writableDatabase
-        val filterIds = HashMap<Long, Long>()
-        val taskIds = HashMap<Long, Long>()
-        val insertedTasks = ArrayList<Pair<Long, Task>>()
-
-        db.beginTransaction()
+        var operationFailure: Throwable? = null
         try {
+            db.beginTransaction()
+            val filterIds = HashMap<Long, Long>()
+            val taskIds = HashMap<Long, Long>()
+            val insertedTasks = ArrayList<Pair<Long, Task>>()
             db.delete(Trigger.TABLE_NAME, null, null)
             db.delete(Task.TABLE_NAME, null, null)
             db.delete(Filter.TABLE_NAME, null, null)
@@ -720,9 +726,37 @@ class DatabaseHandler(context: Context?) :
             )
 
             db.setTransactionSuccessful()
+        } catch (failure: Throwable) {
+            operationFailure = failure
+            throw failure
         } finally {
-            db.endTransaction()
-            db.close()
+            var cleanupFailure: Throwable? = null
+            try {
+                // inTransaction() also covers a begin that throws after SQLite entered a
+                // transaction. Keep finalization separate so closing is still attempted on error.
+                if (db.inTransaction()) db.endTransaction()
+            } catch (failure: Throwable) {
+                cleanupFailure = failure
+            }
+            try {
+                db.close()
+            } catch (failure: Throwable) {
+                val previousCleanupFailure = cleanupFailure
+                if (previousCleanupFailure == null) {
+                    cleanupFailure = failure
+                } else {
+                    previousCleanupFailure.addSuppressed(failure)
+                }
+            }
+            val finalizationFailure = cleanupFailure
+            if (finalizationFailure != null) {
+                val originalFailure = operationFailure
+                if (originalFailure == null) {
+                    throw finalizationFailure
+                } else {
+                    originalFailure.addSuppressed(finalizationFailure)
+                }
+            }
         }
     }
 

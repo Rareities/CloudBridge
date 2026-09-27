@@ -8,6 +8,12 @@ final class RcdClaimFailurePolicy {
     static boolean mayHaveStarted(RuntimeException failure) {
         if (failure instanceof RcloneRcd.RcdIOException) return true;
         if (failure instanceof RcloneRcd.RcdOpException) {
+            RcdExternalFailure.Kind kind = ((RcloneRcd.RcdOpException) failure)
+                    .getExternalFailure().getKind();
+            if (kind == RcdExternalFailure.Kind.REQUEST_TOO_LARGE
+                    || kind == RcdExternalFailure.Kind.REQUEST_ENCODING_FAILED) {
+                return false;
+            }
             int status = ((RcloneRcd.RcdOpException) failure).getStatus();
             return status < 0 || status >= 500;
         }

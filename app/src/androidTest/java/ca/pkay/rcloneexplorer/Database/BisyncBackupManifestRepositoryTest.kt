@@ -56,7 +56,10 @@ class BisyncBackupManifestRepositoryTest {
         old.execSQL(DatabaseInfo.SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
         old.execSQL(DatabaseInfo.SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
         old.execSQL(DatabaseInfo.SQL_CREATE_TABLE_PROFILES)
-        old.execSQL(DatabaseInfo.SQL_CREATE_TABLE_RUNS)
+        old.execSQL(DatabaseInfo.SQL_CREATE_TABLE_RUNS.replace(
+            "${DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT} TEXT,",
+            ""
+        ))
         old.execSQL(DatabaseInfo.SQL_CREATE_INDEX_ACTIVE_RUN)
         old.execSQL(DatabaseInfo.SQL_CREATE_TABLE_RESOURCE_CLAIMS)
         old.execSQL(DatabaseInfo.SQL_CREATE_TABLE_BISYNC_PREFLIGHT)
@@ -165,7 +168,7 @@ class BisyncBackupManifestRepositoryTest {
         val handler = DatabaseHandler(context)
         val upgraded = handler.writableDatabase
         try {
-            assertEquals(16, upgraded.version)
+            assertEquals(17, upgraded.version)
             assertEquals(2L, DatabaseUtils.longForQuery(
                 upgraded,
                 "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN (?, ?)",
@@ -193,6 +196,11 @@ class BisyncBackupManifestRepositoryTest {
             assertEquals(1L, DatabaseUtils.longForQuery(
                 upgraded, "SELECT COUNT(*) FROM ${DatabaseInfo.RUN_TABLE_NAME} WHERE ${DatabaseInfo.RUN_COLUMN_ID} = ? AND ${DatabaseInfo.RUN_COLUMN_STATE} = ?",
                 arrayOf(runId, RunState.SUCCESS.wireValue)
+            ))
+            assertEquals(1L, DatabaseUtils.longForQuery(
+                upgraded,
+                "SELECT COUNT(*) FROM ${DatabaseInfo.RUN_TABLE_NAME} WHERE ${DatabaseInfo.RUN_COLUMN_ID} = ? AND ${DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT} IS NULL",
+                arrayOf(runId)
             ))
             assertEquals(1L, DatabaseUtils.longForQuery(
                 upgraded, "SELECT COUNT(*) FROM ${DatabaseInfo.BISYNC_PREFLIGHT_TABLE_NAME} WHERE ${DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID} = ? AND ${DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE} = ?",

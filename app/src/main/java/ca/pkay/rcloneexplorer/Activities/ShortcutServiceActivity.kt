@@ -19,7 +19,7 @@ class ShortcutServiceActivity : AppCompatActivity() {
         moveTaskToBack(true)
 
         val id = taskIdFromIntent()
-        val capability = intent.getStringExtra(ShortcutCapabilities.EXTRA_CAPABILITY)
+        val capability = capabilityFromIntent()
         if (intent.action == TASK_SYNC_ACTION && id != null
             && ShortcutCapabilities.isValid(this, id, capability)) {
             SyncManager(this).queue(id)
@@ -33,11 +33,24 @@ class ShortcutServiceActivity : AppCompatActivity() {
     }
 
     private fun taskIdFromIntent(): Long? {
-        val extras = intent.extras ?: return null
-        if (!extras.containsKey(EXTRA_TASK_ID)) {
-            return null
+        return try {
+            val extras = intent.extras ?: return null
+            if (!extras.containsKey(EXTRA_TASK_ID)) return null
+            extras.getLong(EXTRA_TASK_ID, Long.MIN_VALUE).takeIf { it > 0L }
+        } catch (_: RuntimeException) {
+            // Exported intents may contain malformed or wrong-typed parcelables.
+            null
         }
-        val rawId = extras.getLong(EXTRA_TASK_ID, Long.MIN_VALUE)
-        return rawId.takeIf { it > 0L }
+    }
+
+    private fun capabilityFromIntent(): String? {
+        return try {
+            val extras = intent.extras ?: return null
+            if (!extras.containsKey(ShortcutCapabilities.EXTRA_CAPABILITY)) return null
+            ShortcutCapabilities.stringValue(extras.get(ShortcutCapabilities.EXTRA_CAPABILITY))
+        } catch (_: RuntimeException) {
+            // A malformed extra must be rejected, not allowed to crash this exported route.
+            null
+        }
     }
 }

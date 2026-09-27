@@ -29,7 +29,6 @@ import android.provider.DocumentsContract.Document;
 import android.provider.DocumentsContract.Root;
 import android.system.ErrnoException;
 import android.system.OsConstants;
-import android.util.LruCache;
 import android.webkit.MimeTypeMap;
 
 import androidx.annotation.IntDef;
@@ -50,6 +49,8 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -58,12 +59,15 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import ca.pkay.rcloneexplorer.Items.FileItem;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.RcloneRcd.ListItem;
 import ca.pkay.rcloneexplorer.Services.RcdService;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.RemoteErrorMessagePolicy;
+import ca.pkay.rcloneexplorer.util.VcpJobCompletion;
 import io.github.x0b.safdav.provider.SingleRootProvider;
 import java9.util.concurrent.CompletableFuture;
 
@@ -114,8 +118,8 @@ public class VirtualContentProvider extends SingleRootProvider {
     private Rclone rclone;
     private SharedPreferences preferences;
     private File configFile;
-    RcloneRcd rcd;
-    RcdService rcdService;
+    volatile RcloneRcd rcd;
+    volatile RcdService rcdService;
     volatile boolean rcdAvailable;
 
     private final ServiceConnection connection = new ServiceConnection() {
@@ -123,16 +127,24 @@ public class VirtualContentProvider extends SingleRootProvider {
         public void onServiceConnected(ComponentName name, IBinder service) {
             FLog.d(TAG, "onServiceConnected: service connected");
             RcdService.RcdBinder binder = (RcdService.RcdBinder) service;
-            rcdService = binder.getService();
-            rcd = rcdService.getLocalRcd();
-            rcdAvailable = true;
+            synchronized (VirtualContentProvider.this) {
+                rcdService = binder.getService();
+                rcd = rcdService.getLocalRcd();
+                rcdAvailable = true;
+                VirtualContentProvider.this.notifyAll();
+            }
             CompletableFuture.runAsync(() -> reloadRemotesIfRequired(), asyncExc);
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
             FLog.d(TAG, "onServiceDisconnected: service disconnected");
-            rcdAvailable = false;
+            synchronized (VirtualContentProvider.this) {
+                rcdAvailable = false;
+                rcd = null;
+                rcdService = null;
+                VirtualContentProvider.this.notifyAll();
+            }
         }
     };
 
@@ -145,22 +157,24 @@ public class VirtualContentProvider extends SingleRootProvider {
         if (!preferences.getBoolean(context.getString(R.string.pref_key_enable_vcp), false)) {
             return false;
         }
-        if (rcdAvailable && rcd.isAlive()) {
+        if (rcdAvailable && rcd != null && rcd.isAlive()) {
             return true;
         }
         FLog.d(TAG, "acquireRcdService: connecting to RcdService");
         Context appCtx = context.getApplicationContext();
         if (rcdService != null && rcdService.isShutdown()) {
             FLog.d(TAG, "Removing old binding");
+            rcdAvailable = false;
+            rcd = null;
+            rcdService = null;
             appCtx.unbindService(connection);
         }
         startBindService(context);
-        awaitRcdService();
-        if (null != rcdService) {
+        if (!awaitRcdService()) {
             FLog.w(TAG, "acquireRcd: rcd not ready in time");
-            return true;
+            return false;
         }
-        return false;
+        return rcdAvailable && rcdService != null && rcd != null;
     }
 
     private void startBindService(Context context) {
@@ -174,18 +188,37 @@ public class VirtualContentProvider extends SingleRootProvider {
         }
     }
 
-    private void awaitRcdService() {
-        long waitTime = 500;
-        while (waitTime > 0 && null != rcdService) {
-            FLog.d(TAG, "acquireRcd: waiting for service");
-            long waitStart = System.nanoTime();
-            try {
-                Thread.sleep(100);
-            } catch (InterruptedException ignored) {
+    private boolean awaitRcdService() {
+        return awaitRcdServiceConnection(this, 500,
+                () -> rcdAvailable && rcdService != null && rcd != null);
+    }
+
+    @VisibleForTesting
+    static boolean awaitRcdServiceConnection(Object connectionMonitor, long timeoutMillis,
+                                             RcdServiceConnectionState connectionState) {
+        long deadlineNanos = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        synchronized (connectionMonitor) {
+            while (!connectionState.isConnected()) {
+                long remainingNanos = deadlineNanos - System.nanoTime();
+                if (remainingNanos <= 0) {
+                    return false;
+                }
+                long waitMillis = TimeUnit.NANOSECONDS.toMillis(remainingNanos);
+                int waitNanos = (int) (remainingNanos - TimeUnit.MILLISECONDS.toNanos(waitMillis));
+                try {
+                    connectionMonitor.wait(waitMillis, waitNanos);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
             }
-            long actualWait = (System.nanoTime() - waitStart) / 1000000;
-            waitTime -= actualWait;
+            return true;
         }
+    }
+
+    @VisibleForTesting
+    interface RcdServiceConnectionState {
+        boolean isConnected();
     }
 
     private void initAsyncPool() {
@@ -339,7 +372,6 @@ public class VirtualContentProvider extends SingleRootProvider {
         if (rcdAvailable && rcdService != null) {
             rcdService.onNotifyUse();
         }
-        grantPermission(documentId);
         FLog.v(TAG, "queryDocument(): %s", documentId);
         if (null == projection) {
             projection = DEFAULT_DOCUMENT_PROJECTION;
@@ -348,6 +380,7 @@ public class VirtualContentProvider extends SingleRootProvider {
         if (ROOT_DOC_ID.equals(documentId)) {
             try (MatrixCursor result = new MatrixCursor(projection)) {
                 addRootDocProjectedRow(result);
+                grantPermission(documentId);
                 return result;
             }
         // Return the level below, e.g. rclone/remotes/gdrive:
@@ -355,7 +388,9 @@ public class VirtualContentProvider extends SingleRootProvider {
             String remoteDocumentId = getShortId(documentId);
             String remoteName = getRemoteName(remoteDocumentId);
             requireConfiguredRemote(remoteDocumentId);
-            return getRemotesAsCursor(projection, remoteName);
+            Cursor cursor = getRemotesAsCursor(projection, remoteName);
+            grantPermission(documentId);
+            return cursor;
         // Return another level below, e.g. rclone/remotes/gdrive:/brochure.pdf
         } else {
             String fileDocumentId = requireNonRootDocumentId(documentId);
@@ -367,6 +402,7 @@ public class VirtualContentProvider extends SingleRootProvider {
                 FLog.v(TAG, "queryDocument(%s): %s, %s, %s, %d", documentId, cached.path, cached.mimeType, cached.name, cached.lastModified);
                 cursor = new MatrixCursor(projection);
                 cursor.addRow(getForProjection(cached, getRootedDocumentId(documentId), projection));
+                grantPermission(documentId);
             } else {
                 Bundle bundle = new Bundle();
                 Context context = Objects.requireNonNull(getContext());
@@ -428,17 +464,18 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public Cursor queryChildDocuments(String parentDocumentId, String[] projection, String sortOrder) throws FileNotFoundException {
+        final boolean rootDocument = ROOT_DOC_ID.equals(parentDocumentId);
+        final String validatedParentId = rootDocument ? null : requireParentDocumentId(parentDocumentId);
         FLog.v(TAG, "queryChildDocuments(): parent=%s", parentDocumentId);
         if (null != sortOrder && !sortOrder.equals("_display_name ASC")) {
             FLog.w(TAG, "Specified sort order not supported, using default");
         }
-        if (ROOT_DOC_ID.equals(parentDocumentId)) {
+        if (rootDocument) {
             if (null == projection) {
                 projection = DEFAULT_REMOTE_PROJECTION;
             }
             return getRemotesAsCursor(projection, null);
         } else {
-            final String validatedParentId = requireParentDocumentId(parentDocumentId);
             final RemoteItem remoteItem = requireConfiguredRemote(validatedParentId);
             if (null == projection) {
                 projection = DEFAULT_DOCUMENT_PROJECTION;
@@ -472,7 +509,7 @@ public class VirtualContentProvider extends SingleRootProvider {
                     }
 
                 } catch (RcloneRcd.RcdOpException e) {
-                    extraInfo = e.getError();
+                    extraInfo = RemoteErrorMessagePolicy.forUser(e.getError());
                 }
                 if (null == directFiles) {
                     Context context = Objects.requireNonNull(getContext());
@@ -665,10 +702,10 @@ public class VirtualContentProvider extends SingleRootProvider {
                     throw new FileNotFoundException();
                 }
             } catch (RcloneRcd.RcdIOException e) {
-                throw new FileNotFoundException(e.getError());
+                throw new FileNotFoundException(RemoteErrorMessagePolicy.forUser(e.getError()));
             } catch (RcloneRcd.RcdOpException e) {
                 FLog.e(TAG, "Unexpected RCD error", e);
-                throw new FileNotFoundException(e.getError());
+                throw new FileNotFoundException(RemoteErrorMessagePolicy.forUser(e.getError()));
             }
         } else {
             // However, we need to add this to the cache to capture the subsequent queryDocument call
@@ -690,113 +727,109 @@ public class VirtualContentProvider extends SingleRootProvider {
         FLog.v(TAG, "renameDocument: %s -> %s", rootedDocumentId, safeDisplayName);
         final String remoteName = getRemoteName(sourceDocumentId);
         final String srcPath = getRclonePath(sourceDocumentId);
+        final ListItem sourceItem = getFileItem(sourceDocumentId);
+        if (sourceItem == null) {
+            throw new FileNotFoundException("Document metadata is unavailable");
+        }
         final String targetDocId = getTargetByChild(getParent(rootedDocumentId), safeDisplayName);
         final String dstPath = getRclonePath(targetDocId);
         FLog.v(TAG, "remoteName: %s, srcPath: %s, targetDocId: %s, dstPath: %s", remoteName, srcPath, targetDocId, dstPath);
         if (!acquireRcd()) {
             throw new FileNotFoundException();
         }
-        MaxWait lock = new MaxWait(5000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
+        VcpJobCompletion completion = new VcpJobCompletion();
+        OnJobFinishListener listener = new OnJobFinishListener(completion) {
             @Override
             void onFinish(RcloneRcd.JobStatusResponse status) {
-                FLog.v(TAG, "rename finished with: %s at %d", status.success, status.endTime);
-                lock.release();
-                if (!status.success) {
-                    FLog.w(TAG, "renameDocument: failed to rename %s to %s", srcPath, dstPath);
-                } else {
-                    String cacheId = sourceDocumentId;
-                    fsCache.remove(cacheId);
-                    remoteState.remove(cacheId);
-                    notifyChange(rootedDocumentId);
-                    notifyChange(targetDocId);
+                FLog.v(TAG, "rename job reached a terminal callback");
+                invalidateMutationState(sourceItem.isDir, rootedDocumentId, targetDocId);
+                if (isConfirmedSuccess(status)) {
+                    revokeDocumentPermission(rootedDocumentId);
                 }
             }
         };
         try {
             rcd.moveFile(remoteName, srcPath, remoteName, dstPath, listener);
-            if (!lock.await()) {
-                FLog.w(TAG, "renameDocument: timed out waiting for rcd job (still running)");
-            }
+            requireMutationSuccess(completion, 5000, sourceItem.isDir, rootedDocumentId, targetDocId);
             return targetDocId;
         } catch (RcloneRcd.RcdOpException e) {
             FLog.e(TAG, "RCD move failure", e);
-            throw new FileNotFoundException();
+            invalidateMutationState(sourceItem.isDir, rootedDocumentId, targetDocId);
+            throw mutationNotConfirmed(VcpJobCompletion.Outcome.UNKNOWN);
         }
     }
 
-    /**
-     * Finish listener that will notify() on the lock object on completion
-     */
+    /** Runs mutation state cleanup before waking the synchronous DocumentsProvider caller. */
     private static class OnJobFinishListener implements RcloneRcd.JobStatusHandler {
 
-        private final MaxWait lock;
+        private final VcpJobCompletion completion;
 
-        public OnJobFinishListener(MaxWait lock) {
-            this.lock = lock;
+        public OnJobFinishListener(VcpJobCompletion completion) {
+            this.completion = completion;
         }
 
         @Override
         public final void handleJobStatus(RcloneRcd.JobStatusResponse jobStatusResponse) {
-            if (null != lock) {
-                // markCompleted() sets the done flag and notifies any thread blocked in await().
-                lock.markCompleted();
+            try {
+                onFinish(jobStatusResponse);
+                completion.complete(jobStatusResponse != null && jobStatusResponse.finished,
+                        jobStatusResponse != null && jobStatusResponse.success);
+            } catch (RuntimeException failure) {
+                FLog.e(TAG, "Unable to refresh provider state after terminal RCD job callback", failure);
+                completion.complete(false, false);
             }
-            onFinish(jobStatusResponse);
+        }
+
+        @Override
+        public final boolean dispatchOnMainThread() {
+            return false;
         }
 
         void onFinish(RcloneRcd.JobStatusResponse jobStatusResponse) {
         }
     }
 
-    /**
-     * An inefficient but simple lock to increase compatibility with clients
-     * that don't understand change notifications.
-     */
-    private static class MaxWait {
+    private static boolean isConfirmedSuccess(RcloneRcd.JobStatusResponse status) {
+        return status != null && VcpJobCompletion.isConfirmedSuccess(status.finished, status.success);
+    }
 
-        private final long timeout;
-        private final Object lock;
-        private volatile boolean completed;
-
-        MaxWait(long timeout) {
-            this.timeout = timeout;
-            this.lock = new Object();
+    private void requireMutationSuccess(VcpJobCompletion completion, long timeoutMillis,
+                                       boolean includeDescendants,
+                                       String... affectedDocumentIds) throws FileNotFoundException {
+        VcpJobCompletion.Outcome outcome = completion.await(timeoutMillis);
+        if (outcome != VcpJobCompletion.Outcome.SUCCEEDED) {
+            FLog.w(TAG, "Provider mutation did not receive confirmed success: %s", outcome);
+            invalidateMutationState(includeDescendants, affectedDocumentIds);
+            throw mutationNotConfirmed(outcome);
         }
+    }
 
-        /**
-         * Await release of
-         * @return {@code true} if the rcd job signalled completion, {@code false} if the
-         *         timeout elapsed first (the job may still be running).
-         */
-        public boolean await() {
-            synchronized (lock) {
-                if (!completed) {
-                    try {
-                        lock.wait(timeout);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
+    private static FileNotFoundException mutationNotConfirmed(VcpJobCompletion.Outcome outcome) {
+        String message = outcome == VcpJobCompletion.Outcome.FAILED
+                ? "Remote operation did not complete successfully"
+                : "Remote operation may still be running; completion is not confirmed";
+        return new FileNotFoundException(message);
+    }
+
+    /** Drops stale provider metadata and tells SAF clients to re-query affected documents. */
+    private void invalidateMutationState(boolean includeDescendants, String... affectedDocumentIds) {
+        if (fsCache != null) fsCache.evictAll();
+        if (remoteState != null) remoteState.clearCache();
+        if (affectedDocumentIds == null) return;
+        for (String affectedDocumentId : affectedDocumentIds) {
+            if (affectedDocumentId == null) continue;
+            String shortId = getShortId(affectedDocumentId);
+            if (fsCache != null) fsCache.remove(shortId);
+            if (remoteState != null) {
+                if (includeDescendants) {
+                    remoteState.removeSubtree(shortId);
+                } else {
+                    remoteState.remove(shortId);
                 }
-                return completed;
             }
-        }
-
-        /** Marks the awaited job as completed and releases a blocked await(). */
-        public void markCompleted() {
-            synchronized (lock) {
-                completed = true;
-                lock.notify();
-            }
-        }
-
-        /** Equivalent to {@link #markCompleted()}; kept for call-site compatibility. */
-        public void release() {
-            markCompleted();
-        }
-
-        public boolean isCompleted() {
-            return completed;
+            notifyChange(shortId);
+            String parent = getParent(shortId);
+            if (!parent.equals(shortId)) notifyChange(parent);
         }
     }
 
@@ -821,16 +854,15 @@ public class VirtualContentProvider extends SingleRootProvider {
             throw new FileNotFoundException();
         }
 
-        MaxWait lock = new MaxWait(10000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
+        VcpJobCompletion completion = new VcpJobCompletion();
+        OnJobFinishListener listener = new OnJobFinishListener(completion) {
             @Override
             void onFinish(RcloneRcd.JobStatusResponse jobStatusResponse) {
-                FLog.v(TAG, "deleteDocument/onFinish(): success=%s", jobStatusResponse.success);
-                fsCache.remove(documentId);
-                remoteState.remove(documentId);
-                revokeDocumentPermission(rootedDocumentId);
-                lock.release();
-                notifyChange(rootedDocumentId);
+                FLog.v(TAG, "delete job reached a terminal callback");
+                invalidateMutationState(document.isDir, rootedDocumentId);
+                if (isConfirmedSuccess(jobStatusResponse)) {
+                    revokeDocumentPermission(rootedDocumentId);
+                }
             }
         };
 
@@ -845,11 +877,11 @@ public class VirtualContentProvider extends SingleRootProvider {
             } else {
                 rcd.deleteFile(remoteName, document.path, listener);
             }
-            if (!lock.await()) {
-                FLog.w(TAG, "deleteDocument: timed out waiting for rcd job (still running)");
-            }
+            requireMutationSuccess(completion, 10000, document.isDir, rootedDocumentId);
         } catch (RcloneRcd.RcdOpException e) {
             FLog.e(TAG, "deleteDocument() failed", e);
+            invalidateMutationState(document.isDir, rootedDocumentId);
+            throw mutationNotConfirmed(VcpJobCompletion.Outcome.UNKNOWN);
         }
     }
 
@@ -859,6 +891,7 @@ public class VirtualContentProvider extends SingleRootProvider {
         String sourceDocumentId = requireNonRootDocumentId(rootedSrcDocId);
         String rootedSourceDocumentId = getRootedDocumentId(sourceDocumentId);
         requireConfiguredRemote(sourceDocumentId);
+        requireConfiguredRemote(targetParentDocumentId);
         FLog.v(TAG, "copyDocument: %s -> %s", rootedSourceDocumentId, rootedTargetParentDocId);
         final String targetDocumentId = requireTargetDocumentId(sourceDocumentId, targetParentDocumentId);
         ListItem document = getFileItem(sourceDocumentId);
@@ -873,13 +906,12 @@ public class VirtualContentProvider extends SingleRootProvider {
 
         // copyDocument is a data-transfer operation; allow up to 30s for the rcd job so we don't
         // report success to the client while bytes are still moving.
-        final MaxWait lock = new MaxWait(30000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
+        final VcpJobCompletion completion = new VcpJobCompletion();
+        OnJobFinishListener listener = new OnJobFinishListener(completion) {
             @Override
             void onFinish(RcloneRcd.JobStatusResponse jobStatusResponse) {
-                FLog.v(TAG, "copyDocument/onFinish(): success=%s", jobStatusResponse.success);
-                lock.release();
-                notifyChange(targetDocumentId);
+                FLog.v(TAG, "copy job reached a terminal callback");
+                invalidateMutationState(document.isDir, targetDocumentId);
             }
         };
 
@@ -894,13 +926,12 @@ public class VirtualContentProvider extends SingleRootProvider {
             } else {
                 rcd.copyFile(srcRemoteName, document.path, dstRemoteName, dstPath, listener);
             }
-            if (!lock.await()) {
-                FLog.w(TAG, "copyDocument: timed out waiting for rcd job; client may see success before completion");
-            }
+            requireMutationSuccess(completion, 30000, document.isDir, targetDocumentId);
             return getRootedDocumentId(targetDocumentId);
         } catch (RcloneRcd.RcdOpException e) {
             FLog.e(TAG, "copyDocument() failed", e);
-            throw new FileNotFoundException();
+            invalidateMutationState(document.isDir, targetDocumentId);
+            throw mutationNotConfirmed(VcpJobCompletion.Outcome.UNKNOWN);
         }
     }
 
@@ -915,6 +946,7 @@ public class VirtualContentProvider extends SingleRootProvider {
             throw invalidDocumentInput(new IllegalArgumentException("Source parent does not match document ID"));
         }
         requireConfiguredRemote(sourceDocumentId);
+        requireConfiguredRemote(targetParentDocumentId);
         FLog.d(TAG, "moveDocument: %s -> %s", rootedSourceDocumentId, rootedTargetDocParentId);
         final String targetDocumentId = requireTargetDocumentId(sourceDocumentId, targetParentDocumentId);
 
@@ -924,17 +956,15 @@ public class VirtualContentProvider extends SingleRootProvider {
         }
 
         // moveDocument is a data-transfer operation; allow up to 30s for the rcd job.
-        MaxWait lock = new MaxWait(30000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
+        final VcpJobCompletion completion = new VcpJobCompletion();
+        OnJobFinishListener listener = new OnJobFinishListener(completion) {
             @Override
             void onFinish(RcloneRcd.JobStatusResponse status) {
-                FLog.v(TAG, "move finished with: %s at %d", status.success, status.endTime);
-                fsCache.remove(getNoRootId(sourceDocumentId));
-                remoteState.remove(getNoRootId(sourceDocumentId));
-                revokeDocumentPermission(rootedSourceDocumentId);
-                lock.release();
-                notifyChange(rootedSourceDocumentId);
-                notifyChange(targetDocumentId);
+                FLog.v(TAG, "move job reached a terminal callback");
+                invalidateMutationState(document.isDir, rootedSourceDocumentId, targetDocumentId);
+                if (isConfirmedSuccess(status)) {
+                    revokeDocumentPermission(rootedSourceDocumentId);
+                }
             }
         };
 
@@ -956,13 +986,13 @@ public class VirtualContentProvider extends SingleRootProvider {
                 rcd.moveFile(srcRemote, srcPath, dstRemote, dstPath, listener);
             }
 
-            if (!lock.await()) {
-                FLog.w(TAG, "moveDocument: timed out waiting for rcd job; client may see success before completion");
-            }
+            requireMutationSuccess(completion, 30000, document.isDir,
+                    rootedSourceDocumentId, targetDocumentId);
             return getRootedDocumentId(targetDocumentId);
         } catch (RcloneRcd.RcdOpException e) {
             FLog.e(TAG, "moveDocument() failed", e);
-            throw new FileNotFoundException();
+            invalidateMutationState(document.isDir, rootedSourceDocumentId, targetDocumentId);
+            throw mutationNotConfirmed(VcpJobCompletion.Outcome.UNKNOWN);
         }
     }
 
@@ -1216,6 +1246,30 @@ public class VirtualContentProvider extends SingleRootProvider {
         return rootedDocumentId.substring(ROOT_DOC_ID.length() + 1);
     }
 
+    @VisibleForTesting
+    static boolean isSameOrDescendantCacheId(String candidateId, String rootId) {
+        String normalizedRoot = normalizeCacheId(rootId);
+        String normalizedCandidate = normalizeCacheId(candidateId);
+        if (normalizedCandidate.equals(normalizedRoot)) {
+            return true;
+        }
+        String subtreePrefix = normalizedRoot.endsWith("/")
+                ? normalizedRoot : normalizedRoot + "/";
+        return normalizedCandidate.startsWith(subtreePrefix);
+    }
+
+    private static String normalizeCacheId(String documentId) {
+        String shortId = getShortId(documentId);
+        int colon = shortId.indexOf(':');
+        if (colon >= 0 && shortId.length() == colon + 1) {
+            return shortId + "/";
+        }
+        while (colon >= 0 && shortId.length() > colon + 2 && shortId.endsWith("/")) {
+            shortId = shortId.substring(0, shortId.length() - 1);
+        }
+        return shortId;
+    }
+
     @VisibleForTesting()
     static String getRootedDocumentId(String unrootedDocumentId) {
         if (unrootedDocumentId.startsWith(ROOT_DOC_PREFIX)) {
@@ -1377,7 +1431,8 @@ public class VirtualContentProvider extends SingleRootProvider {
         } catch (RcloneRcd.RcdOpException e) {
             Bundle extras = new Bundle(1);
             extras.putString(DocumentsContract.EXTRA_ERROR,
-                    context.getString(R.string.virtual_content_provider_exception_error, e.getError()));
+                    context.getString(R.string.virtual_content_provider_exception_error,
+                            RemoteErrorMessagePolicy.forUser(e.getError())));
             return new ExtrasMatrixCursor(projection, extras);
         }
     }
@@ -1533,31 +1588,49 @@ public class VirtualContentProvider extends SingleRootProvider {
         return path;
     }
 
-    private static class FsCache extends LruCache<String, ListItem> {
+    private static class FsCache {
+        private static final int ESTIMATED_ENTRY_BYTES = 384;
+        private final int maxSize;
+        private int size;
+        // Access order preserves the Android LruCache contract while keeping this policy JVM-testable.
+        private final LinkedHashMap<String, ListItem> entries = new LinkedHashMap<>(16, 0.75f, true);
 
-        /**
-         * @param maxSize for caches that do not override {@link #sizeOf}, this is
-         *     the maximum number of entries in the cache. For all other caches,
-         *     this is the maximum sum of the sizes of the entries in this cache.
-         */
-        public FsCache(int maxSize) {
-            super(maxSize);
+        FsCache(int maxSize) {
+            if (maxSize <= 0) throw new IllegalArgumentException("maxSize must be positive");
+            this.maxSize = maxSize;
         }
 
-        /**
-         * Returns a size value determined by averaging memory usage over 10K
-         * fs entries. The goal here is not to be exactly right, rather than
-         * achieving stable memory usage while being about right.
-         * <br><br>
-         * The exact value heavily depends on path depth (and to a lesser
-         * extend, file name and mime type length)
-         * @param key does not matter
-         * @param value does not matter
-         * @return 384
-         */
-        @Override
-        protected int sizeOf(String key, ListItem value) {
-            return 384;
+        synchronized ListItem get(String key) {
+            return entries.get(key);
+        }
+
+        synchronized void put(String key, ListItem value) {
+            if (key == null || value == null) throw new NullPointerException("key and value must be non-null");
+            ListItem previous = entries.put(key, value);
+            if (previous == null) size += ESTIMATED_ENTRY_BYTES;
+            trimToSize();
+        }
+
+        synchronized void remove(String key) {
+            if (entries.remove(key) != null) size -= ESTIMATED_ENTRY_BYTES;
+        }
+
+        synchronized Map<String, ListItem> snapshot() {
+            return new LinkedHashMap<>(entries);
+        }
+
+        synchronized void evictAll() {
+            entries.clear();
+            size = 0;
+        }
+
+        private void trimToSize() {
+            Iterator<Map.Entry<String, ListItem>> iterator = entries.entrySet().iterator();
+            while (size > maxSize && iterator.hasNext()) {
+                iterator.next();
+                iterator.remove();
+                size -= ESTIMATED_ENTRY_BYTES;
+            }
         }
 
         /**
@@ -1603,7 +1676,7 @@ public class VirtualContentProvider extends SingleRootProvider {
         private final Map<String, FsStateNode> stickyMap = new HashMap<>();
         private final FsCache fsCache = new FsCache(500 * 1024);
 
-        public void put(String noRootId, ListItem item, int flags) {
+        public synchronized void put(String noRootId, ListItem item, int flags) {
             if ((flags & FsStateNode.STICKY) == 1) {
                 FLog.v(TAG, "storing sticky: %s", noRootId);
                 FsStateNode node = new FsStateNode(item, flags);
@@ -1614,7 +1687,7 @@ public class VirtualContentProvider extends SingleRootProvider {
             }
         }
 
-        public FsStateNode get(String noRootId) {
+        public synchronized FsStateNode get(String noRootId) {
             FLog.v(TAG, "retrieving node: %s", noRootId);
             FsStateNode node = stickyMap.get(noRootId);
             if (null == node) {
@@ -1624,7 +1697,7 @@ public class VirtualContentProvider extends SingleRootProvider {
             return node;
         }
 
-        public void remove(String noRootId) {
+        public synchronized void remove(String noRootId) {
             FLog.v(TAG, "removing node: %s", noRootId);
             FsStateNode node = stickyMap.remove(noRootId);
             if (null == node) {
@@ -1632,7 +1705,20 @@ public class VirtualContentProvider extends SingleRootProvider {
             }
         }
 
-        public Map<String, FsStateNode> search(String searchTerm) {
+        public synchronized void removeSubtree(String noRootId) {
+            for (String id : new ArrayList<>(stickyMap.keySet())) {
+                if (isSameOrDescendantCacheId(id, noRootId)) {
+                    stickyMap.remove(id);
+                }
+            }
+            for (String id : new ArrayList<>(fsCache.snapshot().keySet())) {
+                if (isSameOrDescendantCacheId(id, noRootId)) {
+                    fsCache.remove(id);
+                }
+            }
+        }
+
+        public synchronized Map<String, FsStateNode> search(String searchTerm) {
             FLog.v(TAG, "searching: %s", searchTerm);
             String normalizedSearch = searchTerm.toLowerCase(Locale.ROOT).trim();
             Map<String, FsStateNode> results = new HashMap<>();
@@ -1649,11 +1735,11 @@ public class VirtualContentProvider extends SingleRootProvider {
             return results;
         }
 
-        public Map<String, FsStateNode> getStickies() {
-            return Collections.unmodifiableMap(stickyMap);
+        public synchronized Map<String, FsStateNode> getStickies() {
+            return Collections.unmodifiableMap(new HashMap<>(stickyMap));
         }
 
-        public void clearCache() {
+        public synchronized void clearCache() {
             this.fsCache.evictAll();
         }
     }

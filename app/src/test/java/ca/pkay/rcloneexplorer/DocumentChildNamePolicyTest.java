@@ -49,4 +49,26 @@ public class DocumentChildNamePolicyTest {
         assertEquals("remotes/remote:/child",
                 DocumentChildNamePolicy.targetDocumentId("remotes/remote:/", "child"));
     }
+
+    @Test
+    public void boundsCreateAndRenameNamesAtSameLimit() {
+        char[] characters = new char[DocumentChildNamePolicy.MAX_CHILD_NAME_LENGTH];
+        java.util.Arrays.fill(characters, 'x');
+        String maximum = new String(characters);
+        assertEquals(maximum, DocumentChildNamePolicy.normalizeForCreate(maximum));
+        assertEquals(maximum, DocumentChildNamePolicy.requireSingleComponent(maximum));
+
+        String oversized = maximum + "x";
+        assertRejected(() -> DocumentChildNamePolicy.normalizeForCreate(oversized));
+        assertRejected(() -> DocumentChildNamePolicy.requireSingleComponent(oversized));
+    }
+
+    private static void assertRejected(Runnable action) {
+        try {
+            action.run();
+            fail("Expected an oversized document name to be rejected");
+        } catch (IllegalArgumentException expected) {
+            // The provider rejects oversized names before constructing an RC request.
+        }
+    }
 }

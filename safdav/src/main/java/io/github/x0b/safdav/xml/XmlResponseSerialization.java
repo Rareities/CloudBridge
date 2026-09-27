@@ -29,7 +29,7 @@ public class XmlResponseSerialization {
         StringBuilder b = new StringBuilder("<?xml version=\"1.0\" encoding=\"utf-8\"?><D:multistatus xmlns:D=\"DAV:\">");
         timings.addSplit("onBeforeWriteCollection");
         if(item.isCollection() && !baseUrl.endsWith("/")){
-            Log.w(TAG, "Base Url was: " + baseUrl +", appended '/'");
+            Log.w(TAG, "response.base_url_missing_trailing_slash");
             baseUrl += "/";
         }
         writeResponseElement(b, item, 1, baseUrl, item.isCollection());

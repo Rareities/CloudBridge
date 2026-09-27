@@ -13,6 +13,7 @@ import android.system.ErrnoException;
 import android.system.Os;
 import android.system.OsConstants;
 import android.system.StructStat;
+import android.util.AtomicFile;
 import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 
@@ -24,13 +25,11 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.BufferedInputStream;
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
-import java.io.FileWriter;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -57,7 +56,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.net.InetAddress;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import ca.pkay.rcloneexplorer.Database.json.Exporter;
@@ -85,11 +83,22 @@ import ca.pkay.rcloneexplorer.Items.FilterEntry;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject;
 import ca.pkay.rcloneexplorer.rclone.Provider;
+import ca.pkay.rcloneexplorer.util.ConfigRevisionPolicy;
+import ca.pkay.rcloneexplorer.util.ConfigRevisionStore;
+import ca.pkay.rcloneexplorer.util.ConfigFileRestorer;
+import ca.pkay.rcloneexplorer.util.ConfigResetRecoveryPolicy;
+import ca.pkay.rcloneexplorer.util.BackupArchiveStager;
+import ca.pkay.rcloneexplorer.util.ConfigMutationCommandPolicy;
+import ca.pkay.rcloneexplorer.util.RemoteDeleteTargetPolicy;
 import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
+import ca.pkay.rcloneexplorer.util.BoundedTextReader;
 import ca.pkay.rcloneexplorer.util.EndpointConflictCoordinator;
 import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.LogRedactor;
+import ca.pkay.rcloneexplorer.util.ProviderMetadataPolicy;
 import ca.pkay.rcloneexplorer.util.NativeExecutionHandle;
+import ca.pkay.rcloneexplorer.util.NativeDiagnosticCommandPolicy;
+import ca.pkay.rcloneexplorer.util.StagedUploadSourceCleanup;
 import ca.pkay.rcloneexplorer.util.SyncLog;
 import ca.pkay.rcloneexplorer.workmanager.SessionProbeFailureClassifier;
 import es.dmoral.toasty.Toasty;
@@ -100,7 +109,8 @@ import io.github.x0b.safdav.file.SafConstants;
 public class Rclone {
 
     private static final String TAG = "Rclone";
-    private static final long MAX_BACKUP_ENTRY_BYTES = 4L * 1024L * 1024L;
+    private static final Object PROVIDER_CACHE_LOCK = new Object();
+    private static final long MAX_BACKUP_ENTRY_BYTES = BackupArchiveStager.MAX_ENTRY_BYTES;
     private static final long METADATA_COMMAND_TIMEOUT_MILLIS = 5L * 60L * 1000L;
     private static final long LISTING_TIMEOUT_MILLIS = 15L * 60L * 1000L;
     private static final int MAX_LISTING_JSON_CHARS = 16 * 1024 * 1024;
@@ -123,9 +133,12 @@ public class Rclone {
     private Log2File log2File;
     private final ConfigSecretStore configSecretStore;
     private final EndpointConflictCoordinator endpointConflictCoordinator;
+    private volatile IOException configFileRecoveryFailure;
     private final Map<Process, ResourceClaimLease> pendingExecutionClaims =
             Collections.synchronizedMap(new IdentityHashMap<Process, ResourceClaimLease>());
-    private volatile String configPassword;
+    private final Map<Process, Boolean> pendingConfigRevisionMutations =
+            Collections.synchronizedMap(new IdentityHashMap<Process, Boolean>());
+    private volatile ConfigSecretStore.BoundSecret configSecret;
     // RC-38: cache of the parsed `rclone config dump` JSON. Validated against the rclone.conf
     // file's mtime/length on every read so per-instance caches self-invalidate when another
     // Rclone instance (e.g. a config dialog) mutates the config. Volatile for cross-thread visibility.
@@ -142,11 +155,17 @@ public class Rclone {
         configSecretStore = new ConfigSecretStore(context);
         endpointConflictCoordinator = new EndpointConflictCoordinator(context);
         try {
-            configPassword = configSecretStore.load();
+            ConfigFileRestorer.recover(new File(rcloneConf));
+        } catch (IOException recoveryFailure) {
+            configFileRecoveryFailure = recoveryFailure;
+            FLog.e(TAG, "Unable to recover the rclone config after an interrupted file replacement", recoveryFailure);
+        }
+        try {
+            configSecret = configFileRecoveryFailure == null ? configSecretStore.load() : null;
         } catch (Exception e) {
             // Keep the encrypted config and require explicit recovery if the Keystore key
             // was invalidated. Never clear ciphertext as a generic recovery action.
-            configPassword = null;
+            configSecret = null;
             FLog.w(TAG, "Unable to unlock stored rclone config password; explicit recovery is required");
         }
     }
@@ -272,7 +291,7 @@ public class Rclone {
 
         environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
 
-        String password = configPassword;
+        String password = currentConfigPassword();
         if (password != null && !password.isEmpty()) {
             environmentValues.add("RCLONE_CONFIG_PASS=" + password);
         }
@@ -290,6 +309,23 @@ public class Rclone {
             }
         }
         return environmentValues.toArray(new String[0]);
+    }
+
+    /** Reloads a saved password when another app component rotates its durable generation. */
+    private String currentConfigPassword() {
+        try {
+            ConfigSecretStore.BoundSecret secret = configSecret;
+            if (secret == null || !configSecretStore.isCurrent(secret)) {
+                secret = configSecretStore.load();
+                configSecret = secret;
+            }
+            return secret != null && configSecretStore.isCurrent(secret)
+                    ? secret.password() : null;
+        } catch (Exception e) {
+            configSecret = null;
+            FLog.w(TAG, "Unable to refresh saved config password; explicit recovery is required");
+            return null;
+        }
     }
 
     private String getDnsServers() {
@@ -993,6 +1029,12 @@ public class Rclone {
     /** Transient-only config snapshot token; callers compare before/after a preflight and discard it. */
     @Nullable
     public String getBisyncConfigSnapshotFingerprint() {
+        try {
+            ensureConfigFileRecovered();
+        } catch (IOException recoveryFailure) {
+            FLog.e(TAG, "Unable to fingerprint an unrecovered rclone config", recoveryFailure);
+            return null;
+        }
         return EndpointConflictCoordinator.fingerprintFile(new File(rcloneConf));
     }
 
@@ -1020,7 +1062,11 @@ public class Rclone {
         // The expensive config-dump result is cached and only re-read after the config is mutated
         // via config()/deleteRemote() or an explicit invalidateRemotesCache(). Pin/favorite state
         // is re-applied from SharedPreferences on every call so it stays fresh.
+        String revisionBeforeRead = ConfigRevisionStore.current(context);
         JSONObject remotesJSON = getCachedRemotesConfig();
+        String revisionAfterRead = ConfigRevisionStore.current(context);
+        String configRevision = revisionBeforeRead != null
+                && revisionBeforeRead.equals(revisionAfterRead) ? revisionAfterRead : null;
         if (remotesJSON == null) {
             return new ArrayList<>();
         }
@@ -1056,6 +1102,8 @@ public class Rclone {
                     }
                 }
 
+                newRemote.setConfigRevision(configRevision);
+
                 if (pinnedRemotes.contains(newRemote.getName())) {
                     newRemote.pin(true);
                 }
@@ -1076,6 +1124,12 @@ public class Rclone {
 
     /** Returns the cached rclone config dump, fetching and caching it on first use. */
     private JSONObject getCachedRemotesConfig() {
+        try {
+            ensureConfigFileRecovered();
+        } catch (IOException recoveryFailure) {
+            FLog.e(TAG, "Rclone config is unavailable until interrupted replacement recovery succeeds", recoveryFailure);
+            return null;
+        }
         File confFile = new File(rcloneConf);
         long mtime = confFile.lastModified();
         long length = confFile.length();
@@ -1124,6 +1178,12 @@ public class Rclone {
     /** Only use a config dump whose exact file contents still match the cached snapshot. */
     @Nullable
     private RemotesClaimSnapshot currentRemotesConfigForClaims() {
+        try {
+            ensureConfigFileRecovered();
+        } catch (IOException recoveryFailure) {
+            FLog.e(TAG, "Unable to recover rclone config before native endpoint validation", recoveryFailure);
+            return null;
+        }
         File confFile = new File(rcloneConf);
         long mtime = confFile.lastModified();
         long length = confFile.length();
@@ -1173,6 +1233,21 @@ public class Rclone {
     }
 
     private Process getRuntimeProcess(String[] command, String[] env) throws IOException {
+        return getRuntimeProcess(command, env, null);
+    }
+
+    /** Starts native work, optionally fencing it to the config generation seen while browsing. */
+    private Process getRuntimeProcess(String[] command, String[] env,
+                                      @Nullable String expectedConfigRevision) throws IOException {
+        return getRuntimeProcess(command, env, expectedConfigRevision, null);
+    }
+
+    private Process getRuntimeProcess(String[] command, String[] env,
+                                      @Nullable String expectedConfigRevision,
+                                      @Nullable StagedUploadSourceCleanup stagedSourceCleanup)
+            throws IOException {
+        ensureConfigFileRecovered();
+        endpointConflictCoordinator.requireReadOnlyBisyncCommand(command);
         RemotesClaimSnapshot configSnapshot = currentRemotesConfigForClaims();
         ResourceClaimLease claim = endpointConflictCoordinator.acquireForCommand(
                 command, configSnapshot == null ? null : configSnapshot.remotes, "native-process");
@@ -1180,12 +1255,67 @@ public class Rclone {
             closeResourceClaim(claim);
             throw new IOException("Rclone config changed during endpoint validation; retry the operation");
         }
-        try {
-            Process process = Runtime.getRuntime().exec(command, env);
-            pendingExecutionClaims.put(process, claim);
-            return process;
-        } catch (IOException | RuntimeException failure) {
+        if (expectedConfigRevision != null
+                && !ConfigRevisionStore.matches(context, expectedConfigRevision)) {
             closeResourceClaim(claim);
+            throw new IOException("Remote configuration changed; reopen the remote before deleting");
+        }
+        boolean configMutation = ConfigMutationCommandPolicy.isMutationCommand(command);
+        if (configMutation && !ConfigRevisionStore.beginMutation(context)) {
+            closeResourceClaim(claim);
+            throw new IOException("Unable to establish a durable config-mutation barrier");
+        }
+        Process process = null;
+        boolean launchAttempted = false;
+        try {
+            if (stagedSourceCleanup != null) {
+                stagedSourceCleanup.markLaunchAttempted();
+            }
+            launchAttempted = true;
+            process = Runtime.getRuntime().exec(command, env);
+            pendingExecutionClaims.put(process, claim);
+            if (configMutation) {
+                pendingConfigRevisionMutations.put(process, Boolean.TRUE);
+            }
+            return process;
+        } catch (IOException | RuntimeException | Error failure) {
+            if (process == null && launchAttempted) {
+                // Android can create the OS child before Process construction finishes; a
+                // Runtime.exec exception does not prove that no process escaped. Keep staged
+                // bytes and endpoint/config-mutation barriers fail-closed until recovery evidence
+                // exists instead of inferring safety from the exception type.
+                FLog.e(TAG, "Native launch returned no process handle; preserving ownership");
+                throw failure;
+            }
+            boolean claimOwnershipResolved = false;
+            if (process != null) {
+                // The process is not returned to the legacy Process adapter, so remove any
+                // partial bookkeeping before transferring the claim to the failure reaper.
+                pendingExecutionClaims.remove(process);
+                pendingConfigRevisionMutations.remove(process);
+                NativeExecutionHandle failedLaunch = NativeExecutionHandle.adopt(
+                        process, "launch-bookkeeping-failed");
+                if (failedLaunch != null) {
+                    AutoCloseable ownedClaim = claimWithConfigRevisionFinalizer(claim, configMutation);
+                    boolean claimAttached = failedLaunch.attachResource(ownedClaim);
+                    if (stagedSourceCleanup != null) {
+                        stagedSourceCleanup.attachTo(failedLaunch);
+                    }
+                    failedLaunch.cancelAndAwait(null, null);
+                    if (claimAttached) {
+                        claimOwnershipResolved = true;
+                    } else if (failedLaunch.isExitConfirmed()) {
+                        closeOwnedClaim(ownedClaim);
+                        claimOwnershipResolved = true;
+                    }
+                }
+            }
+            if (!claimOwnershipResolved) {
+                if (configMutation) {
+                    finishConfigRevisionMutation();
+                }
+                closeResourceClaim(claim);
+            }
             throw failure;
         }
     }
@@ -1193,6 +1323,8 @@ public class Rclone {
     /** Starts a direct native handle with its durable endpoint claim acquired before launch. */
     private NativeExecutionHandle launchClaimed(String[] command, String[] env, String label)
             throws IOException {
+        ensureConfigFileRecovered();
+        endpointConflictCoordinator.requireReadOnlyBisyncCommand(command);
         RemotesClaimSnapshot configSnapshot = currentRemotesConfigForClaims();
         ResourceClaimLease claim = endpointConflictCoordinator.acquireForCommand(
                 command, configSnapshot == null ? null : configSnapshot.remotes, label);
@@ -1200,32 +1332,64 @@ public class Rclone {
             closeResourceClaim(claim);
             throw new IOException("Rclone config changed during endpoint validation; retry the operation");
         }
-        final NativeExecutionHandle execution;
-        try {
-            execution = NativeExecutionHandle.launch(command, env, label);
-        } catch (IOException | RuntimeException failure) {
+        boolean configMutation = ConfigMutationCommandPolicy.isMutationCommand(command);
+        if (configMutation && !ConfigRevisionStore.beginMutation(context)) {
             closeResourceClaim(claim);
-            throw failure;
+            throw new IOException("Unable to establish a durable config-mutation barrier");
         }
-        if (!execution.attachResource(claim)) {
-            execution.cancel();
-            // Keep the durable row on this exceptional path: without an attached owner, only
-            // confirmed process reconciliation may safely release it.
-            throw new IOException("Unable to attach native endpoint ownership");
+        // Environment construction may precede acquisition of the global claim. If a config
+        // replacement revoked the cached password in that interval, do not launch with it.
+        if (!"decrypt-config".equals(label)) {
+            ConfigSecretStore.BoundSecret cachedSecret = configSecret;
+            if (cachedSecret != null && !configSecretStore.isCurrent(cachedSecret)) {
+                env = withoutConfigPassword(env, cachedSecret.password());
+            }
         }
-        return execution;
+        AutoCloseable ownedClaim = claimWithConfigRevisionFinalizer(claim, configMutation);
+        // A failed Runtime.exec may have crossed the OS child-creation boundary without
+        // returning a Process. Keep the durable endpoint claim/config barrier fail-closed;
+        // launchOwned attaches the finalizer before exposing any successfully returned handle.
+        return NativeExecutionHandle.launchOwned(command, env, label, ownedClaim);
+    }
+
+    private static String[] withoutConfigPassword(String[] environment, String revokedPassword) {
+        if (environment == null || revokedPassword == null) {
+            return environment;
+        }
+        String revokedValue = "RCLONE_CONFIG_PASS=" + revokedPassword;
+        ArrayList<String> filtered = new ArrayList<>(environment.length);
+        for (String entry : environment) {
+            if (!revokedValue.equals(entry)) {
+                filtered.add(entry);
+            }
+        }
+        return filtered.toArray(new String[0]);
     }
 
     /** Adopts a legacy private launcher and transfers its pre-launch durable claim to the handle. */
     @Nullable
     private NativeExecutionHandle adoptClaimed(@Nullable Process process, String label) {
-        if (process == null) return null;
+        return adoptClaimed(process, label, null);
+    }
+
+    @Nullable
+    private NativeExecutionHandle adoptClaimed(@Nullable Process process, String label,
+            @Nullable StagedUploadSourceCleanup stagedSourceCleanup) {
+        if (process == null) {
+            if (stagedSourceCleanup != null) {
+                stagedSourceCleanup.cleanupAfter(null);
+            }
+            return null;
+        }
         ResourceClaimLease claim = pendingExecutionClaims.remove(process);
         if (claim == null) {
             NativeExecutionHandle unclaimed = NativeExecutionHandle.adopt(process, label);
             ResourceClaimLease quarantine = endpointConflictCoordinator
                     .quarantineUnclaimedProcess("unclaimed-" + label);
             boolean attached = unclaimed.attachResource(quarantine);
+            if (stagedSourceCleanup != null) {
+                stagedSourceCleanup.attachTo(unclaimed);
+            }
             NativeExecutionHandle.Outcome stopped = unclaimed.cancelAndAwait(null, null);
             if (!attached && stopped.isConfirmed()) {
                 closeResourceClaim(quarantine);
@@ -1234,16 +1398,35 @@ public class Rclone {
             }
             throw new IllegalStateException("Native process was launched without an endpoint claim");
         }
+        boolean configMutation = Boolean.TRUE.equals(pendingConfigRevisionMutations.remove(process));
         NativeExecutionHandle execution = NativeExecutionHandle.adopt(process, label);
         if (execution == null) {
             closeResourceClaim(claim);
             return null;
         }
-        if (!execution.attachResource(claim)) {
-            execution.cancel();
+        AutoCloseable ownedClaim = claimWithConfigRevisionFinalizer(claim, configMutation);
+        if (!execution.attachResource(ownedClaim)) {
+            if (stagedSourceCleanup != null) {
+                stagedSourceCleanup.attachTo(execution);
+                execution.cancelAndAwait(null, null);
+            } else {
+                execution.cancel();
+            }
             throw new IllegalStateException("Unable to attach native endpoint ownership");
         }
+        if (stagedSourceCleanup != null && !stagedSourceCleanup.attachTo(execution)) {
+            execution.cancelAndAwait(null, null);
+            throw new IllegalStateException("Unable to attach staged upload cleanup");
+        }
         return execution;
+    }
+
+    private void closeOwnedClaim(AutoCloseable claim) {
+        try {
+            claim.close();
+        } catch (Exception failure) {
+            FLog.e(TAG, "Unable to release a confirmed native endpoint claim", failure);
+        }
     }
 
     private void closeResourceClaim(@Nullable ResourceClaimLease claim) {
@@ -1255,17 +1438,113 @@ public class Rclone {
         }
     }
 
+    /**
+     * Invalidates queued remote targets and removes the active config only while no native
+     * operation owns an endpoint. Used by the explicit app-reset flow before its data wipe.
+     */
+    public boolean deleteConfigForReset() {
+        try (ResourceClaimLease ignored = endpointConflictCoordinator.acquireGlobal("app-reset-config")) {
+            ensureConfigFileRecovered();
+            if (!ConfigRevisionStore.beginMutation(context)) {
+                return false;
+            }
+            File configFile = new File(rcloneConf);
+            ConfigSecretStore.InvalidationToken secretInvalidation;
+            try {
+                secretInvalidation = configSecretStore.invalidateForConfigReplacement();
+            } catch (ConfigSecretStore.InvalidationException failure) {
+                boolean recovered = restoreResetInvalidationIfSafe(configFile, failure.token());
+                if (!recovered) {
+                    FLog.e(TAG, "Could not recover config-secret state after reset invalidation failed");
+                }
+                return false;
+            }
+            try {
+                if (!ConfigFileRestorer.delete(configFile)) {
+                    if (!restoreResetInvalidationIfSafe(configFile, secretInvalidation)) {
+                        FLog.e(TAG, "Config reset state is uncertain; revision barrier remains pending");
+                    }
+                    return false;
+                }
+                configSecretStore.clear();
+                configSecret = null;
+                invalidateRemotesCache();
+                return finishConfigRevisionMutation();
+            } catch (IOException | RuntimeException failure) {
+                if (secretInvalidation != null && configFile.exists()
+                        && !restoreResetInvalidationIfSafe(configFile, secretInvalidation)) {
+                    FLog.e(TAG, "Config reset rollback is uncertain; revision barrier remains pending");
+                }
+                throw failure;
+            }
+        } catch (IOException | RuntimeException failure) {
+            FLog.e(TAG, "Unable to safely remove rclone config during app reset");
+            return false;
+        }
+    }
+
+    private boolean restoreResetInvalidationIfSafe(
+            File configFile, @Nullable ConfigSecretStore.InvalidationToken token) {
+        return ConfigResetRecoveryPolicy.restoreIfConfigUnchanged(
+                configFile.exists(),
+                new File(configFile.getPath() + ".bak").exists(),
+                token != null,
+                () -> configSecretStore.restoreInvalidation(token),
+                this::finishConfigRevisionMutation);
+    }
+
+    private AutoCloseable claimWithConfigRevisionFinalizer(
+            @Nullable ResourceClaimLease claim, boolean configMutation) {
+        return () -> {
+            if (configMutation) {
+                finishConfigRevisionMutation();
+            }
+            closeResourceClaim(claim);
+        };
+    }
+
+    private boolean finishConfigRevisionMutation() {
+        boolean finalized = ConfigRevisionStore.finishMutation(context);
+        if (!finalized) {
+            // The durable pending marker keeps every old queued target invalid across process death.
+            FLog.e(TAG, "Config revision could not be finalized; destructive targets remain disabled");
+        }
+        return finalized;
+    }
+
+    private void ensureConfigFileRecovered() throws IOException {
+        try {
+            ConfigFileRestorer.recover(new File(rcloneConf));
+            configFileRecoveryFailure = null;
+        } catch (IOException recoveryFailure) {
+            configFileRecoveryFailure = recoveryFailure;
+            throw new IOException("Rclone config recovery is incomplete", recoveryFailure);
+        }
+    }
+
     /** Holds the global configuration claim across a multi-store backup import or rollback. */
     public ConfigTransaction beginConfigTransaction(String operation) throws IOException {
-        return new ConfigTransaction(endpointConflictCoordinator.acquireGlobal(operation));
+        ResourceClaimLease claim = endpointConflictCoordinator.acquireGlobal(operation);
+        try {
+            return new ConfigTransaction(claim, configSecretStore.snapshot());
+        } catch (RuntimeException failure) {
+            claim.close();
+            throw failure;
+        }
     }
 
     public final class ConfigTransaction implements AutoCloseable {
         private final ResourceClaimLease claim;
+        private ConfigSecretStore.Snapshot secretSnapshot;
         private final AtomicBoolean closed = new AtomicBoolean(false);
+        private ConfigSecretStore.InvalidationToken secretRestoreInvalidation;
+        private ConfigSecretStore.InvalidationToken configReplacementSecretInvalidation;
+        private boolean configReplaced;
+        private boolean configSnapshotRestored;
 
-        private ConfigTransaction(ResourceClaimLease claim) {
+        private ConfigTransaction(ResourceClaimLease claim, ConfigSecretStore.Snapshot secretSnapshot) {
             this.claim = claim;
+            this.secretSnapshot = secretSnapshot;
         }
 
         public File snapshotConfigFile() throws IOException {
@@ -1275,12 +1554,37 @@ public class Rclone {
 
         public boolean commitStagedConfigFile(File stagedFile) throws IOException {
             ensureOpen();
-            return commitStagedConfigFileInternal(stagedFile);
+            return commitStagedConfigFileInternal(stagedFile, this);
+        }
+
+        public boolean configWasReplaced() {
+            ensureOpen();
+            return configReplaced;
         }
 
         public void restoreConfigSnapshot(@Nullable File snapshot) throws IOException {
             ensureOpen();
-            restoreConfigSnapshotInternal(snapshot);
+            restoreConfigSnapshotInternal(snapshot, this);
+        }
+
+        public boolean configSnapshotWasRestored() {
+            ensureOpen();
+            return configSnapshotRestored;
+        }
+
+        /** Restores the encrypted pre-import password only if no newer password was saved. */
+        public void restoreConfigSecretSnapshot() throws IOException {
+            ensureOpen();
+            if (!configSnapshotRestored || secretRestoreInvalidation == null
+                    || !secretRestoreInvalidation.follows(configReplacementSecretInvalidation)
+                    || !configSecretStore.restoreSnapshot(
+                            secretSnapshot, secretRestoreInvalidation.expectedGeneration())) {
+                throw new IOException("Saved config password changed during import rollback");
+            }
+            configSecret = null;
+            if (!finishConfigRevisionMutation()) {
+                throw new IOException("Config and password were restored, but the revision barrier remains pending");
+            }
         }
 
         private void ensureOpen() {
@@ -1485,7 +1789,7 @@ public class Rclone {
 
         // Transfer throughput tuning. These are rclone global / VFS flags; the existing
         // serve command already appends subcommand flags (e.g. --user) after the path and
-        // rclone's parser accepts them in this position (cf. --log-file below).
+        // rclone's parser accepts them in this position.
         params.add("--transfers");
         params.add(getTransfers());
         params.add("--buffer-size");
@@ -1517,13 +1821,13 @@ public class Rclone {
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
         boolean isLoggingEnabled = sharedPreferences.getBoolean(context.getString(R.string.pref_key_logs), false);
         if (isLoggingEnabled) {
-            File serveLog = new File(context.getExternalFilesDir("logs"), "serve.log");
-            params.add("--log-file");
-            params.add(serveLog.getAbsolutePath());
+            SyncLog.info(context, "Rclone daemon diagnostics",
+                    NativeDiagnosticCommandPolicy.DISABLED_NOTICE);
         }
 
         String[] env = getRcloneEnv();
-        String[] command = params.toArray(new String[0]);
+        String[] command = NativeDiagnosticCommandPolicy.withoutNativeDiagnostics(
+                params.toArray(new String[0]));
         try {
             return getRuntimeProcess(command, env);
         } catch (IOException e) {
@@ -1732,6 +2036,11 @@ public class Rclone {
     }
 
     private Process uploadFile(RemoteItem remote, String uploadPath, String uploadFile) {
+        return uploadFile(remote, uploadPath, uploadFile, null);
+    }
+
+    private Process uploadFile(RemoteItem remote, String uploadPath, String uploadFile,
+                               @Nullable StagedUploadSourceCleanup stagedSourceCleanup) {
         String remoteName = remote.getName();
         String path;
         String[] command;
@@ -1756,7 +2065,7 @@ public class Rclone {
 
         String[] env = getRcloneEnv();
         try {
-            return getRuntimeProcess(command, env);
+            return getRuntimeProcess(command, env, null, stagedSourceCleanup);
         } catch (IOException e) {
             FLog.e(TAG, "uploadFile: error starting rclone", e);
             return null;
@@ -1774,6 +2083,14 @@ public class Rclone {
     @Nullable
     public NativeExecutionHandle uploadFileOwned(RemoteItem remote, String uploadPath, String uploadFile) {
         return adoptClaimed(uploadFile(remote, uploadPath, uploadFile), "upload");
+    }
+
+    /** WP02 adapter attaches staged-source cleanup before cancellation or waiting can race it. */
+    @Nullable
+    public NativeExecutionHandle uploadFileOwned(RemoteItem remote, String uploadPath,
+            String uploadFile, @Nullable StagedUploadSourceCleanup stagedSourceCleanup) {
+        return adoptClaimed(uploadFile(remote, uploadPath, uploadFile, stagedSourceCleanup),
+                "upload", stagedSourceCleanup);
     }
 
     // Can't pass \u0000 as cmd arg - encode like rclone with U+2400
@@ -1796,7 +2113,15 @@ public class Rclone {
         return localPathBuilder.toString();
     }
 
-    private Process deleteItems(RemoteItem remote, FileItem deleteItem) {
+    private Process deleteItems(RemoteItem remote, FileItem deleteItem, String expectedConfigRevision) {
+        if (!ConfigRevisionPolicy.isValidRevision(expectedConfigRevision)) {
+            return null;
+        }
+        if (remote == null || deleteItem == null
+                || !RemoteDeleteTargetPolicy.isSafeTarget(deleteItem.getPath(), deleteItem.getName())) {
+            FLog.w(TAG, "Refusing delete launch for an invalid target snapshot");
+            return null;
+        }
         String[] command;
         String filePath;
         Process process = null;
@@ -1817,7 +2142,7 @@ public class Rclone {
 
         String[] env = getRcloneEnv();
         try {
-            process = getRuntimeProcess(command, env);
+            process = getRuntimeProcess(command, env, expectedConfigRevision);
         } catch (IOException e) {
             FLog.e(TAG, "deleteItems: error starting rclone", e);
         }
@@ -1874,7 +2199,19 @@ public class Rclone {
     /** WP05 compatibility adapter for the ephemeral transfer worker. */
     @Nullable
     public NativeExecutionHandle deleteItemsOwned(RemoteItem remote, FileItem deleteItem) {
-        return adoptClaimed(deleteItems(remote, deleteItem), "delete");
+        return deleteItemsOwned(remote, deleteItem, null);
+    }
+
+    /** Deletes only if the remote config still matches the generation captured before browsing. */
+    @Nullable
+    public NativeExecutionHandle deleteItemsOwned(
+            RemoteItem remote, FileItem deleteItem, @Nullable String expectedConfigRevision) {
+        if (remote == null || deleteItem == null
+                || !ConfigRevisionPolicy.isValidRevision(expectedConfigRevision)) {
+            FLog.w(TAG, "Refusing delete launch without a valid remote config revision");
+            return null;
+        }
+        return adoptClaimed(deleteItems(remote, deleteItem, expectedConfigRevision), "delete");
     }
 
     public Boolean moveTo(RemoteItem remote, String oldFile, String newFile) {
@@ -2416,6 +2753,7 @@ public class Rclone {
     }
 
     public Boolean decryptConfig(String password) {
+        String expectedGeneration = configSecretStore.currentGeneration();
         String[] command = createCommand("--ask-password=false", "config", "show");
         NativeExecutionHandle handle;
         try {
@@ -2431,10 +2769,9 @@ public class Rclone {
         }
 
         try {
-            configSecretStore.save(password);
-            configPassword = password;
+            configSecret = configSecretStore.save(password, expectedGeneration);
         } catch (Exception e) {
-            configPassword = null;
+            configSecret = null;
             FLog.e(TAG, "decryptConfig: error persisting Keystore-wrapped password", e);
             return false;
         }
@@ -2460,82 +2797,86 @@ public class Rclone {
         return null;
     }
 
-    public File getFileFromZip(Uri uri, String target, File targetfile) throws IOException {
-
-        // The exact cause of the NPE is unknown, but the effect is the same
-        // - the copy process has failed, therefore bubble an IOException
-        // for handling at the appropriate layers.
-        InputStream inputStream;
-        try {
-            inputStream = context.getContentResolver().openInputStream(uri);
-        } catch(NullPointerException e) {
-            throw new IOException(e);
-        }
-        if (inputStream == null) {
-            throw new IOException("Unable to open backup");
-        }
-
-        try (ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(inputStream))) {
-            ZipEntry zipEntry;
-            byte[] buffer = new byte[4096];
-
-            while ((zipEntry = zipInputStream.getNextEntry()) != null) {
-                if (zipEntry.getName().equals(target)) {
-                    long total = 0;
-                    try (FileOutputStream fileOutputStream = new FileOutputStream(targetfile, false)) {
-                        int count;
-                        while ((count = zipInputStream.read(buffer)) != -1) {
-                            total += count;
-                            if (total > MAX_BACKUP_ENTRY_BYTES) {
-                                targetfile.delete();
-                                throw new IOException("Backup entry exceeds the maximum size");
-                            }
-                            fileOutputStream.write(buffer, 0, count);
-                        }
-                        fileOutputStream.flush();
-                    }
-                    zipInputStream.closeEntry();
-                    return targetfile;
+    /** Opens the user-provided URI once, copies it to private storage, and validates the full ZIP. */
+    public BackupArchiveStager.StagedArchive stageBackupArchive(Uri uri) throws IOException {
+        return BackupArchiveStager.stage(() -> {
+            try {
+                InputStream input = context.getContentResolver().openInputStream(uri);
+                if (input == null) {
+                    throw new IOException("Unable to open backup");
                 }
-                zipInputStream.closeEntry();
+                return input;
+            } catch (NullPointerException unavailableUri) {
+                throw new IOException("Unable to open backup", unavailableUri);
+            }
+        }, context.getFilesDir());
+    }
+
+    /** Compatibility wrapper; multi-component imports should share one StagedArchive handle. */
+    public File getFileFromZip(Uri uri, String target, File targetfile) throws IOException {
+        try (BackupArchiveStager.StagedArchive archive = stageBackupArchive(uri)) {
+            return getFileFromZip(archive, target, targetfile);
+        }
+    }
+
+    private File getFileFromZip(BackupArchiveStager.StagedArchive archive,
+                                String target, File targetfile) throws IOException {
+        if (archive == null || target == null || targetfile == null) {
+            throw new IOException("Backup entry target is unavailable");
+        }
+        if (!archive.hasEntry(target)) {
+            return null;
+        }
+        byte[] contents = archive.readEntry(target);
+        boolean complete = false;
+        try {
+            try (FileOutputStream output = new FileOutputStream(targetfile, false)) {
+                output.write(contents);
+                output.flush();
+            }
+            complete = true;
+            return targetfile;
+        } finally {
+            if (!complete && targetfile.exists() && !targetfile.delete()) {
+                FLog.w(TAG, "Unable to remove incomplete extracted backup entry");
             }
         }
-        return null;
     }
 
     public String readDatabaseJson(Uri uri) throws Exception {
-        return readTextfileFromZip(uri, "rcx.json-tmp", "rcx.json");
+        try (BackupArchiveStager.StagedArchive archive = stageBackupArchive(uri)) {
+            return readDatabaseJson(archive);
+        }
+    }
+
+    public String readDatabaseJson(BackupArchiveStager.StagedArchive archive) throws Exception {
+        return readTextfileFromZip(archive, BackupArchiveStager.DATABASE_ENTRY);
     }
 
     public String readSharedPrefs(Uri uri) throws Exception {
-        return readTextfileFromZip(uri, "rcx.prefs-tmp", "rcx.prefs");
+        try (BackupArchiveStager.StagedArchive archive = stageBackupArchive(uri)) {
+            return readSharedPrefs(archive);
+        }
     }
 
-    public String readTextfileFromZip(Uri uri, String tempfile, String targetfile) throws Exception {
-        File temp = new File(context.getFilesDir().getPath(), tempfile);
-        try {
-            File extracted = getFileFromZip(uri, targetfile, temp);
-            if (extracted == null || !extracted.isFile()) {
-                throw new IOException("Backup entry is missing: " + targetfile);
-            }
+    public String readSharedPrefs(BackupArchiveStager.StagedArchive archive) throws Exception {
+        return readTextfileFromZip(archive, BackupArchiveStager.PREFERENCES_ENTRY);
+    }
 
-            char[] buffer = new char[4096];
-            StringBuilder json = new StringBuilder();
-            try (InputStream inputStream = new FileInputStream(extracted);
-                 Reader in = new InputStreamReader(inputStream, StandardCharsets.UTF_8)) {
-                for (int numRead; (numRead = in.read(buffer, 0, buffer.length)) > 0; ) {
-                    if (json.length() + numRead > Importer.MAX_IMPORT_CHARS) {
-                        throw new IOException("Backup JSON exceeds the maximum size");
-                    }
-                    json.append(buffer, 0, numRead);
-                }
-            }
-            return json.toString();
-        } finally {
-            if (temp.exists()) {
-                temp.delete();
-            }
+    /** Compatibility URI wrapper retained for callers outside the ZIP-import flow. */
+    public String readTextfileFromZip(Uri uri, String tempfile, String targetfile) throws Exception {
+        try (BackupArchiveStager.StagedArchive archive = stageBackupArchive(uri)) {
+            return readTextfileFromZip(archive, targetfile);
         }
+    }
+
+    private String readTextfileFromZip(BackupArchiveStager.StagedArchive archive,
+                                       String targetfile) throws IOException {
+        String json = new String(archive.readEntry(targetfile), StandardCharsets.UTF_8);
+        if (json.length() > Importer.MAX_IMPORT_CHARS) {
+            throw new IOException("Backup JSON exceeds the maximum size");
+        }
+        return json;
     }
 
     public boolean copyConfigFileFromZip(Uri uri) throws Exception {
@@ -2554,23 +2895,26 @@ public class Rclone {
 
     /** Extract and validate a config without replacing the current known-good config. */
     public File stageConfigFileFromZip(Uri uri) throws Exception {
-        File tempFile = new File(context.getFilesDir(), "rclone.conf-import-" + System.nanoTime());
-        File extracted;
+        try (BackupArchiveStager.StagedArchive archive = stageBackupArchive(uri)) {
+            return stageConfigFileFromZip(archive);
+        }
+    }
+
+    public File stageConfigFileFromZip(BackupArchiveStager.StagedArchive archive) throws Exception {
+        File tempFile = File.createTempFile("rclone.conf-import-", ".tmp", context.getFilesDir());
+        boolean valid = false;
         try {
-            extracted = getFileFromZip(uri, "rclone.conf", tempFile);
-        } catch (Exception e) {
-            if (tempFile.exists()) {
-                tempFile.delete();
+            File extracted = getFileFromZip(archive, BackupArchiveStager.CONFIG_ENTRY, tempFile);
+            if (extracted == null || !isValidConfig(extracted.getAbsolutePath())) {
+                return null;
             }
-            throw e;
-        }
-        if (extracted == null || !isValidConfig(extracted.getAbsolutePath())) {
-            if (tempFile.exists()) {
-                tempFile.delete();
+            valid = true;
+            return extracted;
+        } finally {
+            if (!valid && tempFile.exists() && !tempFile.delete()) {
+                FLog.w(TAG, "Unable to remove invalid staged backup config");
             }
-            return null;
         }
-        return extracted;
     }
 
     /** Atomically replaces the app config within its private files directory. */
@@ -2581,6 +2925,11 @@ public class Rclone {
     }
 
     private boolean commitStagedConfigFileInternal(File stagedFile) throws IOException {
+        return commitStagedConfigFileInternal(stagedFile, null);
+    }
+
+    private boolean commitStagedConfigFileInternal(
+            File stagedFile, @Nullable ConfigTransaction transaction) throws IOException {
         if (stagedFile == null || !stagedFile.isFile()) {
             throw new IOException("Staged config is missing");
         }
@@ -2588,14 +2937,60 @@ public class Rclone {
         if (!stagedFile.getParentFile().equals(configFile.getParentFile())) {
             throw new IOException("Staged config is outside the app files directory");
         }
-        if (!stagedFile.renameTo(configFile)) {
-            throw new IOException("Unable to commit staged config");
+        ensureConfigFileRecovered();
+        if (!ConfigRevisionStore.beginMutation(context)) {
+            throw new IOException("Unable to establish a durable config-mutation barrier");
         }
-        // A replacement may belong to another account or use another config password.
-        // Do not reuse the old passphrase against it; the next unlock is explicit.
-        configPassword = null;
-        configSecretStore.clear();
-        invalidateRemotesCache();
+        ConfigSecretStore.InvalidationToken secretInvalidation = null;
+        boolean configReplaced = false;
+        try {
+            // Revoke saved and in-memory secrets before publishing a different config. A failed
+            // preference commit leaves the active config untouched and aborts this replacement.
+            // Keep the encrypted preimage so an in-process rollback can re-enable it safely.
+            try {
+                secretInvalidation = configSecretStore.invalidateForConfigReplacement();
+            } catch (ConfigSecretStore.InvalidationException failedInvalidation) {
+                secretInvalidation = failedInvalidation.token();
+                if (transaction != null) {
+                    transaction.secretSnapshot = secretInvalidation.snapshot();
+                    transaction.configReplacementSecretInvalidation = secretInvalidation;
+                }
+                throw failedInvalidation;
+            }
+            if (transaction != null) {
+                transaction.secretSnapshot = secretInvalidation.snapshot();
+                transaction.configReplacementSecretInvalidation = secretInvalidation;
+            }
+            ConfigFileRestorer.restore(stagedFile, configFile, MAX_BACKUP_ENTRY_BYTES);
+            configReplaced = true;
+            if (transaction != null) {
+                transaction.configReplaced = true;
+            }
+            if (stagedFile.exists() && !stagedFile.delete()) {
+                throw new IOException("Config was replaced but its staged file could not be removed");
+            }
+            // A replacement may belong to another account or use another config password.
+            // Do not reuse the old passphrase against it; the next unlock is explicit.
+            configSecret = null;
+            invalidateRemotesCache();
+        } catch (IOException | RuntimeException failure) {
+            boolean priorConfigProven = failure instanceof ConfigSecretStore.InvalidationException
+                    || (failure instanceof ConfigFileRestorer.ReplacementException
+                    && ((ConfigFileRestorer.ReplacementException) failure).isPreviousStateRestored());
+            boolean priorSecretProven = secretInvalidation == null
+                    || (!configReplaced && priorConfigProven
+                    && configSecretStore.restoreInvalidation(secretInvalidation));
+            if (!configReplaced && priorConfigProven && priorSecretProven) {
+                finishConfigRevisionMutation();
+            } else {
+                FLog.e(TAG, "Config replacement state is uncertain; keeping destructive-operation barrier pending",
+                        failure);
+            }
+            throw failure;
+        }
+        if (!finishConfigRevisionMutation()) {
+            throw new IOException("Config changed, but its revision could not be finalized");
+        }
         return true;
     }
 
@@ -2609,6 +3004,7 @@ public class Rclone {
 
     @Nullable
     private File snapshotConfigFileInternal() throws IOException {
+        ensureConfigFileRecovered();
         File configFile = new File(rcloneConf);
         if (!configFile.isFile()) {
             return null;
@@ -2626,28 +3022,64 @@ public class Rclone {
     /** Restore a snapshot created by {@link #snapshotConfigFile()}. */
     public void restoreConfigSnapshot(@Nullable File snapshot) throws IOException {
         try (ResourceClaimLease ignored = endpointConflictCoordinator.acquireGlobal("config-restore")) {
-            restoreConfigSnapshotInternal(snapshot);
+            restoreConfigSnapshotInternal(snapshot, null);
         }
     }
 
-    private void restoreConfigSnapshotInternal(@Nullable File snapshot) throws IOException {
+    private ConfigSecretStore.InvalidationToken restoreConfigSnapshotInternal(
+            @Nullable File snapshot, @Nullable ConfigTransaction transaction) throws IOException {
         File configFile = new File(rcloneConf);
-        if (snapshot == null) {
-            if (configFile.exists() && !configFile.delete()) {
-                throw new IOException("Unable to remove imported config during rollback");
-            }
-        } else {
-            if (!snapshot.isFile() || !snapshot.getParentFile().equals(configFile.getParentFile())) {
+        if (!ConfigRevisionStore.beginMutation(context)) {
+            throw new IOException("Unable to establish a durable config-mutation barrier");
+        }
+        ConfigSecretStore.InvalidationToken secretInvalidation = null;
+        try {
+            ensureConfigFileRecovered();
+            if (snapshot != null && (!snapshot.isFile()
+                    || !snapshot.getParentFile().equals(configFile.getParentFile()))) {
                 throw new IOException("Config snapshot is invalid");
             }
-            if (configFile.exists() && !configFile.delete()) {
-                throw new IOException("Unable to replace config during rollback");
+            // Snapshot restore is also a config replacement. Revoke cached credentials before
+            // deleting or renaming either side; the restored config can be unlocked explicitly.
+            try {
+                secretInvalidation = configSecretStore.invalidateForConfigReplacement();
+            } catch (ConfigSecretStore.InvalidationException failedInvalidation) {
+                secretInvalidation = failedInvalidation.token();
+                if (transaction != null) {
+                    transaction.secretRestoreInvalidation = secretInvalidation;
+                }
+                throw failedInvalidation;
             }
-            if (!snapshot.renameTo(configFile)) {
-                throw new IOException("Unable to restore config snapshot");
+            if (transaction != null) {
+                // Preserve the token even if subsequent file/revision work fails.
+                transaction.secretRestoreInvalidation = secretInvalidation;
             }
+            configSecret = null;
+            if (snapshot == null) {
+                if (!ConfigFileRestorer.delete(configFile)) {
+                    throw new IOException("Unable to remove imported config during rollback");
+                }
+            } else {
+                ConfigFileRestorer.restore(snapshot, configFile, MAX_BACKUP_ENTRY_BYTES);
+            }
+            invalidateRemotesCache();
+            if (transaction != null) transaction.configSnapshotRestored = true;
+        } catch (IOException | RuntimeException failure) {
+            if (failure instanceof ConfigSecretStore.InvalidationException
+                    && secretInvalidation != null
+                    && !configSecretStore.restoreInvalidation(secretInvalidation)) {
+                FLog.e(TAG, "Could not restore config-secret generation after rollback invalidation failed");
+            }
+            // The database/preferences may already be rolling back to match this config.
+            // Keep mutation_pending set until recovery proves the prior config was restored.
+            FLog.e(TAG, "Config rollback is incomplete; preserving the destructive-operation barrier",
+                    failure);
+            throw failure;
         }
-        invalidateRemotesCache();
+        if (transaction == null && !finishConfigRevisionMutation()) {
+            throw new IOException("Config changed, but its revision could not be finalized");
+        }
+        return secretInvalidation;
     }
 
     private static void copyFile(File source, File destination) throws IOException {
@@ -2690,13 +3122,26 @@ public class Rclone {
             throw new IOException("Unable to open config");
         }
 
+        try (InputStream input = inputStream) {
+            return copyConfigFile(input);
+        }
+    }
+
+    /**
+     * Stages and validates the supplied config bytes without reopening their source.
+     * The caller retains ownership of and must close {@code inputStream}.
+     */
+    public boolean copyConfigFile(InputStream inputStream) throws IOException {
+        if (inputStream == null) {
+            throw new IOException("Unable to open config");
+        }
+
         File tempFile = new File(context.getFilesDir(), "rclone.conf-import-" + System.nanoTime());
-        try (InputStream input = inputStream;
-             FileOutputStream output = new FileOutputStream(tempFile, false)) {
+        try (FileOutputStream output = new FileOutputStream(tempFile, false)) {
             byte[] buffer = new byte[4096];
             long total = 0;
             int offset;
-            while ((offset = input.read(buffer)) != -1) {
+            while ((offset = inputStream.read(buffer)) != -1) {
                 total += offset;
                 if (total > MAX_BACKUP_ENTRY_BYTES) {
                     throw new IOException("Config exceeds the maximum size");
@@ -2856,11 +3301,11 @@ public class Rclone {
     }
     public ArrayList<Provider> getProviders(boolean silent) throws JSONException {
 
-        JSONArray remotesJSON;
         int versionCode = BuildConfig.VERSION_CODE;
         File file = new File(context.getCacheDir(), "rclone.provider."+versionCode);
+        JSONArray remotesJSON = readProviderCache(file);
 
-        if(!file.exists()) {
+        if (remotesJSON == null) {
             String[] command = createCommand("config", "providers");
             DiagnosticCapture diagnostics = new DiagnosticCapture();
 
@@ -2876,37 +3321,12 @@ public class Rclone {
                 }
 
                 remotesJSON = new JSONArray(result.text);
+                validateProviderMetadata(remotesJSON);
+                writeProviderCache(file, remotesJSON);
             } catch (IOException | JSONException e) {
                 FLog.e(TAG, "Unable to retrieve bounded rclone provider data");
                 return new ArrayList<>();
             }
-
-            try {
-                FileWriter fw = new FileWriter(file.getAbsoluteFile());
-                BufferedWriter bw = new BufferedWriter(fw);
-                bw.write(remotesJSON.toString(4));
-                bw.close();
-            } catch (IOException e) {
-                Toasty.error(context, context.getString(R.string.error_getting_remotes), Toast.LENGTH_SHORT, true).show();
-                FLog.e(TAG, "Could not save providers to cache!", e);
-                return new ArrayList<>();
-            }
-        } else {
-            StringBuilder fileContent = new StringBuilder();
-            try {
-                FileInputStream inputstream = new FileInputStream(file);
-                byte[] buffer = new byte[8128];
-                int size;
-                while ((size = inputstream.read(buffer)) != -1) {
-                    fileContent.append(new String(buffer, 0, size));
-                }
-            } catch (IOException e) {
-                Toasty.error(context, context.getString(R.string.error_getting_remotes), Toast.LENGTH_SHORT, true).show();
-                FLog.e(TAG, "Could not read cached providers, but the file exists! Please clear your app cache.", e);
-                return new ArrayList<>();
-            }
-
-            remotesJSON = new JSONArray(fileContent.toString());
         }
 
         ArrayList<Provider> providerItems = new ArrayList<>();
@@ -2916,6 +3336,82 @@ public class Rclone {
         }
 
         return providerItems;
+    }
+
+    @Nullable
+    private static JSONArray readProviderCache(File file) {
+        synchronized (PROVIDER_CACHE_LOCK) {
+            AtomicFile atomicFile = new AtomicFile(file);
+            try (InputStream input = atomicFile.openRead();
+                 Reader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
+                JSONArray providers = new JSONArray(
+                        BoundedTextReader.read(reader, MAX_CONFIG_JSON_CHARS));
+                validateProviderMetadata(providers);
+                return providers;
+            } catch (FileNotFoundException noCache) {
+                return null;
+            } catch (IOException | JSONException invalidCache) {
+                FLog.e(TAG, "Cached provider metadata is invalid; refreshing from rclone");
+                return null;
+            }
+        }
+    }
+
+    private static void validateProviderMetadata(JSONArray providers) throws JSONException {
+        for (int i = 0; i < providers.length(); i++) {
+            JSONObject provider = providers.optJSONObject(i);
+            if (provider == null ||
+                    !ProviderMetadataPolicy.hasValidProviderName(provider.opt("Name"))) {
+                throw new JSONException("Provider metadata contains an invalid provider name");
+            }
+
+            Object rawOptions = provider.opt("Options");
+            if (rawOptions == null || rawOptions == JSONObject.NULL) continue;
+            if (!(rawOptions instanceof JSONArray)) {
+                throw new JSONException("Provider metadata contains invalid options");
+            }
+            JSONArray options = (JSONArray) rawOptions;
+            for (int optionIndex = 0; optionIndex < options.length(); optionIndex++) {
+                JSONObject option = options.optJSONObject(optionIndex);
+                if (option == null ||
+                        !ProviderMetadataPolicy.hasValidProviderName(option.opt("Name"))) {
+                    throw new JSONException("Provider metadata contains an invalid option");
+                }
+
+                Object rawExamples = option.opt("Examples");
+                if (rawExamples == null || rawExamples == JSONObject.NULL) continue;
+                if (!(rawExamples instanceof JSONArray)) {
+                    throw new JSONException("Provider metadata contains invalid examples");
+                }
+                JSONArray examples = (JSONArray) rawExamples;
+                for (int exampleIndex = 0; exampleIndex < examples.length(); exampleIndex++) {
+                    if (examples.optJSONObject(exampleIndex) == null) {
+                        throw new JSONException("Provider metadata contains an invalid example");
+                    }
+                }
+            }
+        }
+    }
+
+    private static void writeProviderCache(File file, JSONArray providers) {
+        String json = providers.toString();
+        if (json.length() > MAX_CONFIG_JSON_CHARS) {
+            FLog.e(TAG, "Provider metadata exceeds the cache size limit; skipping cache write");
+            return;
+        }
+
+        synchronized (PROVIDER_CACHE_LOCK) {
+            AtomicFile atomicFile = new AtomicFile(file);
+            FileOutputStream output = null;
+            try {
+                output = atomicFile.startWrite();
+                output.write(json.getBytes(StandardCharsets.UTF_8));
+                atomicFile.finishWrite(output);
+            } catch (IOException writeFailure) {
+                if (output != null) atomicFile.failWrite(output);
+                FLog.e(TAG, "Unable to persist provider metadata cache", writeFailure);
+            }
+        }
     }
 
     public Provider getProvider(String name) throws JSONException {

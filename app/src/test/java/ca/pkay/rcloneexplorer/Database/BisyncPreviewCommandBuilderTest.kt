@@ -1,6 +1,7 @@
 package ca.pkay.rcloneexplorer.Database
 
 import ca.pkay.rcloneexplorer.Items.FilterEntry
+import ca.pkay.rcloneexplorer.util.BisyncCommandModePolicy
 import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -70,6 +71,31 @@ class BisyncPreviewCommandBuilderTest {
     }
 
     @Test
+    fun builderOutputPassesTheFinalNativeReadOnlyBoundaryForBothPreviewModes() {
+        val profileRoot = "${FileRoot.path}/bisync-policy/files/bisync/profiles"
+        val previewRoot = "${FileRoot.path}/bisync-policy/cache/bisync-preview"
+        val absentStateCommand = BisyncPreviewCommandBuilder.build(request(
+            identity = identity(BisyncNativeState.ABSENT, BisyncPreviewResyncMode.PATH1),
+            workDirectory = "$previewRoot/absent"
+        ))
+        val compatibleStateCommand = BisyncPreviewCommandBuilder.build(request(
+            identity = identity(
+                BisyncNativeState.COMPATIBLE,
+                engine = BisyncPreviewCommandBuilder.LOCAL_STATE_CLONE_ENGINE
+            ),
+            acceptedStateDirectory = "$profileRoot/accepted",
+            workDirectory = "$previewRoot/compatible"
+        ))
+
+        assertTrue(BisyncCommandModePolicy.allowsReadOnlyInvocation(
+            absentStateCommand, profileRoot, previewRoot
+        ))
+        assertTrue(BisyncCommandModePolicy.allowsReadOnlyInvocation(
+            compatibleStateCommand, profileRoot, previewRoot
+        ))
+    }
+
+    @Test
     fun unknownPinsAndUnsafeOrUnmodeledRequestsAreRejected() {
         assertThrows(IllegalArgumentException::class.java) {
             BisyncPreviewCommandBuilder.build(request(identity = identity(
@@ -98,6 +124,7 @@ class BisyncPreviewCommandBuilderTest {
         path1: String = "/private/left",
         filters: List<FilterEntry> = emptyList(),
         deleteExcluded: Boolean = false,
+        workDirectory: String = "${FileRoot.path}/preview",
         acceptedStateDirectory: String? = null,
         checksumRequested: Boolean = false
     ) = BisyncPreviewCommandRequest(
@@ -105,7 +132,7 @@ class BisyncPreviewCommandBuilderTest {
         previewId = UUID.fromString("11111111-1111-4111-8111-111111111111").toString(),
         path1 = path1,
         path2 = "remote:/right",
-        workDirectory = "${FileRoot.path}/preview",
+        workDirectory = workDirectory,
         filters = filters,
         deleteExcluded = deleteExcluded,
         acceptedStateDirectory = acceptedStateDirectory,

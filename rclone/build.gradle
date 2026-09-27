@@ -39,6 +39,9 @@ ext {
     if (!configuredRef) {
         throw new GradleException('Missing required de.schuelken.cloudbridge.rCloneRef; refusing an unpinned rclone fallback')
     }
+    if (!(configuredRef ==~ /(?i)[0-9a-f]{40}/)) {
+        throw new GradleException('Rclone must be pinned to a full immutable 40-character commit SHA')
+    }
     RCLONE_REPO_URL = configuredRepoUrl
     RCLONE_REF = configuredRef
 
@@ -178,8 +181,17 @@ def buildRclone(abi) {
 
     return {
         doLast {
+            def goCache = Paths.get(CACHE_PATH, 'gocache')
+            def goTemp = Paths.get(CACHE_PATH, 'gotmp')
+            goCache.toFile().mkdirs()
+            goTemp.toFile().mkdirs()
             def commonEnv = [
                 'GOPATH'      : GOPATH,
+                'GOCACHE'     : goCache.toString(),
+                'GOTMPDIR'    : goTemp.toString(),
+                // This checkout is an independently pinned module, not a member of the
+                // host's workspace (which may contain local review/test replacements).
+                'GOWORK'      : 'off',
                 'GOOS'        : 'linux',
                 'CGO_ENABLED' : '0',
             ] + abiToEnv[abi]
@@ -191,6 +203,9 @@ def buildRclone(abi) {
                 commandLine (
                     GO_EXECUTABLE,
                     'build',
+                    // Repository and full commit provenance are verified and printed by this task;
+                    // keep Go's automatic VCS stamping independent of host Git ownership rules.
+                    '-buildvcs=false',
                     '-tags',
                     'noselfupdate',
                     '-trimpath',
@@ -253,6 +268,19 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             }
         }
 
+        def originOut = new ByteArrayOutputStream()
+        exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'config', '--get', 'remote.origin.url'
+            standardOutput = originOut
+        }
+        def resolvedOrigin = originOut.toString().trim()
+        if (resolvedOrigin != RCLONE_REPO_URL) {
+            throw new GradleException(
+                'Cached rclone origin does not match the configured repository; refusing a potentially stale source cache'
+            )
+        }
+
         // Always sync to the requested ref so upgrades work without manual cache clears
         println "Syncing rclone source to ref: ${RCLONE_REF}"
         exec {
@@ -264,15 +292,21 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             commandLine 'git', 'checkout', RCLONE_REF
         }
 
-        // Print resolved commit and version for traceability
+        // Verify the exact full commit before any native build and retain it in build output.
         def commitOut = new ByteArrayOutputStream()
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'rev-parse', '--short', 'HEAD'
+            commandLine 'git', 'rev-parse', '--verify', 'HEAD^{commit}'
             standardOutput = commitOut
         }
+        def resolvedCommit = commitOut.toString().trim().toLowerCase(java.util.Locale.ROOT)
+        if (resolvedCommit != RCLONE_REF.toLowerCase(java.util.Locale.ROOT)) {
+            throw new GradleException(
+                "Resolved rclone commit ${resolvedCommit} does not match configured pin ${RCLONE_REF}"
+            )
+        }
         def version = getSourceVersion()
-        println "rclone source: commit=${commitOut.toString().trim()} version=${version} (from ${RCLONE_REPO_URL})"
+        println "rclone source: repository=${resolvedOrigin} commit=${resolvedCommit} version=${version}"
     }
 }
 

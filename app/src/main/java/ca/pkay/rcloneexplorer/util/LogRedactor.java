@@ -17,12 +17,20 @@ public final class LogRedactor {
     private static final String REDACTED_PATH = "***redacted-path***";
     private static final String REDACTED_URI = "***redacted-uri***";
 
+    private static final Pattern AUTHORIZATION_HEADER = Pattern.compile(
+            "(?im)(\\bauthorization\\s*[:=]\\s*)[^\\r\\n]*");
+    private static final Pattern URI_USER_INFO = Pattern.compile(
+            "(?i)(\\b[a-z][a-z0-9+.-]*://)[^\\s/?#@]*@");
+    private static final Pattern SIGNED_QUERY_SECRET = Pattern.compile(
+            "(?i)([?&](?:sig|signature|oauth_signature|x-amz-signature|"
+                    + "x-amz-security-token|x-amz-credential|x-goog-signature|"
+                    + "x-goog-credential|googleaccessid)=)[^&#\\s,;\\]}]*");
     private static final Pattern KEY_VALUE_SECRET = Pattern.compile(
             "(?i)((?:rclone_config_pass|client_secret|access_token|refresh_token|authorization"
-                    + "|password|passwd|token|secret|api[_-]?key)\\s*[:=]\\s*)"
+                    + "|password|passwd|token|secret|api[_-]?key)[\"']?\\s*[:=]\\s*)"
                     + "(\"[^\"]*\"|'[^']*'|[^\\s,;\\]}]+)");
     private static final Pattern OPTION_SECRET = Pattern.compile(
-            "(?i)((?:--rc-pass|--password|--token|--secret)\\s+)"
+            "(?i)((?:--rc-pass|--password|--pass|--token|--secret)(?:\\s+|\\s*=\\s*))"
                     + "(\"[^\"]*\"|'[^']*'|[^\\s,;\\]}]+)");
     private static final Pattern BEARER_TOKEN = Pattern.compile(
             "(?i)(\\bBearer\\s+)([^\\s,;\\]}]+)");
@@ -44,7 +52,16 @@ public final class LogRedactor {
             return value;
         }
 
-        String redacted = BEARER_TOKEN.matcher(value).replaceAll("$1" + REDACTED);
+        // Authorization schemes such as Basic and Digest contain whitespace and, for Digest,
+        // many separate credentials. Redact the complete header line before token patterns run.
+        String redacted = AUTHORIZATION_HEADER.matcher(value).replaceAll("$1" + REDACTED);
+        // Remote URLs sometimes embed credentials in user-info (including percent-encoded
+        // passwords). Strip that authority component before any sink sees a diagnostic.
+        redacted = URI_USER_INFO.matcher(redacted).replaceAll("$1" + REDACTED + "@");
+        // Signed object-store URLs put bearer-equivalent credentials in the query rather than
+        // in an Authorization header. Keep parameter names and the rest of the URL readable.
+        redacted = SIGNED_QUERY_SECRET.matcher(redacted).replaceAll("$1" + REDACTED);
+        redacted = BEARER_TOKEN.matcher(redacted).replaceAll("$1" + REDACTED);
         redacted = KEY_VALUE_SECRET.matcher(redacted).replaceAll("$1" + REDACTED);
         redacted = OPTION_SECRET.matcher(redacted).replaceAll("$1" + REDACTED);
         redacted = CONTENT_URI.matcher(redacted).replaceAll("$1" + REDACTED_URI);

@@ -9,7 +9,7 @@ class DatabaseInfo {
     companion object {
 
         // If you change the database schema, you must increment the database version.
-        const val DATABASE_VERSION = 16
+        const val DATABASE_VERSION = 17
         const val DATABASE_NAME = "rcloneExplorer.db"
 
         const val PROFILE_TABLE_NAME = "profile_table"
@@ -35,6 +35,7 @@ class DatabaseInfo {
         const val RUN_COLUMN_REQUESTED_MODE = "run_requested_mode"
         const val RUN_COLUMN_ENDPOINT = "run_endpoint_identity"
         const val RUN_COLUMN_SETTINGS = "run_settings"
+        const val RUN_COLUMN_FILTER_SNAPSHOT = "run_filter_snapshot"
         const val RUN_COLUMN_ENGINE = "run_engine_ref"
         const val RUN_COLUMN_STATE = "run_state"
         const val RUN_COLUMN_REASON = "run_reason"
@@ -208,6 +209,7 @@ class DatabaseInfo {
                 "$RUN_COLUMN_REQUESTED_MODE TEXT NOT NULL," +
                 "$RUN_COLUMN_ENDPOINT TEXT NOT NULL," +
                 "$RUN_COLUMN_SETTINGS TEXT NOT NULL," +
+                "$RUN_COLUMN_FILTER_SNAPSHOT TEXT," +
                 "$RUN_COLUMN_ENGINE TEXT NOT NULL," +
                 "$RUN_COLUMN_STATE TEXT NOT NULL," +
                 "$RUN_COLUMN_REASON TEXT," +
@@ -224,6 +226,9 @@ class DatabaseInfo {
                 "$RUN_COLUMN_UNKNOWN_ITEMS INTEGER," +
                 "$RUN_COLUMN_CREATED_AT INTEGER NOT NULL," +
                 "$RUN_COLUMN_UPDATED_AT INTEGER NOT NULL)"
+
+        val SQL_UPDATE_RUN_ADD_FILTER_SNAPSHOT =
+            "ALTER TABLE $RUN_TABLE_NAME ADD COLUMN $RUN_COLUMN_FILTER_SNAPSHOT TEXT"
 
         val SQL_CREATE_INDEX_ACTIVE_RUN = "CREATE UNIQUE INDEX IF NOT EXISTS run_one_active_profile " +
                 "ON $RUN_TABLE_NAME($RUN_COLUMN_PROFILE_ID) " +

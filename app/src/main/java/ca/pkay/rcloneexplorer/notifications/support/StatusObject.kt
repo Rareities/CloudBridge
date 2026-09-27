@@ -5,6 +5,7 @@ import android.text.format.Formatter
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.StructuredDiagnosticPolicy
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -15,6 +16,7 @@ class StatusObject(var mContext: Context){
     var notificationContent: String = ""
     var notificationBigText = ArrayList<String>()
     var mErrorList = ArrayList<ErrorObject>()
+    private val diagnosticCollector = StructuredDiagnosticPolicy.Collector()
     var mStats = JSONObject()
     var mLogline = JSONObject()
 
@@ -82,33 +84,44 @@ class StatusObject(var mContext: Context){
     }
 
     fun getErrorMessage(): String {
-        if(mLogline.has("msg") && mLogline.getString("level") == "error") {
-            return mLogline.getString("msg")
+        if (mLogline.optString("level", "") == "error") {
+            return mLogline.optString("msg", "")
         }
         return ""
     }
 
     fun getErrorObject(): String {
-        if(mLogline.has("msg") && mLogline.getString("level") == "error") {
+        if (mLogline.optString("level", "") == "error") {
             return mLogline.optString("object", "")
         }
         return ""
     }
 
     fun parseLoglineToStatusObject(logLine: JSONObject) {
-        if(logLine.getString("level") == "error") {
+        if (logLine.optString("level", "") == "error") {
             clearObject()
-            mLogline = logLine
-
-            var error = ErrorObject(getErrorObject(), getErrorMessage())
+            val safe = StructuredDiagnosticPolicy.sanitize(
+                logLine.optString("object", ""),
+                logLine.optString("msg", "")
+            )
+            val error = ErrorObject(safe.objectName, safe.message)
+            // Keep only the safe fields needed by the existing accessors; never retain the raw
+            // error JSONObject after this ingestion boundary.
+            mLogline = JSONObject().apply {
+                put("level", "error")
+                put("object", error.mErrorObject)
+                put("msg", error.mErrorMessage)
+            }
             FLog.e(TAG, "%s - %s", error.mErrorObject, error.mErrorMessage)
-            mErrorList.add(error)
+            if (diagnosticCollector.add(safe)) {
+                mErrorList.add(error)
+            }
         }
 
-        if(logLine.has("stats")) {
+        if (logLine.has("stats")) {
             clearObject()
-            mLogline = logLine
-            mStats = mLogline.getJSONObject("stats")
+            val stats = logLine.optJSONObject("stats") ?: return
+            mStats = stats
 
             //available stats:
             //bytes,checks,deletedDirs,deletes,elapsedTime,errors,eta,fatalError,renames,retryError
@@ -266,13 +279,12 @@ class StatusObject(var mContext: Context){
         }
     }
 
-    fun getAllErrorMessages(): String{
-        var all = ""
-        mErrorList.forEach {
-            all += it.mErrorMessage + "\n"
-            all += mContext.getString(R.string.status_offendingfile) + it.mErrorObject + "\n"
-        }
-        return all
+    fun getOmittedErrorCount(): Int {
+        return diagnosticCollector.omittedCount
+    }
+
+    fun getAllErrorMessages(): String {
+        return diagnosticCollector.format(mContext.getString(R.string.status_offendingfile))
     }
 
     override fun toString(): String {

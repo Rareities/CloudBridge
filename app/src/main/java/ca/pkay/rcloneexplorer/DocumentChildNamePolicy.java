@@ -2,6 +2,7 @@ package ca.pkay.rcloneexplorer;
 
 /** Pure path-component policy shared by the virtual DocumentsProvider. */
 final class DocumentChildNamePolicy {
+    static final int MAX_CHILD_NAME_LENGTH = 4096;
 
     private DocumentChildNamePolicy() {
     }
@@ -10,6 +11,7 @@ final class DocumentChildNamePolicy {
         if (childName == null || childName.isEmpty() || childName.indexOf('\0') >= 0) {
             throw new IllegalArgumentException("Invalid document child name");
         }
+        requireBoundedLength(childName);
         return requireSingleComponent(childName.replace('/', '_'));
     }
 
@@ -18,7 +20,14 @@ final class DocumentChildNamePolicy {
                 || childName.indexOf('/') >= 0 || childName.indexOf('\0') >= 0) {
             throw new IllegalArgumentException("Invalid document child name");
         }
+        requireBoundedLength(childName);
         return childName;
+    }
+
+    private static void requireBoundedLength(String childName) {
+        if (childName.length() > MAX_CHILD_NAME_LENGTH) {
+            throw new IllegalArgumentException("Document child name is too long");
+        }
     }
 
     static String targetDocumentId(String parentDocumentId, String childName) {

@@ -11,6 +11,7 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_DUE_AT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_ENDPOINT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_ENGINE
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_FAILED_ITEMS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_FILTER_SNAPSHOT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_FINISHED_AT
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_ID
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.RUN_COLUMN_OWNER_GENERATION
@@ -43,7 +44,10 @@ class RunRepository(context: Context) {
     ): RunRecord = queueRun(requestedAt, dueAt) { handler, db ->
         val task = handler.getTaskInTransaction(db, taskId)
             ?: throw RunRejectedException("Task no longer exists")
-        ProfileStore.upsertLegacyTask(db, task, engineRef)
+        Pair(
+            ProfileStore.upsertLegacyTask(db, task, engineRef),
+            ProfileStore.filterSnapshot(db, task.filterId)
+        )
     }
 
     fun queueEphemeralTask(
@@ -51,7 +55,10 @@ class RunRepository(context: Context) {
         requestedAt: Long = System.currentTimeMillis(),
         dueAt: Long? = null
     ): RunRecord = queueRun(requestedAt, dueAt) { _, db ->
-        ProfileStore.upsertEphemeralTask(db, task, engineRef)
+        Pair(
+            ProfileStore.upsertEphemeralTask(db, task, engineRef),
+            ProfileStore.filterSnapshot(db, task.filterId)
+        )
     }
 
     /** Defers a dispatch failure only while this exact owner is still queued. */
@@ -90,6 +97,7 @@ class RunRepository(context: Context) {
             val values = ContentValues().apply {
                 put(RUN_COLUMN_STATE, state.wireValue)
                 put(RUN_COLUMN_REASON, reason)
+                putNull(RUN_COLUMN_FILTER_SNAPSHOT)
                 put(RUN_COLUMN_FINISHED_AT, finishedAt)
                 put(RUN_COLUMN_UPDATED_AT, finishedAt)
             }
@@ -111,7 +119,7 @@ class RunRepository(context: Context) {
     private fun queueRun(
         requestedAt: Long,
         dueAt: Long?,
-        resolveProfile: (DatabaseHandler, SQLiteDatabase) -> ProfileRecord
+        resolveProfile: (DatabaseHandler, SQLiteDatabase) -> Pair<ProfileRecord, String?>
     ): RunRecord {
         val handler = DatabaseHandler(context)
         val db = handler.writableDatabase
@@ -119,7 +127,7 @@ class RunRepository(context: Context) {
         val ownerToken = UUID.randomUUID().toString()
         db.beginTransaction()
         try {
-            val profile = resolveProfile(handler, db)
+            val (profile, filterSnapshot) = resolveProfile(handler, db)
             validateQueueEligibility(profile)
             if (activeRunExists(db, profile.profileId)) {
                 throw RunRejectedException("A run already owns this profile")
@@ -133,6 +141,8 @@ class RunRepository(context: Context) {
             values.put(RUN_COLUMN_REQUESTED_MODE, profile.mode.wireValue)
             values.put(RUN_COLUMN_ENDPOINT, profile.endpointIdentity)
             values.put(RUN_COLUMN_SETTINGS, profile.settings)
+            if (filterSnapshot == null) values.putNull(RUN_COLUMN_FILTER_SNAPSHOT)
+            else values.put(RUN_COLUMN_FILTER_SNAPSHOT, filterSnapshot)
             values.put(RUN_COLUMN_ENGINE, profile.engineRef)
             values.put(RUN_COLUMN_STATE, RunState.QUEUED.wireValue)
             values.putNull(RUN_COLUMN_REASON)
@@ -159,45 +169,125 @@ class RunRepository(context: Context) {
     }
 
     /** Claim the queued row and verify the profile has not been edited or retired. */
-    fun claim(runId: String, ownerToken: String): RunRecord {
+    fun claim(runId: String, ownerToken: String, taskIdentity: RunTaskIdentity): RunRecord {
         val handler = DatabaseHandler(context)
         val db = handler.writableDatabase
         var rejection: String? = null
-        db.beginTransaction()
+        var transactionStarted = false
         try {
+            db.beginTransaction()
+            transactionStarted = true
             val run = get(db, runId) ?: throw RunRejectedException("Run no longer exists")
             if (run.ownerToken != ownerToken || run.state != RunState.QUEUED) {
                 throw RunRejectedException("Run owner is stale")
             }
-            val profile = ProfileStore.getById(db, run.profileId)
-            if (profile == null || profile.revision != run.profileRevision ||
-                profile.fingerprint != run.profileFingerprint ||
-                profile.readiness == ProfileReadiness.RECOVERY_REQUIRED ||
-                profile.readiness == ProfileReadiness.BLOCKED ||
-                profile.readiness == ProfileReadiness.INITIALIZATION_REQUIRED) {
-                moveToRecovery(db, run, "Profile changed or is not ready for execution")
-                rejection = "Profile changed or requires recovery"
+            if (run.cancellationRequested) {
+                if (!cancelQueuedRun(db, run, System.currentTimeMillis())) {
+                    throw RunRejectedException("Queued cancellation could not be recorded")
+                }
+                rejection = "Run was cancelled before execution"
             } else {
-                val values = ContentValues()
-                values.put(RUN_COLUMN_STATE, RunState.PREFLIGHT.wireValue)
-                values.put(RUN_COLUMN_OWNER_GENERATION, run.ownerGeneration + 1)
-                values.put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
-                val updated = db.update(
-                    RUN_TABLE_NAME,
-                    values,
-                    "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ?",
-                    arrayOf(runId, ownerToken, RunState.QUEUED.wireValue)
-                )
-                if (updated != 1) throw RunRejectedException("Run was claimed by another owner")
+                val profile = ProfileStore.getById(db, run.profileId)
+                if (profile == null || profile.revision != run.profileRevision ||
+                    profile.fingerprint != run.profileFingerprint ||
+                    profile.readiness == ProfileReadiness.RECOVERY_REQUIRED ||
+                    profile.readiness == ProfileReadiness.BLOCKED ||
+                    profile.readiness == ProfileReadiness.INITIALIZATION_REQUIRED) {
+                    moveToRecovery(db, run, "Profile changed or is not ready for execution")
+                    rejection = "Profile changed or requires recovery"
+                } else {
+                    val identityMatch = requestMatchesRun(db, handler, run, profile, taskIdentity)
+                    if (!identityMatch.matches) {
+                        // Roll back the QUEUED row unchanged. A stale or substituted payload must never
+                        // terminalize some other run merely because it carries that run's owner token.
+                        throw RunRejectedException("Task payload does not match its durable run identity")
+                    }
+                    val values = ContentValues()
+                    values.put(RUN_COLUMN_STATE, RunState.PREFLIGHT.wireValue)
+                    values.put(RUN_COLUMN_OWNER_GENERATION, run.ownerGeneration + 1)
+                    values.put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
+                    if (run.filterSnapshot == null && identityMatch.filterSnapshot != null) {
+                        // v16 queued rows have no historical rules. Backfill only when the current
+                        // task/filter identity reproduces this run's original fingerprint.
+                        values.put(RUN_COLUMN_FILTER_SNAPSHOT, identityMatch.filterSnapshot)
+                    }
+                    val updated = db.update(
+                        RUN_TABLE_NAME,
+                        values,
+                        "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ? AND $RUN_COLUMN_OWNER_GENERATION = ? AND $RUN_COLUMN_CANCEL_REQUESTED = 0",
+                        arrayOf(runId, ownerToken, RunState.QUEUED.wireValue, run.ownerGeneration.toString())
+                    )
+                    if (updated != 1) throw RunRejectedException("Run was claimed by another owner")
+                }
             }
             db.setTransactionSuccessful()
         } finally {
-            db.endTransaction()
-            db.close()
+            try {
+                if (transactionStarted) db.endTransaction()
+            } finally {
+                // Close the helper even if transaction finalization fails; it owns the DB handle.
+                handler.close()
+            }
         }
         if (rejection != null) throw RunRejectedException(rejection!!)
         return get(runId) ?: throw RunRejectedException("Claimed run could not be read back")
     }
+
+    private fun requestMatchesRun(
+        db: SQLiteDatabase,
+        handler: DatabaseHandler,
+        run: RunRecord,
+        profile: ProfileRecord,
+        taskIdentity: RunTaskIdentity
+    ): RequestIdentityMatch {
+        return when (taskIdentity) {
+            is RunTaskIdentity.LegacyTask -> {
+                val task = handler.getTaskInTransaction(db, taskIdentity.taskId)
+                    ?: return RequestIdentityMatch(false, null)
+                val filterSnapshot = run.filterSnapshot
+                    ?: ProfileStore.filterSnapshot(db, task.filterId)
+                val requested = ProfileStore.profileSpecForFilterSnapshot(
+                    task,
+                    run.engineRef,
+                    filterSnapshot
+                )
+                val matches = RunTaskIdentityPolicy.matchesLegacyTask(
+                    profile.legacyTaskId,
+                    taskIdentity.taskId,
+                    profile.fingerprint,
+                    run.profileFingerprint,
+                    requested.fingerprint
+                )
+                RequestIdentityMatch(matches, filterSnapshot.takeIf { matches && task.filterId != null })
+            }
+            is RunTaskIdentity.EphemeralTask -> {
+                val task = taskIdentity.task
+                val filterSnapshot = run.filterSnapshot
+                    ?: ProfileStore.filterSnapshot(db, task.filterId)
+                val requested = ProfileStore.profileSpecForFilterSnapshot(
+                    task,
+                    run.engineRef,
+                    filterSnapshot
+                )
+                val requestedProfileId = LegacyProfileMapper.stableIdForEphemeralTask(requested.fingerprint)
+                val matches = RunTaskIdentityPolicy.matchesEphemeralTask(
+                    profile.legacyTaskId,
+                    profile.profileId,
+                    run.profileId,
+                    profile.fingerprint,
+                    run.profileFingerprint,
+                    requestedProfileId,
+                    requested.fingerprint
+                )
+                RequestIdentityMatch(matches, filterSnapshot.takeIf { matches && task.filterId != null })
+            }
+        }
+    }
+
+    private data class RequestIdentityMatch(
+        val matches: Boolean,
+        val filterSnapshot: String?
+    )
 
     fun markRunning(runId: String, ownerToken: String): Boolean = updateOwned(
         runId,
@@ -207,7 +297,8 @@ class RunRepository(context: Context) {
         ContentValues().apply {
             put(RUN_COLUMN_STARTED_AT, System.currentTimeMillis())
             put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
-        }
+        },
+        "$RUN_COLUMN_CANCEL_REQUESTED = 0"
     )
 
     fun finish(
@@ -227,11 +318,30 @@ class RunRepository(context: Context) {
         val db = handler.writableDatabase
         db.beginTransaction()
         return try {
+            val run = get(db, runId)
+            if (run == null || run.ownerToken != ownerToken ||
+                (run.state != RunState.PREFLIGHT && run.state != RunState.RUNNING)) {
+                db.setTransactionSuccessful()
+                return false
+            }
+            // A cancellation observed in PREFLIGHT means markRunning did not acquire the
+            // execution phase, so native work was not admitted. Preserve that outcome even
+            // when the caller reports the failed phase transition as a generic failure.
+            val cancelledBeforeExecution = run.state == RunState.PREFLIGHT &&
+                run.cancellationRequested && state != RunState.RECOVERY_REQUIRED
+            val finalState = if (cancelledBeforeExecution) RunState.CANCELLED else state
+            val finalReason = if (cancelledBeforeExecution) {
+                "Cancellation requested before execution"
+            } else {
+                reason
+            }
             val values = ContentValues()
-            values.put(RUN_COLUMN_STATE, state.wireValue)
-            if (reason == null) values.putNull(RUN_COLUMN_REASON) else values.put(RUN_COLUMN_REASON, reason)
-            values.put(RUN_COLUMN_FINISHED_AT, System.currentTimeMillis())
-            values.put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
+            values.put(RUN_COLUMN_STATE, finalState.wireValue)
+            if (finalReason == null) values.putNull(RUN_COLUMN_REASON) else values.put(RUN_COLUMN_REASON, finalReason)
+            values.putNull(RUN_COLUMN_FILTER_SNAPSHOT)
+            val finishedAt = System.currentTimeMillis()
+            values.put(RUN_COLUMN_FINISHED_AT, finishedAt)
+            values.put(RUN_COLUMN_UPDATED_AT, finishedAt)
             putNullableLong(values, RUN_COLUMN_SUCCESSFUL_ITEMS, successfulItems)
             putNullableLong(values, RUN_COLUMN_FAILED_ITEMS, failedItems)
             putNullableLong(values, RUN_COLUMN_CONFLICT_ITEMS, conflictItems)
@@ -239,16 +349,15 @@ class RunRepository(context: Context) {
             val updated = db.update(
                 RUN_TABLE_NAME,
                 values,
-                "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND " +
-                        "$RUN_COLUMN_STATE IN ('PREFLIGHT','RUNNING','QUEUED')",
-                arrayOf(runId, ownerToken)
+                "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ? AND $RUN_COLUMN_OWNER_GENERATION = ?",
+                arrayOf(runId, ownerToken, run.state.wireValue, run.ownerGeneration.toString())
             )
-            if (updated == 1 && state == RunState.RECOVERY_REQUIRED) {
+            if (updated == 1 && finalState == RunState.RECOVERY_REQUIRED) {
                 val run = get(db, runId)
                 if (run != null) {
                     val profileValues = ContentValues()
                     profileValues.put(DatabaseInfo.PROFILE_COLUMN_READINESS, ProfileReadiness.RECOVERY_REQUIRED.wireValue)
-                    profileValues.put(DatabaseInfo.PROFILE_COLUMN_REASON, reason ?: "Native completion was not confirmed")
+                    profileValues.put(DatabaseInfo.PROFILE_COLUMN_REASON, finalReason ?: "Native completion was not confirmed")
                     profileValues.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, System.currentTimeMillis())
                     db.update(
                         DatabaseInfo.PROFILE_TABLE_NAME,
@@ -271,15 +380,29 @@ class RunRepository(context: Context) {
         val db = handler.writableDatabase
         db.beginTransaction()
         return try {
+            val run = get(db, runId)
+            if (run == null || run.ownerToken != ownerToken) {
+                db.setTransactionSuccessful()
+                return false
+            }
+            val now = System.currentTimeMillis()
+            if (run.state == RunState.QUEUED) {
+                val updated = cancelQueuedRun(db, run, now)
+                db.setTransactionSuccessful()
+                return updated
+            }
+            if (run.state != RunState.PREFLIGHT && run.state != RunState.RUNNING) {
+                db.setTransactionSuccessful()
+                return false
+            }
             val values = ContentValues()
             values.put(RUN_COLUMN_CANCEL_REQUESTED, 1)
-            values.put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
+            values.put(RUN_COLUMN_UPDATED_AT, now)
             val updated = db.update(
                 RUN_TABLE_NAME,
                 values,
-                "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND " +
-                        "$RUN_COLUMN_STATE IN ('QUEUED','PREFLIGHT','RUNNING')",
-                arrayOf(runId, ownerToken)
+                "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ? AND $RUN_COLUMN_OWNER_GENERATION = ?",
+                arrayOf(runId, ownerToken, run.state.wireValue, run.ownerGeneration.toString())
             )
             db.setTransactionSuccessful()
             updated == 1
@@ -297,39 +420,69 @@ class RunRepository(context: Context) {
         try {
             val cursor = db.query(
                 RUN_TABLE_NAME,
-                arrayOf(RUN_COLUMN_ID, RUN_COLUMN_PROFILE_ID, RUN_COLUMN_OWNER_GENERATION),
-                "$RUN_COLUMN_STATE IN ('PREFLIGHT','RUNNING')",
+                arrayOf(
+                    RUN_COLUMN_ID,
+                    RUN_COLUMN_PROFILE_ID,
+                    RUN_COLUMN_OWNER_GENERATION,
+                    RUN_COLUMN_STATE,
+                    RUN_COLUMN_CANCEL_REQUESTED
+                ),
+                "$RUN_COLUMN_STATE IN ('PREFLIGHT','RUNNING') OR " +
+                    "($RUN_COLUMN_STATE = 'QUEUED' AND $RUN_COLUMN_CANCEL_REQUESTED = 1)",
                 null,
                 null,
                 null,
                 null
             )
-            val rows = ArrayList<Triple<String, String, Long>>()
+            val rows = ArrayList<RunReconciliationTarget>()
             try {
                 while (cursor.moveToNext()) {
-                    rows.add(Triple(cursor.getString(0), cursor.getString(1), cursor.getLong(2)))
+                    rows.add(
+                        RunReconciliationTarget(
+                            runId = cursor.getString(0),
+                            profileId = cursor.getString(1),
+                            ownerGeneration = cursor.getLong(2),
+                            state = RunState.fromWireValue(cursor.getString(3)),
+                            cancellationRequested = cursor.getInt(4) != 0
+                        )
+                    )
                 }
             } finally {
                 cursor.close()
             }
-            for ((runId, profileId, generation) in rows) {
+            for (target in rows) {
+                val queuedCancellation = target.state == RunState.QUEUED && target.cancellationRequested
+                val nextState = if (queuedCancellation) RunState.CANCELLED else RunState.INTERRUPTED
+                val reason = if (queuedCancellation) {
+                    "Cancellation requested before execution"
+                } else {
+                    "Application restarted before native completion was confirmed"
+                }
+                val now = System.currentTimeMillis()
                 val values = ContentValues()
-                values.put(RUN_COLUMN_STATE, RunState.INTERRUPTED.wireValue)
-                values.put(RUN_COLUMN_REASON, "Application restarted before native completion was confirmed")
-                values.put(RUN_COLUMN_FINISHED_AT, System.currentTimeMillis())
-                values.put(RUN_COLUMN_OWNER_GENERATION, generation + 1)
-                values.put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
-                db.update(RUN_TABLE_NAME, values, "$RUN_COLUMN_ID = ?", arrayOf(runId))
+                values.put(RUN_COLUMN_STATE, nextState.wireValue)
+                values.put(RUN_COLUMN_REASON, reason)
+                values.put(RUN_COLUMN_FINISHED_AT, now)
+                values.putNull(RUN_COLUMN_FILTER_SNAPSHOT)
+                values.put(RUN_COLUMN_OWNER_GENERATION, target.ownerGeneration + 1)
+                values.put(RUN_COLUMN_UPDATED_AT, now)
+                val updated = db.update(
+                    RUN_TABLE_NAME,
+                    values,
+                    "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_STATE = ? AND $RUN_COLUMN_OWNER_GENERATION = ?",
+                    arrayOf(target.runId, target.state.wireValue, target.ownerGeneration.toString())
+                )
+                if (updated != 1 || queuedCancellation) continue
 
                 val profileValues = ContentValues()
                 profileValues.put(DatabaseInfo.PROFILE_COLUMN_READINESS, ProfileReadiness.RECOVERY_REQUIRED.wireValue)
                 profileValues.put(DatabaseInfo.PROFILE_COLUMN_REASON, "Interrupted run requires reconciliation")
-                profileValues.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, System.currentTimeMillis())
+                profileValues.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, now)
                 db.update(
                     DatabaseInfo.PROFILE_TABLE_NAME,
                     profileValues,
                     "${DatabaseInfo.PROFILE_COLUMN_ID} = ?",
-                    arrayOf(profileId)
+                    arrayOf(target.profileId)
                 )
             }
             db.setTransactionSuccessful()
@@ -354,17 +507,20 @@ class RunRepository(context: Context) {
         ownerToken: String,
         expected: RunState,
         next: RunState,
-        values: ContentValues
+        values: ContentValues,
+        additionalSelection: String? = null
     ): Boolean {
         val handler = DatabaseHandler(context)
         val db = handler.writableDatabase
         db.beginTransaction()
         return try {
             values.put(RUN_COLUMN_STATE, next.wireValue)
+            val selection = "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ?" +
+                (additionalSelection?.let { " AND ($it)" } ?: "")
             val updated = db.update(
                 RUN_TABLE_NAME,
                 values,
-                "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ?",
+                selection,
                 arrayOf(runId, ownerToken, expected.wireValue)
             )
             db.setTransactionSuccessful()
@@ -406,11 +562,38 @@ class RunRepository(context: Context) {
         val values = ContentValues()
         values.put(RUN_COLUMN_STATE, RunState.RECOVERY_REQUIRED.wireValue)
         values.put(RUN_COLUMN_REASON, reason)
+        values.putNull(RUN_COLUMN_FILTER_SNAPSHOT)
         values.put(RUN_COLUMN_FINISHED_AT, System.currentTimeMillis())
         values.put(RUN_COLUMN_OWNER_GENERATION, run.ownerGeneration + 1)
         values.put(RUN_COLUMN_UPDATED_AT, System.currentTimeMillis())
         db.update(RUN_TABLE_NAME, values, "$RUN_COLUMN_ID = ?", arrayOf(run.runId))
     }
+
+    private fun cancelQueuedRun(db: SQLiteDatabase, run: RunRecord, cancelledAt: Long): Boolean {
+        val values = ContentValues().apply {
+            put(RUN_COLUMN_STATE, RunState.CANCELLED.wireValue)
+            put(RUN_COLUMN_REASON, "Cancellation requested before execution")
+            put(RUN_COLUMN_CANCEL_REQUESTED, 1)
+            putNull(RUN_COLUMN_FILTER_SNAPSHOT)
+            put(RUN_COLUMN_FINISHED_AT, cancelledAt)
+            put(RUN_COLUMN_OWNER_GENERATION, run.ownerGeneration + 1)
+            put(RUN_COLUMN_UPDATED_AT, cancelledAt)
+        }
+        return db.update(
+            RUN_TABLE_NAME,
+            values,
+            "$RUN_COLUMN_ID = ? AND $RUN_COLUMN_OWNER_TOKEN = ? AND $RUN_COLUMN_STATE = ? AND $RUN_COLUMN_OWNER_GENERATION = ?",
+            arrayOf(run.runId, run.ownerToken, RunState.QUEUED.wireValue, run.ownerGeneration.toString())
+        ) == 1
+    }
+
+    private data class RunReconciliationTarget(
+        val runId: String,
+        val profileId: String,
+        val ownerGeneration: Long,
+        val state: RunState,
+        val cancellationRequested: Boolean
+    )
 
     private fun get(db: SQLiteDatabase, runId: String): RunRecord? {
         val cursor = db.query(
@@ -457,7 +640,8 @@ class RunRepository(context: Context) {
         conflictItems = if (cursor.isNull(19)) null else cursor.getLong(19),
         unknownItems = if (cursor.isNull(20)) null else cursor.getLong(20),
         createdAt = cursor.getLong(21),
-        updatedAt = cursor.getLong(22)
+        updatedAt = cursor.getLong(22),
+        filterSnapshot = if (cursor.isNull(23)) null else cursor.getString(23)
     )
 
     private companion object {
@@ -484,7 +668,8 @@ class RunRepository(context: Context) {
             RUN_COLUMN_CONFLICT_ITEMS,
             RUN_COLUMN_UNKNOWN_ITEMS,
             RUN_COLUMN_CREATED_AT,
-            RUN_COLUMN_UPDATED_AT
+            RUN_COLUMN_UPDATED_AT,
+            RUN_COLUMN_FILTER_SNAPSHOT
         )
     }
 }

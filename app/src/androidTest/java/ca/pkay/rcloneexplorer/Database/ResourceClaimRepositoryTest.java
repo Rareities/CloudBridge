@@ -4,6 +4,7 @@ import android.content.Context;
 import android.app.Instrumentation;
 import android.content.ContentValues;
 import android.database.DatabaseUtils;
+import android.database.sqlite.SQLiteConstraintException;
 import android.database.sqlite.SQLiteDatabase;
 
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -257,7 +258,8 @@ public class ResourceClaimRepositoryTest {
         SQLiteDatabase versionTen = SQLiteDatabase.openOrCreateDatabase(
                 testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
         versionTen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
-        versionTen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_RUNS());
+        versionTen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_RUNS()
+                .replace(DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT + " TEXT,", ""));
         versionTen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_ACTIVE_RUN());
         ContentValues profile = new ContentValues();
         profile.put(DatabaseInfo.PROFILE_COLUMN_ID, "migration-profile");
@@ -438,6 +440,7 @@ public class ResourceClaimRepositoryTest {
         SQLiteDatabase versionTwelve = SQLiteDatabase.openOrCreateDatabase(
                 testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
         versionTwelve.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
+        createPreV17RunsTable(versionTwelve);
         versionTwelve.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_BISYNC_PREFLIGHT());
 
         ContentValues profile = new ContentValues();
@@ -453,6 +456,8 @@ public class ResourceClaimRepositoryTest {
         profile.put(DatabaseInfo.PROFILE_COLUMN_CREATED_AT, 1);
         profile.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, 1);
         versionTwelve.insertOrThrow(DatabaseInfo.PROFILE_TABLE_NAME, null, profile);
+        versionTwelve.insertOrThrow(DatabaseInfo.RUN_TABLE_NAME, null,
+                createMigrationRun("migration-run-v12", "migration-profile-v12", 124L));
 
         ContentValues preflight = new ContentValues();
         preflight.put(DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_PROFILE_ID, "migration-profile-v12");
@@ -471,6 +476,9 @@ public class ResourceClaimRepositoryTest {
         SQLiteDatabase upgraded = handler.getWritableDatabase();
         try {
             assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
+            assertRunFilterSnapshotColumnExists(upgraded);
+            assertMigrationRunRetained(upgraded, "migration-run-v12", "migration-profile-v12", 124L);
+            assertNoMigrationForeignKeyViolations(upgraded);
             try (android.database.Cursor cursor = upgraded.rawQuery(
                     "SELECT " + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE + ", "
                             + DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_NATIVE_STATE_REASON + ", "
@@ -502,6 +510,8 @@ public class ResourceClaimRepositoryTest {
         SQLiteDatabase versionThirteen = SQLiteDatabase.openOrCreateDatabase(
                 testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
         versionThirteen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
+        createPreV17RunsTable(versionThirteen);
+        createPreV16PreflightTable(versionThirteen);
 
         ContentValues profile = new ContentValues();
         profile.put(DatabaseInfo.PROFILE_COLUMN_ID, "migration-profile-v13");
@@ -516,6 +526,9 @@ public class ResourceClaimRepositoryTest {
         profile.put(DatabaseInfo.PROFILE_COLUMN_CREATED_AT, 100L);
         profile.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, 200L);
         versionThirteen.insertOrThrow(DatabaseInfo.PROFILE_TABLE_NAME, null, profile);
+        versionThirteen.insertOrThrow(DatabaseInfo.RUN_TABLE_NAME, null,
+                createMigrationRun("migration-run-v13", "migration-profile-v13", 201L,
+                        3L, "profile-snapshot"));
         versionThirteen.setVersion(13);
         versionThirteen.close();
 
@@ -523,6 +536,9 @@ public class ResourceClaimRepositoryTest {
         SQLiteDatabase upgraded = handler.getWritableDatabase();
         try {
             assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
+            assertRunFilterSnapshotColumnExists(upgraded);
+            assertMigrationRunRetained(upgraded, "migration-run-v13", "migration-profile-v13", 201L);
+            assertNoMigrationForeignKeyViolations(upgraded);
             assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
                     "SELECT COUNT(*) FROM " + DatabaseInfo.PROFILE_TABLE_NAME, null));
             assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
@@ -551,59 +567,20 @@ public class ResourceClaimRepositoryTest {
     public void versionFourteenUpgradeDoesNotInventInitializationPreferenceOrReleaseActiveOwner() {
         SQLiteDatabase versionFourteen = SQLiteDatabase.openOrCreateDatabase(
                 testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
-        versionFourteen.execSQL("CREATE TABLE " + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + " ("
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + " TEXT PRIMARY KEY NOT NULL,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + " TEXT NOT NULL,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + " TEXT NOT NULL,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE + " TEXT,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + " TEXT NOT NULL,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + " INTEGER NOT NULL,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT + " INTEGER NOT NULL,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT + " INTEGER,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " INTEGER,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE + " TEXT,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS + " TEXT,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS + " INTEGER,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES + " INTEGER,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES + " INTEGER,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES + " INTEGER,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT + " INTEGER,"
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT + " INTEGER NOT NULL)");
-        versionFourteen.execSQL("CREATE UNIQUE INDEX bisync_preview_one_owner ON "
-                + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + "("
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + ") WHERE "
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS
-                + " IN ('QUEUED','RUNNING','INTERRUPTED','RECOVERY_REQUIRED')");
-        ContentValues runningPreview = new ContentValues();
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID, "legacy-absent-preview");
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID, "legacy-profile");
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE, "ABSENT");
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE);
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS, "RUNNING");
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION, 1L);
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT, 100L);
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT, 101L);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES);
-        runningPreview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT);
-        runningPreview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT, 102L);
-        versionFourteen.insertOrThrow(DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME, null, runningPreview);
-        versionFourteen.execSQL("INSERT INTO " + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + " ("
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + ","
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + ","
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + ","
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE + ","
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + ","
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + ","
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT + ","
-                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT + ") VALUES ("
-                + "'legacy-absent-queued-preview','legacy-queued-profile','ABSENT',NULL,"
-                + "'QUEUED',1,200,201)");
+        versionFourteen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
+        createPreV17RunsTable(versionFourteen);
+        createPreV16PreflightTable(versionFourteen);
+        insertMigrationProfile(versionFourteen, "legacy-profile");
+        insertMigrationProfile(versionFourteen, "legacy-queued-profile");
+        versionFourteen.insertOrThrow(DatabaseInfo.RUN_TABLE_NAME, null,
+                createMigrationRun("migration-run-v14", "legacy-profile", 99L));
+        createV14PreviewSchema(versionFourteen);
+        versionFourteen.insertOrThrow(DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME, null,
+                createV14MigrationPreview("legacy-absent-preview", "legacy-profile",
+                        "RUNNING", 100L, 101L, 102L));
+        versionFourteen.insertOrThrow(DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME, null,
+                createV14MigrationPreview("legacy-absent-queued-preview", "legacy-queued-profile",
+                        "QUEUED", 200L, null, 201L));
         versionFourteen.setVersion(14);
         versionFourteen.close();
 
@@ -611,12 +588,18 @@ public class ResourceClaimRepositoryTest {
         SQLiteDatabase upgraded = handler.getWritableDatabase();
         try {
             assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
+            assertRunFilterSnapshotColumnExists(upgraded);
+            assertMigrationRunRetained(upgraded, "migration-run-v14", "legacy-profile", 99L);
+            assertNoMigrationForeignKeyViolations(upgraded);
             try (android.database.Cursor cursor = upgraded.rawQuery(
                     "SELECT " + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + ", "
                             + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + ", "
                             + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE + ", "
                             + DatabaseInfo.BISYNC_PREVIEW_COLUMN_INITIALIZATION_MODE + ", "
-                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " FROM "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_TOKEN + ", "
+                            + DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT + " FROM "
                             + DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME + " WHERE "
                             + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + " = ?",
                     new String[]{"legacy-absent-preview"})) {
@@ -626,7 +609,13 @@ public class ResourceClaimRepositoryTest {
                 assertEquals("INITIALIZATION_POLICY_MISSING", cursor.getString(2));
                 assertNull(cursor.getString(3));
                 assertTrue(cursor.isNull(4));
+                assertEquals("legacy-profile", cursor.getString(5));
+                assertEquals("migration-preview-owner-legacy-absent-preview", cursor.getString(6));
+                assertEquals(100L, cursor.getLong(7));
             }
+            assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' "
+                            + "AND name='bisync_preview_one_owner'", null));
             try (android.database.Cursor cursor = upgraded.rawQuery(
                     "SELECT " + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + ", "
                             + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + ", "
@@ -646,6 +635,198 @@ public class ResourceClaimRepositoryTest {
             assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='bisync_preview_one_owner'",
                     null));
+        } finally {
+            upgraded.close();
+            handler.close();
+        }
+    }
+
+    @Test
+    public void versionFifteenUpgradeAddsObservationBackupAndRunSnapshotSchema() {
+        SQLiteDatabase versionFifteen = SQLiteDatabase.openOrCreateDatabase(
+                testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
+        versionFifteen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
+        createPreV17RunsTable(versionFifteen);
+        createPreV16PreflightTable(versionFifteen);
+        createV15PreviewSchema(versionFifteen);
+        versionFifteen.setVersion(15);
+        versionFifteen.close();
+
+        DatabaseHandler handler = new DatabaseHandler(testContext);
+        SQLiteDatabase upgraded = handler.getWritableDatabase();
+        try {
+            assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
+            assertRunFilterSnapshotColumnExists(upgraded);
+            assertMigrationColumnExists(upgraded, DatabaseInfo.BISYNC_PREFLIGHT_TABLE_NAME,
+                    DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_OBSERVATION_FINGERPRINT);
+            assertMigrationTableExists(upgraded, DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME);
+            assertMigrationTableExists(upgraded, DatabaseInfo.BISYNC_BACKUP_LOCATION_TABLE_NAME);
+            assertMigrationIndexExists(upgraded, "bisync_backup_one_unresolved_profile");
+            assertMigrationIndexExists(upgraded, "bisync_backup_history");
+            assertMigrationIndexDefinition(upgraded, "bisync_backup_one_unresolved_profile",
+                    "CREATE UNIQUE INDEX", "ON " + DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME
+                            + "(" + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_ID + ")",
+                    "WHERE " + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_STATUS
+                            + " IN ('PENDING_VALIDATION','BACKUP_VERIFIED','MUTATION_IN_PROGRESS',"
+                            + "'RECOVERY_REQUIRED','RESTORE_REQUIRED','RESTORE_IN_PROGRESS','INVALIDATED')");
+            assertMigrationIndexDefinition(upgraded, "bisync_backup_history",
+                    "CREATE INDEX", "ON " + DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME + "("
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_ID + ","
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_CREATED_AT + " DESC)");
+            assertNoMigrationForeignKeyViolations(upgraded);
+        } finally {
+            upgraded.close();
+            handler.close();
+        }
+    }
+
+    @Test
+    public void versionSixteenUpgradeAddsRunFilterSnapshotWithoutDroppingNewerLedgers() {
+        SQLiteDatabase versionSixteen = SQLiteDatabase.openOrCreateDatabase(
+                testContext.getDatabasePath(DatabaseInfo.DATABASE_NAME), null);
+        versionSixteen.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_PROFILES());
+        createPreV17RunsTable(versionSixteen);
+        createPreV16PreflightTable(versionSixteen);
+        versionSixteen.execSQL(
+                DatabaseInfo.Companion.getSQL_UPDATE_BISYNC_PREFLIGHT_ADD_OBSERVATION_FINGERPRINT());
+        createV15PreviewSchema(versionSixteen);
+        createV16BackupTables(versionSixteen);
+        insertMigrationProfile(versionSixteen, "migration-profile-v16");
+        versionSixteen.insertOrThrow(DatabaseInfo.RUN_TABLE_NAME, null,
+                createMigrationRun("migration-active-run-v16", "migration-profile-v16", 123L));
+        versionSixteen.insertOrThrow(DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME, null,
+                createV16MigrationPreview("migration-preview-v16", "migration-profile-v16", 123L));
+        versionSixteen.insertOrThrow(DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME, null,
+                createV16MigrationBackupManifest("migration-backup-v16", "migration-active-run-v16",
+                        "migration-profile-v16", "migration-preview-v16", 123L));
+        versionSixteen.insertOrThrow(DatabaseInfo.BISYNC_BACKUP_LOCATION_TABLE_NAME, null,
+                createV16MigrationBackupLocation("migration-backup-v16", 123L));
+        versionSixteen.setVersion(16);
+        versionSixteen.close();
+
+        DatabaseHandler handler = new DatabaseHandler(testContext);
+        SQLiteDatabase upgraded = handler.getWritableDatabase();
+        try {
+            assertEquals(DatabaseInfo.DATABASE_VERSION, upgraded.getVersion());
+            assertRunFilterSnapshotColumnExists(upgraded);
+            assertMigrationColumnExists(upgraded, DatabaseInfo.BISYNC_PREFLIGHT_TABLE_NAME,
+                    DatabaseInfo.BISYNC_PREFLIGHT_COLUMN_OBSERVATION_FINGERPRINT);
+            assertMigrationTableExists(upgraded, DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME);
+            assertMigrationTableExists(upgraded, DatabaseInfo.BISYNC_BACKUP_LOCATION_TABLE_NAME);
+            assertMigrationIndexExists(upgraded, "bisync_backup_one_unresolved_profile");
+            assertMigrationIndexExists(upgraded, "bisync_backup_history");
+            assertMigrationIndexDefinition(upgraded, "bisync_backup_one_unresolved_profile",
+                    "CREATE UNIQUE INDEX", "ON " + DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME
+                            + "(" + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_ID + ")",
+                    "WHERE " + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_STATUS
+                            + " IN ('PENDING_VALIDATION','BACKUP_VERIFIED','MUTATION_IN_PROGRESS',"
+                            + "'RECOVERY_REQUIRED','RESTORE_REQUIRED','RESTORE_IN_PROGRESS','INVALIDATED')");
+            assertMigrationIndexDefinition(upgraded, "bisync_backup_history",
+                    "CREATE INDEX", "ON " + DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME + "("
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_ID + ","
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_CREATED_AT + " DESC)");
+            assertNoMigrationForeignKeyViolations(upgraded);
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OPERATION_ID + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_RUN_ID + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_ID + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_REVISION + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_ENGINE_REF + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_STATE_VERSION + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREFLIGHT_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OBSERVATION_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREVIEW_ID + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREVIEW_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREFLIGHT_CHECKED_AT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_INITIALIZATION_MODE + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_FILTER_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_COMPARISON_MODE + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_MAX_DELETE_PERCENT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_MAX_DELETE_COUNT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_USER_CONFIRMED_AT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OWNER_TOKEN + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OWNER_GENERATION + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_STATUS + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_CREATED_AT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_UPDATED_AT + " FROM "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OPERATION_ID + " = ?",
+                    new String[]{"migration-backup-v16"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals("migration-backup-v16", cursor.getString(0));
+                assertEquals("migration-active-run-v16", cursor.getString(1));
+                assertEquals("migration-profile-v16", cursor.getString(2));
+                assertEquals(1L, cursor.getLong(3));
+                assertEquals(repeat('a', 64), cursor.getString(4));
+                assertEquals("rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0", cursor.getString(5));
+                assertEquals(1, cursor.getInt(6));
+                assertEquals(repeat('b', 64), cursor.getString(7));
+                assertEquals(repeat('c', 64), cursor.getString(8));
+                assertEquals("migration-preview-v16", cursor.getString(9));
+                assertEquals(repeat('d', 64), cursor.getString(10));
+                assertEquals(123L, cursor.getLong(11));
+                assertEquals("path1", cursor.getString(12));
+                assertEquals(repeat('e', 64), cursor.getString(13));
+                assertEquals("SIZE_AND_MODTIME", cursor.getString(14));
+                assertEquals(25, cursor.getInt(15));
+                assertEquals(100, cursor.getInt(16));
+                assertEquals(123L, cursor.getLong(17));
+                assertEquals("migration-backup-owner", cursor.getString(18));
+                assertEquals(1L, cursor.getLong(19));
+                assertEquals("BACKUP_VERIFIED", cursor.getString(20));
+                assertEquals(123L, cursor.getLong(21));
+                assertEquals(123L, cursor.getLong(22));
+            }
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_OPERATION_ID + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_SIDE + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_ACCOUNT_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_ENDPOINT_SCOPE_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_BACKUP_SCOPE_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_LOCATOR + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_LOCATOR_FINGERPRINT + ", "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_CREATED_AT + " FROM "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_OPERATION_ID + " = ?",
+                    new String[]{"migration-backup-v16"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals("migration-backup-v16", cursor.getString(0));
+                assertEquals("LEFT", cursor.getString(1));
+                assertEquals(repeat('f', 64), cursor.getString(2));
+                assertEquals(repeat('1', 64), cursor.getString(3));
+                assertEquals(repeat('2', 64), cursor.getString(4));
+                assertEquals("disposable/v16-backup", cursor.getString(5));
+                assertEquals(repeat('3', 64), cursor.getString(6));
+                assertEquals(123L, cursor.getLong(7));
+            }
+            try (android.database.Cursor cursor = upgraded.rawQuery(
+                    "SELECT " + DatabaseInfo.RUN_COLUMN_PROFILE_ID + ", "
+                            + DatabaseInfo.RUN_COLUMN_STATE + ", "
+                            + DatabaseInfo.RUN_COLUMN_OWNER_TOKEN + ", "
+                            + DatabaseInfo.RUN_COLUMN_REQUESTED_AT + ", "
+                            + DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT + " FROM "
+                            + DatabaseInfo.RUN_TABLE_NAME + " WHERE "
+                            + DatabaseInfo.RUN_COLUMN_ID + " = ?",
+                    new String[]{"migration-active-run-v16"})) {
+                assertTrue(cursor.moveToFirst());
+                assertEquals("migration-profile-v16", cursor.getString(0));
+                assertEquals("RUNNING", cursor.getString(1));
+                assertEquals("migration-owner-migration-active-run-v16", cursor.getString(2));
+                assertEquals(123L, cursor.getLong(3));
+                assertTrue(cursor.isNull(4));
+            }
+            assertEquals(1L, DatabaseUtils.longForQuery(upgraded,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='index' "
+                            + "AND name='run_one_active_profile'", null));
+            try {
+                upgraded.insertOrThrow(DatabaseInfo.RUN_TABLE_NAME, null,
+                        createMigrationRun("migration-duplicate-active-run-v16",
+                                "migration-profile-v16", 124L));
+                fail("migration must preserve the unique active-run owner index");
+            } catch (SQLiteConstraintException expected) {
+                // The existing RUNNING row still owns the profile after upgrade.
+            }
         } finally {
             upgraded.close();
             handler.close();
@@ -794,5 +975,404 @@ public class ResourceClaimRepositoryTest {
         char[] values = new char[count];
         java.util.Arrays.fill(values, value);
         return new String(values);
+    }
+
+    /**
+     * The v13-v15 preflight schema is the v12 base table plus the three columns added before
+     * version 13. The observation fingerprint is a v16 migration and must stay absent here.
+     */
+    private static void createPreV17RunsTable(SQLiteDatabase database) {
+        String currentSchema = DatabaseInfo.Companion.getSQL_CREATE_TABLE_RUNS();
+        String filterSnapshotColumn = DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT + " TEXT,";
+        if (!currentSchema.contains(filterSnapshotColumn)) {
+            throw new AssertionError("current run schema no longer contains the v17 column to omit");
+        }
+        String createRuns = currentSchema.replace(filterSnapshotColumn, "");
+        database.execSQL(createRuns);
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_ACTIVE_RUN());
+    }
+
+    private static void insertMigrationProfile(SQLiteDatabase database, String profileId) {
+        ContentValues profile = new ContentValues();
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ID, profileId);
+        profile.put(DatabaseInfo.PROFILE_COLUMN_REVISION, 1);
+        profile.put(DatabaseInfo.PROFILE_COLUMN_TITLE, "Migration profile");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_MODE, "BISYNC");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ENDPOINT, "endpoint-fingerprint");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_SETTINGS, "settings-fingerprint");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_FINGERPRINT, "profile-fingerprint");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_ENGINE,
+                "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_READINESS, "BLOCKED");
+        profile.put(DatabaseInfo.PROFILE_COLUMN_CREATED_AT, 1L);
+        profile.put(DatabaseInfo.PROFILE_COLUMN_UPDATED_AT, 1L);
+        database.insertOrThrow(DatabaseInfo.PROFILE_TABLE_NAME, null, profile);
+    }
+
+    private static ContentValues createMigrationRun(String runId, String profileId, long requestedAt) {
+        return createMigrationRun(runId, profileId, requestedAt, 1L, "profile-fingerprint");
+    }
+
+    private static ContentValues createMigrationRun(
+            String runId,
+            String profileId,
+            long requestedAt,
+            long profileRevision,
+            String profileFingerprint
+    ) {
+        ContentValues run = new ContentValues();
+        run.put(DatabaseInfo.RUN_COLUMN_ID, runId);
+        run.put(DatabaseInfo.RUN_COLUMN_PROFILE_ID, profileId);
+        run.put(DatabaseInfo.RUN_COLUMN_PROFILE_REVISION, profileRevision);
+        run.put(DatabaseInfo.RUN_COLUMN_PROFILE_FINGERPRINT, profileFingerprint);
+        run.put(DatabaseInfo.RUN_COLUMN_REQUESTED_MODE, "BISYNC");
+        run.put(DatabaseInfo.RUN_COLUMN_ENDPOINT, "endpoint-fingerprint");
+        run.put(DatabaseInfo.RUN_COLUMN_SETTINGS, "settings-fingerprint");
+        run.put(DatabaseInfo.RUN_COLUMN_ENGINE,
+                "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
+        run.put(DatabaseInfo.RUN_COLUMN_STATE, "RUNNING");
+        run.putNull(DatabaseInfo.RUN_COLUMN_REASON);
+        run.put(DatabaseInfo.RUN_COLUMN_REQUESTED_AT, requestedAt);
+        run.put(DatabaseInfo.RUN_COLUMN_STARTED_AT, requestedAt);
+        run.put(DatabaseInfo.RUN_COLUMN_OWNER_TOKEN, "migration-owner-" + runId);
+        run.put(DatabaseInfo.RUN_COLUMN_OWNER_GENERATION, 7L);
+        run.put(DatabaseInfo.RUN_COLUMN_CANCEL_REQUESTED, 0);
+        run.put(DatabaseInfo.RUN_COLUMN_CREATED_AT, requestedAt);
+        run.put(DatabaseInfo.RUN_COLUMN_UPDATED_AT, requestedAt);
+        return run;
+    }
+
+    private static void assertMigrationRunRetained(
+            SQLiteDatabase database,
+            String runId,
+            String profileId,
+            long requestedAt
+    ) {
+        try (android.database.Cursor cursor = database.rawQuery(
+                "SELECT " + DatabaseInfo.RUN_COLUMN_PROFILE_ID + ", "
+                        + DatabaseInfo.RUN_COLUMN_STATE + ", "
+                        + DatabaseInfo.RUN_COLUMN_OWNER_TOKEN + ", "
+                        + DatabaseInfo.RUN_COLUMN_OWNER_GENERATION + ", "
+                        + DatabaseInfo.RUN_COLUMN_REQUESTED_AT + ", "
+                        + DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT + " FROM "
+                        + DatabaseInfo.RUN_TABLE_NAME + " WHERE "
+                        + DatabaseInfo.RUN_COLUMN_ID + " = ?",
+                new String[]{runId})) {
+            assertTrue(cursor.moveToFirst());
+            assertEquals(profileId, cursor.getString(0));
+            assertEquals("RUNNING", cursor.getString(1));
+            assertEquals("migration-owner-" + runId, cursor.getString(2));
+            assertEquals(7L, cursor.getLong(3));
+            assertEquals(requestedAt, cursor.getLong(4));
+            assertTrue(cursor.isNull(5));
+        }
+    }
+
+    private static void assertRunFilterSnapshotColumnExists(SQLiteDatabase database) {
+        assertMigrationColumnExists(database, DatabaseInfo.RUN_TABLE_NAME,
+                DatabaseInfo.RUN_COLUMN_FILTER_SNAPSHOT);
+    }
+
+    private static void assertMigrationColumnExists(
+            SQLiteDatabase database,
+            String tableName,
+            String columnName
+    ) {
+        boolean foundColumn = false;
+        try (android.database.Cursor cursor =
+                     database.rawQuery("PRAGMA table_info(" + tableName + ")", null)) {
+            while (cursor.moveToNext()) {
+                if (columnName.equals(cursor.getString(1))) {
+                    foundColumn = true;
+                    break;
+                }
+            }
+        }
+        assertTrue(foundColumn);
+    }
+
+    private static void assertMigrationTableExists(SQLiteDatabase database, String tableName) {
+        assertEquals(1L, DatabaseUtils.longForQuery(database,
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?",
+                new String[]{tableName}));
+    }
+
+    private static void assertMigrationIndexExists(SQLiteDatabase database, String indexName) {
+        assertEquals(1L, DatabaseUtils.longForQuery(database,
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?",
+                new String[]{indexName}));
+    }
+
+    private static void assertMigrationIndexDefinition(
+            SQLiteDatabase database,
+            String indexName,
+            String... expectedFragments
+    ) {
+        String sql = DatabaseUtils.stringForQuery(database,
+                "SELECT sql FROM sqlite_master WHERE type='index' AND name=?",
+                new String[]{indexName});
+        assertTrue(sql != null);
+        String normalizedSql = sql.replaceAll("\\s+", " ").toUpperCase(java.util.Locale.ROOT);
+        for (String expectedFragment : expectedFragments) {
+            String normalizedFragment = expectedFragment.replaceAll("\\s+", " ")
+                    .toUpperCase(java.util.Locale.ROOT);
+            assertTrue("missing SQL fragment in index " + indexName + ": " + expectedFragment,
+                    normalizedSql.contains(normalizedFragment));
+        }
+    }
+
+    private static void assertNoMigrationForeignKeyViolations(SQLiteDatabase database) {
+        try (android.database.Cursor cursor = database.rawQuery("PRAGMA foreign_key_check", null)) {
+            assertEquals(0, cursor.getCount());
+        }
+    }
+
+    private static void createV15PreviewSchema(SQLiteDatabase database) {
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_BISYNC_PREVIEWS());
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW());
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY());
+    }
+
+    /** Exact v14 preview DDL, before commit 7daef06 added initialization_mode in schema v15. */
+    private static void createV14PreviewSchema(SQLiteDatabase database) {
+        String table = DatabaseInfo.BISYNC_PREVIEW_TABLE_NAME;
+        String schema = "CREATE TABLE IF NOT EXISTS " + table + " ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID + " TEXT PRIMARY KEY NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID + " TEXT NOT NULL REFERENCES "
+                + DatabaseInfo.PROFILE_TABLE_NAME + "(" + DatabaseInfo.PROFILE_COLUMN_ID + ") ON DELETE CASCADE,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_REVISION + " INTEGER NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_REVISION + " > 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_FINGERPRINT + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ENGINE_REF + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATE_VERSION + " INTEGER NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATE_VERSION + " > 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_LEFT_ACCOUNT + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_LEFT_SCOPE + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_RIGHT_ACCOUNT + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_RIGHT_SCOPE + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FILTER + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPARISON + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_PERCENT + " INTEGER NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_PERCENT + " BETWEEN 1 AND 100),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_COUNT + " INTEGER NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_COUNT + " > 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + " TEXT NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + " IN ('ABSENT','COMPATIBLE')),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE + " TEXT,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_IDENTITY_FINGERPRINT + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + " TEXT NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS
+                + " IN ('QUEUED','RUNNING','COMPLETE','INCOMPLETE','UNAVAILABLE','CANCELLED','STALE','INTERRUPTED','RECOVERY_REQUIRED')),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_TOKEN + " TEXT NOT NULL,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + " INTEGER NOT NULL DEFAULT 0 CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION + " >= 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT + " INTEGER NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT + " > 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " INTEGER,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE + " TEXT,"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS + " TEXT CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS + " IN ('COMPLETE','INCOMPLETE')),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS + " INTEGER CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS + " >= 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES + " INTEGER CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES + " >= 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES + " INTEGER CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES + " >= 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES + " INTEGER CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES + " >= 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT + " INTEGER CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT + " >= 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_CONFLICTS_KNOWN + " INTEGER NOT NULL DEFAULT 0 CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_CONFLICTS_KNOWN + " = 0),"
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT + " INTEGER NOT NULL CHECK ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT + " > 0),"
+                + "CHECK ((" + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + " = 'ABSENT' AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE + " IS NULL) OR ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE + " = 'COMPATIBLE' AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE + " IS NOT NULL)),"
+                + "CHECK ((" + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + " = 'COMPLETE' AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS + " = 'COMPLETE' AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT + " = 0 AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " IS NOT NULL) OR ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + " = 'INCOMPLETE' AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS + " = 'INCOMPLETE' AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " IS NOT NULL) OR ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + " = 'UNAVAILABLE' AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS + " IS NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE + " IS NOT NULL AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " IS NOT NULL) OR ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS + " IN ('STALE','CANCELLED') AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " IS NOT NULL) OR ("
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS
+                + " IN ('QUEUED','RUNNING','INTERRUPTED','RECOVERY_REQUIRED') AND "
+                + DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT + " IS NULL)))";
+        database.execSQL(schema);
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_ACTIVE_BISYNC_PREVIEW());
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_BISYNC_PREVIEW_HISTORY());
+    }
+
+    private static ContentValues createV14MigrationPreview(
+            String previewId,
+            String profileId,
+            String status,
+            long requestedAt,
+            Long startedAt,
+            long updatedAt
+    ) {
+        ContentValues preview = new ContentValues();
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID, previewId);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID, profileId);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_REVISION, 1L);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_FINGERPRINT, "profile-fingerprint");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ENGINE_REF,
+                "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATE_VERSION, 1);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_LEFT_ACCOUNT, repeat('a', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_LEFT_SCOPE, repeat('b', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_RIGHT_ACCOUNT, repeat('c', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_RIGHT_SCOPE, repeat('d', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_FILTER, "");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPARISON, "SIZE_AND_MODTIME");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_PERCENT, 25);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_COUNT, 100);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE, "ABSENT");
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_IDENTITY_FINGERPRINT, "legacy-identity");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS, status);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_TOKEN,
+                "migration-preview-owner-" + previewId);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION, 1L);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT, requestedAt);
+        if (startedAt == null) {
+            preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT);
+        } else {
+            preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT, startedAt);
+        }
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_CONFLICTS_KNOWN, 0);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT, updatedAt);
+        return preview;
+    }
+
+    private static ContentValues createV16MigrationPreview(
+            String previewId,
+            String profileId,
+            long timestamp
+    ) {
+        ContentValues preview = new ContentValues();
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ID, previewId);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_ID, profileId);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_REVISION, 1L);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PROFILE_FINGERPRINT, repeat('a', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ENGINE_REF,
+                "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATE_VERSION, 1);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_LEFT_ACCOUNT, repeat('b', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_LEFT_SCOPE, repeat('c', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_RIGHT_ACCOUNT, repeat('d', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_RIGHT_SCOPE, repeat('e', 64));
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_FILTER, "");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPARISON, "SIZE_AND_MODTIME");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_PERCENT, 25);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_MAX_DELETE_COUNT, 100);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_NATIVE_STATE, "COMPATIBLE");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ACCEPTED_BASELINE, "accepted-baseline");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_IDENTITY_FINGERPRINT, "legacy-identity");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STATUS, "STALE");
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_TOKEN,
+                "migration-preview-owner-" + previewId);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_OWNER_GENERATION, 2L);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_REQUESTED_AT, timestamp);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_STARTED_AT, timestamp);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_COMPLETED_AT, timestamp);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_FAILURE_CODE, "MIGRATION_FIXTURE");
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_SUMMARY_STATUS);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_TRANSFERS);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_BYTES);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_FILE_DELETES);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_PLANNED_DIRECTORY_DELETES);
+        preview.putNull(DatabaseInfo.BISYNC_PREVIEW_COLUMN_ERROR_COUNT);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_CONFLICTS_KNOWN, 0);
+        preview.put(DatabaseInfo.BISYNC_PREVIEW_COLUMN_UPDATED_AT, timestamp);
+        return preview;
+    }
+
+    private static ContentValues createV16MigrationBackupManifest(
+            String operationId,
+            String runId,
+            String profileId,
+            String previewId,
+            long timestamp
+    ) {
+        ContentValues manifest = new ContentValues();
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OPERATION_ID, operationId);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_RUN_ID, runId);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_ID, profileId);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_REVISION, 1L);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PROFILE_FINGERPRINT, repeat('a', 64));
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_ENGINE_REF,
+                "rclone:1.76.0@fe775a8b58cf217fdf4bd34f0975af1e4c19c1a0");
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_STATE_VERSION, 1);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREFLIGHT_FINGERPRINT, repeat('b', 64));
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OBSERVATION_FINGERPRINT, repeat('c', 64));
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREVIEW_ID, previewId);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREVIEW_FINGERPRINT, repeat('d', 64));
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_PREFLIGHT_CHECKED_AT, timestamp);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_INITIALIZATION_MODE, "path1");
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_FILTER_FINGERPRINT, repeat('e', 64));
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_COMPARISON_MODE, "SIZE_AND_MODTIME");
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_MAX_DELETE_PERCENT, 25);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_MAX_DELETE_COUNT, 100);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_USER_CONFIRMED_AT, timestamp);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OWNER_TOKEN, "migration-backup-owner");
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_OWNER_GENERATION, 1L);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_STATUS, "BACKUP_VERIFIED");
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_CREATED_AT, timestamp);
+        manifest.put(DatabaseInfo.BISYNC_BACKUP_MANIFEST_COLUMN_UPDATED_AT, timestamp);
+        return manifest;
+    }
+
+    private static ContentValues createV16MigrationBackupLocation(String operationId, long timestamp) {
+        ContentValues location = new ContentValues();
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_OPERATION_ID, operationId);
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_SIDE, "LEFT");
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_ACCOUNT_FINGERPRINT, repeat('f', 64));
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_ENDPOINT_SCOPE_FINGERPRINT, repeat('1', 64));
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_BACKUP_SCOPE_FINGERPRINT, repeat('2', 64));
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_LOCATOR, "disposable/v16-backup");
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_LOCATOR_FINGERPRINT, repeat('3', 64));
+        location.put(DatabaseInfo.BISYNC_BACKUP_LOCATION_COLUMN_CREATED_AT, timestamp);
+        return location;
+    }
+
+    private static void createV16BackupTables(SQLiteDatabase database) {
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_BISYNC_BACKUP_MANIFESTS());
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_BISYNC_BACKUP_LOCATIONS());
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_ACTIVE_BISYNC_BACKUP_PROFILE());
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_INDEX_BISYNC_BACKUP_HISTORY());
+    }
+
+    private static void createPreV16PreflightTable(SQLiteDatabase database) {
+        database.execSQL(DatabaseInfo.Companion.getSQL_CREATE_TABLE_BISYNC_PREFLIGHT());
+        database.execSQL(DatabaseInfo.Companion.getSQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE());
+        database.execSQL(DatabaseInfo.Companion.getSQL_UPDATE_BISYNC_PREFLIGHT_ADD_NATIVE_STATE_REASON());
+        database.execSQL(DatabaseInfo.Companion.getSQL_UPDATE_BISYNC_PREFLIGHT_ADD_RECOVERY_LISTINGS_VALID());
     }
 }

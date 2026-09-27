@@ -219,16 +219,64 @@ public final class NativeExecutionHandle implements AutoCloseable {
     }
 
     /**
+     * Launches native work and transfers a pre-acquired owner to the handle before returning.
+     * If the starter throws before returning a Process, the owner is deliberately not closed:
+     * callers cannot infer from a missing handle that no child escaped during process creation.
+     */
+    public static NativeExecutionHandle launchOwned(String[] command, String[] environment,
+            String label, @Nullable AutoCloseable owner) throws IOException {
+        return launchOwned(command, environment, label, owner,
+                (launchCommand, launchEnvironment) ->
+                        Runtime.getRuntime().exec(launchCommand, launchEnvironment));
+    }
+
+    /** Process-creation seam for package tests of the no-handle ownership boundary. */
+    interface ProcessStarter {
+        Process start(String[] command, String[] environment) throws IOException;
+    }
+
+    static NativeExecutionHandle launchOwned(String[] command, String[] environment,
+            String label, @Nullable AutoCloseable owner, ProcessStarter starter) throws IOException {
+        if (starter == null) {
+            throw new NullPointerException("process starter is required");
+        }
+        Process process = starter.start(command, environment);
+        if (process == null) {
+            // A null handle after crossing the launch boundary is ambiguous just like a thrown
+            // process-construction failure; preserve the pre-acquired owner.
+            throw new IOException("Native process starter returned no process handle");
+        }
+
+        NativeExecutionHandle execution = new NativeExecutionHandle(
+                process, label, DEFAULT_TERMINATION_GRACE_MILLIS);
+        if (!execution.attachResource(owner)) {
+            Outcome stopped = execution.cancelAndAwait(null, null);
+            if (stopped.isConfirmed() && owner != null) {
+                try {
+                    owner.close();
+                } catch (Exception releaseFailure) {
+                    FLog.e("NativeExecution", label + " owner release failed", releaseFailure);
+                }
+            }
+            throw new IOException("Unable to attach native execution owner");
+        }
+        return execution;
+    }
+
+    /**
      * Attaches a resource such as a wake/Wi-Fi lock. It is closed only after confirmed reap.
-     * Returns false when the process has already reached a terminal state; in that case the
-     * caller remains responsible for the resource.
+     * A bounded UNCONFIRMED result still permits late resource attachment until release begins;
+     * this lets owners register cleanup with the background reaper. Returns false once resources
+     * are already being released, at which point process exit is confirmed.
      */
     public boolean attachResource(@Nullable AutoCloseable resource) {
         if (resource == null) {
             return true;
         }
         synchronized (resourceLock) {
-            if (terminalAccepted.get()) {
+            Outcome terminal = outcome;
+            if (resourcesReleased.get() ||
+                    (terminalAccepted.get() && terminal != null && terminal.isConfirmed())) {
                 return false;
             }
             resources.add(resource);
@@ -423,6 +471,12 @@ public final class NativeExecutionHandle implements AutoCloseable {
     /** A later reap may confirm exit after a bounded caller reported UNCONFIRMED. */
     public boolean hasConfirmedReap() {
         return processReaped.getCount() == 0L && !isProcessAlive(process);
+    }
+
+    /** True only after the process exit is confirmed, including a late background reap. */
+    public boolean isExitConfirmed() {
+        Outcome terminal = outcome;
+        return (terminal != null && terminal.isConfirmed()) || hasConfirmedReap();
     }
 
     private boolean startPumps(@Nullable LineSink stdoutSink, @Nullable LineSink stderrSink) {

@@ -8,9 +8,7 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +25,7 @@ import java.util.Collections;
 
 public class SyncLog {
 
+    private static final String TAG = "SyncLog";
     private static int loglength = 4;
     private static final long MAX_LOG_BYTES = 1024L * 1024L;
 
@@ -40,15 +39,11 @@ public class SyncLog {
     public static ArrayList<JSONObject> getLog(Context c){
         File log = new File(c.getFilesDir().getPath() + "/sync.log");
         StringBuilder file = new StringBuilder();
-        try {
-            char[] buffer = new char[4096];
-            InputStream inputStream = new FileInputStream(log);
-            Reader in = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-            for (int numRead; (numRead = in.read(buffer, 0, buffer.length)) > 0; ) {
-                file.append(buffer, 0, numRead);
-            }
+        try (Reader in = new InputStreamReader(new FileInputStream(log), StandardCharsets.UTF_8)) {
+            file.append(BoundedTextReader.read(in, (int) MAX_LOG_BYTES));
         } catch (IOException e) {
-            e.printStackTrace();
+            FLog.e(TAG, "Unable to read persisted sync log", e);
+            return new ArrayList<>();
         }
 
         String lines[] = file.toString().split("\\r?\\n");
@@ -67,17 +62,13 @@ public class SyncLog {
     private static void appendLog(Context c, String entry){
 
         File log = new File(c.getFilesDir().getPath() + "/sync.log");
-        if (log.length() > MAX_LOG_BYTES && (!log.delete() || log.exists())) {
-            return;
-        }
         try {
-            FileWriter writer = new FileWriter(log, true);
-            writer.append(System.lineSeparator());
-            writer.append(entry);
-            writer.flush();
-            writer.close();
+            byte[] record = (System.lineSeparator() + entry).getBytes(StandardCharsets.UTF_8);
+            if (!BoundedFileAppender.append(log, record, MAX_LOG_BYTES)) {
+                FLog.w(TAG, "Sync log record exceeds the configured size limit");
+            }
         } catch (Exception e){
-            e.printStackTrace();
+            FLog.e(TAG, "Unable to append persisted sync log", e);
         }
     }
 
@@ -90,7 +81,7 @@ public class SyncLog {
             json.put(TITLE, LogRedactor.redact(title));
             json.put(TYPE, type);
         } catch (JSONException e) {
-            e.printStackTrace();
+            FLog.e(TAG, "Unable to serialize sync log entry", e);
         }
         appendLog(c, json.toString());
         return now;
