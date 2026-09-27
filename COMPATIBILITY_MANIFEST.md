@@ -4,7 +4,8 @@
 
 **Current implementation identity:** CloudBridge code commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
 on `Rareities/CloudBridge:codex/luna-implementation`; branch head `5b608a2` adds only
-the reconciled ledgers below. App-native rclone pin
+the reconciled ledgers below; later branch commits are documentation-only provenance
+clarifications. App-native rclone pin
 `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` from `Rareities/rclone:codex/luna-engine-final`
 (branch head `4d6404e`, ledger-only descendant).
 OSS/RS JVM suites are 473/473 with zero failures/errors and two skips per flavor; both debug

@@ -4,8 +4,9 @@
 
 - CloudBridge implementation commit `ddeee759a034b71f0c08697f0cbf17cfba3320e8`
   (`cloudbridge: harden bisync safety and provenance`) is pushed to
-  `Rareities/CloudBridge:codex/luna-implementation`; branch head `5b608a2` adds only the
-  reconciled ledgers below. The implementation commit is intentionally unsigned; no
+  `Rareities/CloudBridge:codex/luna-implementation`; prior ledger checkpoint `5b608a2`
+  and subsequent documentation-only commits add only the reconciled evidence below. The
+  implementation commit is intentionally unsigned; no
   release-signing claim is made. PR creation remains deferred until the user authorizes the
   final PR phase.
 - Current OSS and RS JVM suites both pass from this committed source with JDK 21/Android SDK 36:

@@ -4,7 +4,8 @@
 
 This section supersedes older snapshot rows below. CloudBridge implementation commit
 `ddeee759a034b71f0c08697f0cbf17cfba3320e8` is pushed to
-`Rareities/CloudBridge:codex/luna-implementation` (ledger head `5b608a2`); the engine source pin is
+`Rareities/CloudBridge:codex/luna-implementation` (prior ledger checkpoint `5b608a2`, followed only
+by documentation-only provenance clarifications); the engine source pin is
 `cf3ad40d29d15919af116a5d1e64e0381e2ce3fd` on
 `Rareities/rclone:codex/luna-engine-final` (branch head `4d6404e`, ledger-only descendant).
 
