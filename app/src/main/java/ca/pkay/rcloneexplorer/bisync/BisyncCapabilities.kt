@@ -14,7 +14,7 @@ data class BisyncCapabilitySnapshot(val schemaVersion: Int = 1, val engineSha: S
 object BisyncCapabilities {
     private val required = setOf("workdir", "compare", "check-sync", "max-delete", "conflict-resolve",
         "conflict-loser", "conflict-suffix", "resync", "resync-mode", "check-access", "check-filename",
-        "backup-dir1", "backup-dir2")
+        "backup-dir1", "backup-dir2", "filters-file")
 
     fun parseFlags(help: String): Set<String> =
         Regex("(?m)^\\s+(?:-[A-Za-z],\\s*)?--([a-z][a-z0-9-]*)\\b").findAll(help)

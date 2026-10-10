@@ -28,7 +28,7 @@ object BisyncSession {
         }
         return digest.digest().joinToString("") { "%02x".format(it) }.also { cachedEngineIdentity = it }
     }
-    private fun approvalIdentity(context: Context, task: Task): String {
+    private fun approvalIdentity(context: Context, task: Task, filters: String = BisyncFilters.resolve(context, task)): String {
         val remote = JSONObject(Rclone(context).configDump()).getJSONObject(task.remoteId)
         check(remote.optString("type") == "protondrive") {
             "Initial bisync support requires a native local directory and a Proton Drive remote"
@@ -39,7 +39,7 @@ object BisyncSession {
             .joinToString("") { key -> val value = remote.get(key).toString(); "${key.length}:$key${value.length}:$value" }
         val digest = java.security.MessageDigest.getInstance("SHA-256")
             .digest(values.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
-        return "${BisyncPolicy.fingerprint(task)}:${engineIdentity(context)}:$digest"
+        return "${BisyncPolicy.fingerprint(task)}:${engineIdentity(context)}:${BisyncFilters.digest(filters)}:$digest"
     }
     private fun prefs(context: Context) = context.getSharedPreferences("bisync_state", Context.MODE_PRIVATE)
     private fun root(context: Context, task: Task): File {
@@ -94,6 +94,8 @@ object BisyncSession {
         // Conservatively serialize all app bisync jobs, including aliases/overlapping roots.
         val lease = previewLease(context)
         try {
+            ca.pkay.rcloneexplorer.proton.ProtonAccountState.requireReady(context,
+                Rclone(context).protonAccountIdentity(task.remoteId))
             val p = prefs(context)
             check(!needsReview(context, task)) { "Bisync needs a successful preview and explicit initialization/recovery approval in the task editor" }
             val initialize = p.getString("${task.stableUUID}.state", null) == "approved"
@@ -118,14 +120,23 @@ object BisyncSession {
         } catch (e: Exception) { lease.close(); throw e }
     }
 
-    @JvmStatic fun arguments(context: Context, task: Task, preview: Boolean): ArrayList<String> {
+    @JvmOverloads @JvmStatic fun arguments(context: Context, task: Task, preview: Boolean, expectedIdentity: String? = null): ArrayList<String> {
         val directory = root(context, task)
+        val filters = BisyncFilters.resolve(context, task)
+        if (expectedIdentity != null) check(expectedIdentity == approvalIdentity(context, task, filters)) {
+            "Filter or configuration changed before preview; review again"
+        }
+        if (!preview) check(prefs(context).getString("${task.stableUUID}.fingerprint", null) == approvalIdentity(context, task, filters)) {
+            "Filter or configuration changed; preview and approve initialization again"
+        }
+        val filterFile = BisyncFilters.snapshot(directory, filters)
         val result = arrayListOf("bisync", File(task.localPath).canonicalPath,
             "${task.remoteId}:${task.remotePath}", "--workdir",
             if (preview) File(directory, "preview").apply { mkdirs() }.absolutePath else directory.absolutePath,
             "--protondrive-original-file-size=true", "--protondrive-enable-caching=false",
             "--compare", "size,checksum", "--checksum", "--check-sync", "true", "--max-delete",
             task.bisyncMaxDelete.toString(), "--conflict-resolve", "none", "--conflict-loser", "num")
+        result.addAll(listOf("--filters-file", filterFile.absolutePath))
         if (preview || prefs(context).getBoolean("${task.stableUUID}.initialize", false)) {
             result.addAll(listOf("--resync", "--resync-mode", "path1"))
         }

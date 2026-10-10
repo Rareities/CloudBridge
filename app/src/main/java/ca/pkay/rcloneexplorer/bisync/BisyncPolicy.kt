@@ -5,7 +5,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
-/** Deliberately conservative first release: native local paths and no changing filters. */
+/** Deliberately conservative first release: native local paths and approval-bound filter migration. */
 object BisyncPolicy {
     fun validate(task: Task) {
         UUID.fromString(task.stableUUID)
@@ -15,8 +15,8 @@ object BisyncPolicy {
         require(task.remoteId.isNotBlank() && !task.remoteId.contains(':')) { "Invalid remote" }
         require(task.remotePath.isNotBlank() && !task.remotePath.contains('\u0000')) { "Invalid remote path" }
         require(task.bisyncMaxDelete in 0..25) { "Deletion limit must be between 0 and 25 percent" }
-        require(task.filterId == null && !task.deleteExcluded) {
-            "Bisync filters are not supported until baseline-changing filter migration is implemented"
+        require(!task.deleteExcluded) {
+            "Bisync never deletes excluded files"
         }
         task.transfers?.let { require(it in 1..8) { "Invalid transfer count" } }
         task.bisyncOptions.validate()

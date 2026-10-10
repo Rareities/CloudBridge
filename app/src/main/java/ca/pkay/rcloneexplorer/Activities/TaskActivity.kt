@@ -210,6 +210,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         switchDeleteExcluded.isChecked = existingTask?.deleteExcluded ?: false
         bisyncDeleteLimit.setText((existingTask?.bisyncMaxDelete ?: 10).toString())
         bisyncOptions = existingTask?.bisyncOptions ?: BisyncOptions()
+        findViewById<Button>(R.id.task_proton_account).setOnClickListener { showProtonAccount() }
         findViewById<Button>(R.id.task_bisync_advanced).setOnClickListener { editBisyncOptions() }
         findViewById<Button>(R.id.task_bisync_history).setOnClickListener { showBisyncHistory() }
         findViewById<Button>(R.id.task_bisync_access).setOnClickListener { setupAccessMarkers() }
@@ -301,7 +302,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 BisyncSession.previewLease(this).use {
                     if (previewCancelled) error("Preview canceled")
                     approval = BisyncSession.previewApproval(this, task)
-                    val process = rcloneInstance.bisyncPreview(task)
+                    val process = rcloneInstance.bisyncPreview(task, checkNotNull(approval).identity)
                         ?: error("Cannot start rclone preview")
                     previewProcess = process
                     if (previewCancelled) process.destroy()
@@ -389,8 +390,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
             }
             taskToPopulate.bisyncMaxDelete = percent
             taskToPopulate.md5sum = true
-            if (taskToPopulate.filterId != null || taskToPopulate.deleteExcluded) {
-                Toasty.error(this, "Bisync filters are not yet supported; remove the filter before saving").show()
+            if (taskToPopulate.deleteExcluded) {
+                Toasty.error(this, "Bisync never deletes excluded files; disable that option before saving").show()
                 return null
             }
         }
@@ -521,6 +522,42 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                     } catch (e: Exception) { Toasty.error(this, "Cannot generate validated command").show() }
                 }.show()
         } catch (e: Exception) { Toasty.error(this, e.message ?: "Cannot read history").show() }
+    }
+
+    private fun showProtonAccount() {
+        val task = getTaskValues(existingTask?.id ?: 0) ?: return
+        val code = EditText(this).apply {
+            setHint(R.string.proton_one_time_code)
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            isSaveEnabled = false
+            if (android.os.Build.VERSION.SDK_INT >= 26) importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        }
+        val buttons = AlertDialog.Builder(this).setTitle(R.string.proton_account_action)
+            .setView(code)
+            .setMessage(R.string.proton_account_explanation)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.edit) { _, _ ->
+                startActivity(Intent(this, ca.pkay.rcloneexplorer.RemoteConfig.RemoteConfig::class.java)
+                    .putExtra(ca.pkay.rcloneexplorer.RemoteConfig.RemoteConfig.CONFIG_EDIT_TARGET, task.remoteId))
+            }
+            .setPositiveButton(R.string.proton_reconnect) { _, _ ->
+                val oneTimeCode = code.text.toString().trim()
+                code.text.clear()
+                val waiting = AlertDialog.Builder(this).setMessage(R.string.proton_reconnect)
+                    .setCancelable(false).show()
+                Thread {
+                    val failure = try { Rclone(this).reconnectProtonAccount(task.remoteId, oneTimeCode); null }
+                        catch (e: Exception) { ca.pkay.rcloneexplorer.util.SecretRedactor.redact(e.message ?: "Reconnect failed") }
+                    runOnUiThread {
+                        waiting.dismiss()
+                        if (!isFinishing && !isDestroyed) {
+                            if (failure == null) Toasty.success(this, getString(R.string.proton_verified)).show()
+                            else Toasty.error(this, failure).show()
+                        }
+                    }
+                }.start()
+            }
+        buttons.show()
     }
 
     private fun setupAccessMarkers() {

@@ -704,7 +704,7 @@
     <string name="no_log_entries">No sync log entries yet</string>
     <string name="bisync_delete_limit">Maximum deleted files per side (percent, 0–25)</string>
     <string name="bisync_review_title">Initialize or recover bidirectional sync</string>
-    <string name="bisync_review_explanation">This needs a new baseline. First preview the operation. Initialization combines both folders; when contents conflict, the LOCAL copy wins. Back up both folders before continuing. This is also the recovery path after interruption; it never runs automatically.</string>
+    <string name="bisync_review_explanation">This needs a new baseline, including when filter rules change. Excluded files remain untouched. First preview the operation. Initialization combines both folders; when contents conflict, the LOCAL copy wins. Back up both folders before continuing. This is also the recovery path after interruption; it never runs automatically.</string>
     <string name="bisync_preview">Preview initialization</string>
     <string name="bisync_preview_running">Reading both folders without transferring or deleting files…</string>
     <string name="bisync_approve_title">Review initialization plan</string>
@@ -771,4 +771,10 @@
     <string name="vault_requires_screen_lock">Set a secure device screen lock before using authenticated mode.</string>
     <string name="vault_mode_changed">Configuration unlock mode updated.</string>
     <string name="vault_mode_failed">Configuration is locked or could not be updated. Confirm your device credential, stop transfers or restore a protected backup.</string>
+    <string name="proton_account_action">Proton account and reconnect</string>
+    <string name="proton_needs_action">Proton jobs paused. Open the task editor to review login, reconnect, or complete verification in the official client.</string>
+    <string name="proton_account_explanation">This integration is unofficial. Complete CAPTCHA or human verification in Proton’s official client. Edit login details for two-password or 2FA changes; prefer a one-time code over storing an authenticator seed. Reconnect resets the cached session and verifies a read-only root listing. Paused jobs stay paused until verification succeeds. A bisync recovery still needs its own preview and approval.</string>
+    <string name="proton_reconnect">Reconnect and verify</string>
+    <string name="proton_verified">Account verified. Paused jobs may be queued again; review bisync recovery separately.</string>
+    <string name="proton_one_time_code">One-time 2FA code (optional; never saved)</string>
 </resources>

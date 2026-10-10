@@ -60,7 +60,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
 
     internal enum class FAILURE_REASON {
-        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION, DEADLINE
+        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION, DEADLINE, NEEDS_USER_ACTION
     }
 
     // Objects
@@ -90,6 +90,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private var nativeExitCode: Int? = null
     private var deferred = false
     private var temporaryExit = false
+    private var protonIdentity: String? = null
+    private var protonAction: ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action? = null
     private val automaticPolicy by lazy {
         inputData.getString("schedule_policy")?.let {
             Json.decodeFromString<ca.pkay.rcloneexplorer.scheduling.SchedulePolicy>(it).also { policy -> policy.validate() }
@@ -125,6 +127,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 mTask = task
                 if (!isStopped) handleTask() else failureReason = FAILURE_REASON.CANCELLED
             }
+        } catch (e: ca.pkay.rcloneexplorer.proton.ProtonAccountState.NeedsUserAction) {
+            failureReason = FAILURE_REASON.NEEDS_USER_ACTION
         } catch (e: InterruptedException) {
             failureReason = FAILURE_REASON.CANCELLED
             Thread.currentThread().interrupt()
@@ -189,6 +193,11 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             return
         }
         if(arePreconditionsMet()) {
+            // Only classify a job with one direct cloud endpoint; never attribute another provider's error.
+            if (mTask.direction != SyncDirectionObject.SYNC_REMOTE_TO_REMOTE && mTask.direction != SyncDirectionObject.COPY_REMOTE_TO_REMOTE) {
+                protonIdentity = mRclone.protonAccountIdentity(mTask.remoteId)
+                ca.pkay.rcloneexplorer.proton.ProtonAccountState.requireReady(mContext, protonIdentity)
+            }
             val transferLocks = TransferLocks.acquire(mContext, "sync")
             var bisyncRun: ca.pkay.rcloneexplorer.bisync.BisyncSession.Run? = null
             var bisyncSucceeded = false
@@ -197,7 +206,13 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 if (mTask.direction != SyncDirectionObject.SYNC_BIDIRECTIONAL) {
                     mutationLease = ca.pkay.rcloneexplorer.bisync.BisyncSession.previewLease(mContext)
                 }
-                if (mTask.direction != SyncDirectionObject.SYNC_BIDIRECTIONAL) checkQueuedConfiguration()
+                if (mTask.direction != SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+                    checkQueuedConfiguration()
+                    if (mTask.direction != SyncDirectionObject.SYNC_REMOTE_TO_REMOTE && mTask.direction != SyncDirectionObject.COPY_REMOTE_TO_REMOTE) {
+                        protonIdentity = mRclone.protonAccountIdentity(mTask.remoteId)
+                        ca.pkay.rcloneexplorer.proton.ProtonAccountState.requireReady(mContext, protonIdentity)
+                    }
+                }
                 val taskFilter = if(mTask.filterId != null ) mDatabase.getFilter(mTask.filterId!!) else null;
                 val taskFilterList = taskFilter?.getFilters() ?: ArrayList()
                 val isCloudToCloud = mTask.direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
@@ -285,6 +300,11 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 val exitCode = ProcessMonitor.await(localProcessReference) { line ->
                     try {
                         val logline = JSONObject(line)
+                        if (protonIdentity != null && logline.optString("level").lowercase() in listOf("error", "fatal")) {
+                            val classified = ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.classify(
+                                logline.optString("error").ifBlank { logline.optString("msg") })
+                            if (classified != null) protonAction = classified
+                        }
                         for (key in listOf("msg", "error")) {
                             if (logline.has(key)) logline.put(key,
                                 ca.pkay.rcloneexplorer.util.SecretRedactor.redact(logline.optString(key)))
@@ -305,6 +325,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                     }
                 }
                 nativeExitCode = exitCode
+                if (exitCode != 0 && protonIdentity != null && protonAction != null && !isStopped) {
+                    ca.pkay.rcloneexplorer.proton.ProtonAccountState.pause(mContext, protonIdentity!!, protonAction!!)
+                    failureReason = FAILURE_REASON.NEEDS_USER_ACTION
+                }
                 temporaryExit = exitCode == 5 && failureReason == FAILURE_REASON.NO_FAILURE
                 if (exitCode != 0 && failureReason == FAILURE_REASON.NO_FAILURE) {
                     failureReason = FAILURE_REASON.RCLONE_ERROR
@@ -333,6 +357,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         if (silentRun) {
             return
         }
+        if (failureReason == FAILURE_REASON.NEEDS_USER_ACTION && protonIdentity != null &&
+            !ca.pkay.rcloneexplorer.proton.ProtonAccountState.consumeNotification(mContext, protonIdentity!!)) return
 
         val notificationId = System.currentTimeMillis().toInt()
 
@@ -347,6 +373,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 showCancelledNotification(notificationId)
                 endNotificationAlreadyPosted = true
                 return
+            }
+            FAILURE_REASON.NEEDS_USER_ACTION -> {
+                content = mContext.getString(R.string.proton_needs_action)
             }
             FAILURE_REASON.DEADLINE -> {
                 content = "Runtime limit reached; review the run before trying again"
@@ -370,7 +399,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 content = mContext.getString(R.string.operation_failed_unsupported_direction, mTitle)
             }
         }
-        if (::mTask.isInitialized) followupTask(mTask.onFailFollowup)
+        if (::mTask.isInitialized && failureReason != FAILURE_REASON.NEEDS_USER_ACTION) followupTask(mTask.onFailFollowup)
         showFailNotification(notificationId, content)
         endNotificationAlreadyPosted = true
     }

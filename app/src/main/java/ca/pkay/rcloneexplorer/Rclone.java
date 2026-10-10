@@ -942,17 +942,72 @@ public class Rclone {
         }
     }
 
+    /** Bounded local config inspection; never persist account names or credential material. */
+    public String protonAccountIdentity(String remote) throws IOException {
+        Captured config = capture(createCommand("config", "dump"), getRcloneEnv(), 4 * 1024 * 1024, 30000);
+        if (config.exit != 0) throw new IOException("Account configuration could not be read");
+        try {
+            JSONObject entry = new JSONObject(config.text).getJSONObject(remote);
+            if (!entry.optString("type").equals("protondrive")) return null;
+            return ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.INSTANCE.identity(entry.optString("username"));
+        } catch (JSONException | IllegalArgumentException invalid) {
+            throw new IOException("Account configuration is incomplete");
+        }
+    }
+
+    /** Explicit reconnect only: discard cached session, then verify a read-only listing. */
+    public void reconnectProtonAccount(String remote) throws IOException {
+        reconnectProtonAccount(remote, "");
+    }
+
+    public void reconnectProtonAccount(String remote, String oneTimeCode) throws IOException {
+        if (!oneTimeCode.isEmpty() && !oneTimeCode.matches("[0-9]{6}")) throw new IOException("Enter a six-digit one-time code");
+        ensureConfigEncrypted();
+        boolean epochAdvanced = false;
+        try (java.io.Closeable admission = ca.pkay.rcloneexplorer.util.OperationAdmission.configurationLease(
+                new File(context.getFilesDir(), "bisync-admission.lock"))) {
+            RcloneRcd.quiesceForConfigurationChange();
+            String identity = protonAccountIdentity(remote);
+            if (identity == null) throw new IOException("Select a direct Proton Drive remote");
+            // Keep jobs paused if reconnect is cancelled or any verification step fails.
+            ca.pkay.rcloneexplorer.proton.ProtonAccountState.INSTANCE.pause(context, identity,
+                    ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action.RECONNECT);
+            ca.pkay.rcloneexplorer.util.ConfigEpoch.advance(context);
+            epochAdvanced = true;
+            Captured reset = capture(createCommand("config", "update", remote,
+                    "client_uid", "", "client_access_token", "", "client_refresh_token", "",
+                    "client_salted_key_pass", "", "client_token_generation", "", "--non-interactive"),
+                    getRcloneEnv(), 65536, 30000);
+            if (reset.exit != 0) throw new IOException("Proton session reset failed; jobs remain paused");
+            ArrayList<String> verifyEnvironment = new ArrayList<>();
+            Collections.addAll(verifyEnvironment, getRcloneEnv());
+            if (!oneTimeCode.isEmpty()) verifyEnvironment.add("RCLONE_PROTONDRIVE_2FA=" + oneTimeCode);
+            Captured check = capture(createCommand("lsjson", remote + ":", "--max-depth", "1",
+                    "--protondrive-enable-caching=false"), verifyEnvironment.toArray(new String[0]), 4 * 1024 * 1024, 120000);
+            if (check.exit != 0) throw new IOException("Proton reconnect could not be verified; review login, 2FA or official-client challenge");
+            // A successful exit must contain the expected listing, not an arbitrary empty response.
+            try { new JSONArray(check.text); } catch (JSONException invalid) { throw new IOException("Proton verification response was invalid"); }
+            ca.pkay.rcloneexplorer.proton.ProtonAccountState.INSTANCE.verified(context, identity);
+        } finally {
+            // Reconcile even a failed reconnect: old scheduled work now has an invalid epoch.
+            if (epochAdvanced) {
+                try { new ca.pkay.rcloneexplorer.Services.TriggerService(context).queueTrigger(); }
+                catch (RuntimeException failed) { FLog.w(TAG, "Schedules require reconciliation after reconnect"); }
+            }
+        }
+    }
+
     public Process bisync(Task task, ArrayList<FilterEntry> filters) throws IOException {
-        if (!filters.isEmpty()) throw new IOException("Bisync filter migration is not supported");
-        preflightBisync(task);
         ArrayList<String> args = BisyncSession.arguments(context, task, false);
+        preflightBisync(task, false, args.get(args.indexOf("--filters-file") + 1));
         Collections.addAll(args, "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log");
         return getRuntimeProcess(createCommandWithOptions(args), getRcloneEnv());
     }
 
-    public Process bisyncPreview(Task task) throws IOException {
-        preflightBisync(task);
-        return getRuntimeProcess(createCommandWithOptions(BisyncSession.arguments(context, task, true)), getRcloneEnv());
+    public Process bisyncPreview(Task task, String expectedIdentity) throws IOException {
+        ArrayList<String> args = BisyncSession.arguments(context, task, true, expectedIdentity);
+        preflightBisync(task, false, args.get(args.indexOf("--filters-file") + 1));
+        return getRuntimeProcess(createCommandWithOptions(args), getRcloneEnv());
     }
 
     /** Creates explicitly approved access markers; ordinary runs never recreate missing markers. */
@@ -990,6 +1045,12 @@ public class Rclone {
     }
 
     private void preflightBisync(Task task, boolean settingUpMarkers) throws IOException {
+        preflightBisync(task, settingUpMarkers, null);
+    }
+
+    private void preflightBisync(Task task, boolean settingUpMarkers, String filterPath) throws IOException {
+        String identity = protonAccountIdentity(task.getRemoteId());
+        ca.pkay.rcloneexplorer.proton.ProtonAccountState.INSTANCE.requireReady(context, identity);
         Captured help = capture(createCommand("bisync", "--help"), getRcloneEnv(), 256 * 1024, 30000);
         if (help.exit != 0) throw new IOException("Bisync engine capability discovery failed");
         Captured globalHelp = capture(createCommand("help", "flags"), getRcloneEnv(), 1024 * 1024, 30000);
@@ -999,10 +1060,19 @@ public class Rclone {
         if (!local.isDirectory() || !local.canRead()) throw new IOException("Local bisync root is unavailable");
         String[] roots = {local.getCanonicalPath(), task.getRemoteId() + ":" + task.getRemotePath()};
         for (String root : roots) {
-            Captured result = capture(createCommand("lsjson", root, "--recursive", "--hash-type", "SHA-1",
+            ArrayList<String> listing = new ArrayList<>();
+            Collections.addAll(listing, "lsjson", root, "--recursive", "--hash-type", "SHA-1",
                     "--no-modtime", "--no-mimetype", "--protondrive-original-file-size=true",
-                    "--protondrive-enable-caching=false"), getRcloneEnv(), 16 * 1024 * 1024, 300000);
-            if (result.exit != 0) throw new IOException("Bisync root listing failed; no changes were started");
+                    "--protondrive-enable-caching=false");
+            if (filterPath != null) Collections.addAll(listing, "--filter-from", filterPath);
+            Captured result = capture(createCommandWithOptions(listing), getRcloneEnv(), 16 * 1024 * 1024, 300000);
+            if (result.exit != 0) {
+                if (identity != null && result.action != null && root.startsWith(task.getRemoteId() + ":")) {
+                    ca.pkay.rcloneexplorer.proton.ProtonAccountState.INSTANCE.pause(context, identity, result.action);
+                    throw new ca.pkay.rcloneexplorer.proton.ProtonAccountState.NeedsUserAction();
+                }
+                throw new IOException("Bisync root listing failed; no changes were started");
+            }
             try {
                 JSONArray files = new JSONArray(result.text);
                 boolean accessMarkerFound = false;
@@ -1028,7 +1098,10 @@ public class Rclone {
 
     private static final class Captured {
         final int exit; final String text;
-        Captured(int exit, String text) { this.exit = exit; this.text = text; }
+        final ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action action;
+        Captured(int exit, String text, ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action action) {
+            this.exit = exit; this.text = text; this.action = action;
+        }
     }
 
     /** Bounded read-only helpers drain both pipes and cannot wait indefinitely. */
@@ -1038,9 +1111,18 @@ public class Rclone {
 
     private Captured capture(String[] command, String[] env, int limit, long timeout, byte[] stdin) throws IOException {
         Process process = getRuntimeProcess(command, env);
+        java.util.concurrent.atomic.AtomicReference<ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action> action =
+                new java.util.concurrent.atomic.AtomicReference<>();
         Thread stderr = new Thread(() -> {
-            try (InputStream in = process.getErrorStream()) {
-                byte[] bytes = new byte[4096]; while (in.read(bytes) != -1) { /* no raw diagnostics */ }
+            try (java.io.Reader in = new java.io.InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8)) {
+                char[] bytes = new char[1024]; int count; String tail = "";
+                while ((count = in.read(bytes)) != -1) {
+                    String window = tail + new String(bytes, 0, count);
+                    ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action classified =
+                            ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.INSTANCE.classify(window);
+                    if (classified != null) action.set(classified);
+                    tail = window.substring(Math.max(0, window.length() - 256));
+                }
             } catch (IOException ignored) { }
         }, "rclone-helper-stderr");
         stderr.setDaemon(true);
@@ -1061,7 +1143,8 @@ public class Rclone {
             }
             int exit = process.waitFor();
             if (expired.get()) throw new IOException("Rclone helper timed out");
-            return new Captured(exit, new String(out.toByteArray(), StandardCharsets.UTF_8));
+            stderr.join(1000);
+            return new Captured(exit, new String(out.toByteArray(), StandardCharsets.UTF_8), action.get());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt(); throw new IOException("Rclone helper interrupted", e);
         } finally {

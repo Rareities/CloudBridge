@@ -26,8 +26,8 @@ class BisyncPolicyTest {
     }
 
     @Test(expected = IllegalArgumentException::class)
-    fun refusesFilterChangesUntilSafeMigrationExists() {
-        BisyncPolicy.validate(task().apply { filterId = 2 })
+    fun refusesDeletionOfExcludedFiles() {
+        BisyncPolicy.validate(task().apply { deleteExcluded = true })
     }
 
     @Test(expected = IllegalArgumentException::class)

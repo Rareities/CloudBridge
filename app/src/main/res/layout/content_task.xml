@@ -171,6 +171,13 @@
                         android:text="@string/task_edit_label_transfers"
                         android:textAppearance="@style/TextAppearance.AppCompat.Body1" />
 
+                    <Button
+                        android:id="@+id/task_proton_account"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:text="@string/proton_account_action" />
+
                     <Spinner
                         android:id="@+id/task_transfers_spinner"
                         android:layout_width="match_parent"
