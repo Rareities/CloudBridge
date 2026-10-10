@@ -19,7 +19,7 @@ object BisyncPolicy {
             "Bisync never deletes excluded files"
         }
         task.transfers?.let { require(it in 1..8) { "Invalid transfer count" } }
-        task.bisyncOptions.validate()
+        task.bisyncOptions.arguments(task.transfers)
         val options = task.bisyncOptions
         if (options.backupLocalPath.isNotBlank()) {
             require(options.backupLocalPath.startsWith("/")) { "Local backup must be an absolute native path" }
@@ -50,7 +50,7 @@ object BisyncPolicy {
         validate(task)
         val values = listOf("policy-v2", task.stableUUID, task.remoteId, task.remoteType.toString(),
             normalizeRemote(task.remotePath), File(task.localPath).canonicalPath, task.bisyncMaxDelete.toString(),
-            kotlinx.serialization.json.Json.encodeToString(BisyncOptions.serializer(), task.bisyncOptions))
+            kotlinx.serialization.json.Json.encodeToString(BisyncOptions.serializer(), task.bisyncOptions.copy(customOptions = task.bisyncOptions.customOptions.toSortedMap())))
         // Length-prefix fields so delimiters in filenames cannot create the same identity.
         val bytes = values.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
         return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }

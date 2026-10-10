@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 /** Versioned, typed overrides. Security and baseline ownership flags are intentionally absent. */
 @Serializable
 data class BisyncOptions(
-    val version: Int = 1,
+    val version: Int = CURRENT_VERSION,
     val checkers: Int = 4,
     val retries: Int = 3,
     val lowLevelRetries: Int = 10,
@@ -19,8 +19,10 @@ data class BisyncOptions(
     val requireAccess: Boolean = false,
     val customOptions: Map<String, String> = emptyMap()
 ) {
+    companion object { const val CURRENT_VERSION = 1 }
+
     fun validate() {
-        require(version == 1) { "Unsupported bisync options version" }
+        require(version == CURRENT_VERSION) { "Unsupported bisync options version" }
         require(checkers in 1..16 && retries in 1..10 && lowLevelRetries in 1..20) { "Invalid concurrency/retry budget" }
         require(timeoutSeconds in 30..3600 && connectTimeoutSeconds in 5..300) { "Invalid timeout" }
         bandwidthMiB?.let { require(it in 1..10240) { "Invalid bandwidth limit" } }
@@ -38,7 +40,14 @@ data class BisyncOptions(
             "--contimeout", "${connectTimeoutSeconds}s", "--conflict-suffix", conflictSuffix)
         bandwidthMiB?.let { flags.addAll(listOf("--bwlimit", "${it}M")) }
         tpsLimit?.let { flags.addAll(listOf("--tpslimit", it.toString())) }
-        transfers?.let { flags.addAll(listOf("--transfers", it.toString())) }
-        return BisyncAdvancedOptions.merge(flags, customOptions)
+        require(transfers == null || transfers in 1..8) { "Invalid transfer count" }
+        flags.addAll(listOf("--transfers", (transfers ?: 4).toString()))
+        val effective = BisyncAdvancedOptions.merge(flags, customOptions)
+        val values = effective.chunked(2).associate { it[0] to it[1] }
+        values["--max-connections"]?.toInt()?.let { maximum ->
+            val minimum = values.getValue("--transfers").toInt() + values.getValue("--checkers").toInt() + 1
+            require(maximum >= minimum) { "max-connections must be at least transfers + checkers + 1 ($minimum)" }
+        }
+        return effective
     }
 }

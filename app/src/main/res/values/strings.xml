@@ -777,4 +777,10 @@
     <string name="proton_reconnect">Reconnect and verify</string>
     <string name="proton_verified">Account verified. Paused jobs may be queued again; review bisync recovery separately.</string>
     <string name="proton_one_time_code">One-time 2FA code (optional; never saved)</string>
+    <string name="bisync_choose_preset">Choose tuning preset</string>
+    <string name="bisync_preset_balanced">Balanced: 2 transfers, 4 MiB buffers</string>
+    <string name="bisync_preset_low_memory">Low memory: 1 transfer, no buffer</string>
+    <string name="bisync_preset_limited_bandwidth">Limited bandwidth: 1 transfer, 2 MiB/s</string>
+    <string name="bisync_preset_policy">Presets replace tuning controls and custom rows. Conflict, access-marker and backup controls stay as edited. Values are saved with the job; later preset changes do not change existing jobs. Custom rows override typed controls, including the task transfer count. Review the effective command before approving changes.</string>
+    <string name="bisync_unknown_options_version">This options version is unsupported. Use a compatible app version; the saved job has been preserved.</string>
 </resources>

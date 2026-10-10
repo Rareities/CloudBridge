@@ -38,7 +38,7 @@ object BisyncAdvancedOptions {
         require(base.size % 2 == 0)
         val values = linkedMapOf<String, String>()
         base.chunked(2).forEach { values[it[0]] = it[1] }
-        overrides.forEach { (key, value) -> validate(key, value); values["--$key"] = value }
-        return values.flatMap { (key, value) -> listOf(key, value) }
+        overrides.toSortedMap().forEach { (key, value) -> validate(key, value); values["--$key"] = value }
+        return values.toSortedMap().flatMap { (key, value) -> listOf(key, value) }
     }
 }

@@ -442,6 +442,9 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     private fun editBisyncOptions() {
+        if (bisyncOptions.version != BisyncOptions.CURRENT_VERSION) {
+            Toasty.error(this, getString(R.string.bisync_unknown_options_version)).show(); return
+        }
         val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 16, 24, 16) }
         val scroll = ScrollView(this).apply { addView(form) }
         fun field(label: Int, value: String, numeric: Boolean = false): EditText {
@@ -470,6 +473,27 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         val custom = field(R.string.bisync_custom_rows, bisyncOptions.customOptions.entries.joinToString("\n") { "${it.key}=${it.value}" })
         custom.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
         custom.minLines = 3
+        form.addView(Button(this).apply {
+            setText(R.string.bisync_choose_preset)
+            setOnClickListener {
+                val ids = ca.pkay.rcloneexplorer.bisync.BisyncPresets.Id.entries
+                val labels = arrayOf(getString(R.string.bisync_preset_balanced), getString(R.string.bisync_preset_low_memory),
+                    getString(R.string.bisync_preset_limited_bandwidth))
+                AlertDialog.Builder(this@TaskActivity).setTitle(R.string.bisync_choose_preset)
+                    .setItems(labels) { _, index ->
+                        val snapshot = ca.pkay.rcloneexplorer.bisync.BisyncPresets.apply(ids[index], bisyncOptions)
+                        checkers.setText(snapshot.checkers.toString())
+                        retries.setText(snapshot.retries.toString())
+                        lowRetries.setText(snapshot.lowLevelRetries.toString())
+                        bandwidth.setText(snapshot.bandwidthMiB?.toString() ?: "")
+                        rate.setText(snapshot.tpsLimit?.toString() ?: "")
+                        timeout.setText(snapshot.timeoutSeconds.toString())
+                        connectTimeout.setText(snapshot.connectTimeoutSeconds.toString())
+                        custom.setText(snapshot.customOptions.toSortedMap().entries.joinToString("\n") { "${it.key}=${it.value}" })
+                    }.show()
+            }
+        })
+        form.addView(TextView(this).apply { setText(R.string.bisync_preset_policy) })
         form.addView(TextView(this).apply { text = BisyncAdvancedOptions.supportedNames.sorted().joinToString(", ") })
         form.addView(TextView(this).apply { setText(R.string.bisync_advanced_policy) })
         val dialog = AlertDialog.Builder(this).setTitle(R.string.bisync_advanced).setView(scroll)
