@@ -37,6 +37,21 @@ public final class OperationAdmission {
         return new Lease(open(identity), false);
     }
 
+    /** Retains an idle parent for configuration changes; active native children block replacement. */
+    public static Lease configurationLease(File sidecar) throws IOException {
+        Lease parent = activeContext();
+        if (parent == null) return acquire(sidecar);
+        File identity = sidecar.getCanonicalFile();
+        synchronized (parent.group) {
+            if (!parent.group.identity.equals(identity) || parent.closed.get() || parent.detached.get()
+                    || parent.group.references != 1) {
+                throw new IOException("Configuration changes require exclusive admission without active children");
+            }
+            parent.group.references++;
+            return new Lease(parent.group, false);
+        }
+    }
+
     private static Lease activeContext() {
         Lease parent = CONTEXT.get();
         if (parent != null && (parent.closed.get() || parent.detached.get())) {

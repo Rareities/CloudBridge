@@ -53,6 +53,7 @@ public class Importer {
             Set<String> jobIds = new HashSet<>();
             for (Task task : tasks) {
                 requireId(taskIds, task.getId());
+                task.getBisyncOptions().validate();
                 String uuid = java.util.UUID.fromString(task.getStableUUID()).toString();
                 if (!uuid.equals(task.getStableUUID()) || !jobIds.add(uuid)) {
                     throw new JSONException("Invalid or duplicate job UUID");
@@ -64,6 +65,7 @@ public class Importer {
             for (Filter filter : filters) requireId(filterIds, filter.getId());
             for (Trigger trigger : triggers) {
                 requireId(triggerIds, trigger.getId());
+                trigger.getSchedulePolicy().validate();
                 if (!taskIds.contains(trigger.getTriggerTarget())) {
                     throw new JSONException("Trigger references a missing task");
                 }

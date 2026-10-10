@@ -185,10 +185,16 @@ android {
         // Source sets refer to externally compiled files. Model the actual consumers,
         // not only preBuild, so their input snapshots always follow the producers.
         tasks.configureEach { candidate ->
+            // AGP snapshots source-set trees early. A changed engine identity must
+            // invalidate incremental asset/native merging even when a producer
+            // installs same-sized files during this invocation.
+            if (candidate.name ==~ /(?:merge.*(?:Assets|JniLibFolders|NativeLibs)|compress.*Assets|strip.*DebugSymbols|package.*)/) {
+                candidate.inputs.property('rcloneSourceCommit', project.properties['de.schuelken.cloudbridge.rCloneRef'])
+            }
             if (candidate.name ==~ /merge.*(?:JniLibFolders|NativeLibs)/) {
                 candidate.dependsOn(':rclone:buildAll')
             }
-            if (candidate.name ==~ /merge.*Assets/) {
+            if (candidate.name ==~ /merge.*Assets/ || candidate.name.toLowerCase(java.util.Locale.ROOT).contains('lint') || candidate.name ==~ /test.*UnitTest/) {
                 candidate.dependsOn(':rclone:generateProvenance')
             }
         }
@@ -236,7 +242,7 @@ dependencies {
 
     // Thumbnails
     implementation 'com.github.bumptech.glide:glide:4.16.0'
-    implementation 'androidx.work:work-runtime-ktx:2.9.0'
+    implementation 'androidx.work:work-runtime-ktx:2.10.5'
     implementation 'androidx.preference:preference:1.2.1'
     // REST Client
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
@@ -257,10 +263,15 @@ dependencies {
     implementation 'net.sourceforge.streamsupport:android-retrofuture:1.7.4'
     // App intro
     implementation 'com.github.AppIntro:AppIntro:6.3.1'
+    // Established AES ZIP format for complete encrypted backups.
+    implementation 'net.lingala.zip4j:zip4j:2.11.5'
     // TEST
     testImplementation 'junit:junit:4.13.2'
-    androidTestImplementation 'androidx.test:runner:1.5.2'
-    androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    androidTestImplementation 'androidx.test:runner:1.6.2'
+    androidTestImplementation 'androidx.test:core:1.6.1'
+    androidTestImplementation 'androidx.test:rules:1.6.1'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
+    androidTestImplementation 'androidx.test.espresso:espresso-core:3.6.1'
 
     // Splash screen
     implementation("androidx.core:core-splashscreen:1.0.1")

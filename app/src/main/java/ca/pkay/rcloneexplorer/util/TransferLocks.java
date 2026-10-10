@@ -6,13 +6,8 @@ import android.os.PowerManager;
 
 import androidx.annotation.Nullable;
 
-/**
- * Keeps the CPU and Wi-Fi radio awake for the duration of a long-running rclone transfer.
- *
- * <p>A foreground service keeps the process ranked but does <b>not</b> prevent the device from
- * entering Doze with the screen off. Without these locks, large uploads/downloads stall until
- * the next Doze maintenance window, which destroys throughput. See the transmission-speed audit
- * (P0 item 2).
+/** Holds best-effort CPU/Wi-Fi locks only during an active native transfer.
+ * These locks do not bypass Doze, background restrictions, or foreground-service time budgets.
  */
 public final class TransferLocks {
 
@@ -50,14 +45,32 @@ public final class TransferLocks {
             return new TransferLocks(wake, wifi);
         } catch (RuntimeException e) {
             FLog.e("TransferLocks", "acquire failed, releasing partial state", e);
-            if (wake != null && wake.isHeld()) {
-                try { wake.release(); } catch (RuntimeException ignored) { }
+            if (wake != null) {
+                try { if (wake.isHeld()) wake.release(); } catch (RuntimeException ignored) { }
             }
-            if (wifi != null && wifi.isHeld()) {
-                try { wifi.release(); } catch (RuntimeException ignored) { }
+            if (wifi != null) {
+                try { if (wifi.isHeld()) wifi.release(); } catch (RuntimeException ignored) { }
             }
             return null;
         }
+    }
+
+    /** Preserve active-child ownership if a worker stops before native cleanup exits. */
+    public void releaseAfterExit(@Nullable Process process) {
+        if (process == null) { release(); return; }
+        try { process.exitValue(); release(); return; }
+        catch (IllegalThreadStateException alive) { /* reap before dropping active-transfer locks */ }
+        Thread reaper = new Thread(() -> {
+            boolean interrupted = false;
+            for (;;) {
+                try { process.waitFor(); break; }
+                catch (InterruptedException retry) { interrupted = true; }
+            }
+            release();
+            if (interrupted) Thread.currentThread().interrupt();
+        }, "rclone-transfer-locks");
+        reaper.setDaemon(true);
+        reaper.start();
     }
 
     /** Releases both locks if held. Safe to call from a {@code finally} block. */

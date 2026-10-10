@@ -35,6 +35,43 @@ public final class ScheduleCalculator {
         throw new IllegalStateException("No future schedule occurrence");
     }
 
+    public static long quietDelay(long nowMillis, int startMinute, int endMinute, TimeZone zone) {
+        if (startMinute == -1 && endMinute == -1) return 0;
+        if (startMinute < 0 || startMinute > 1439 || endMinute < 0 || endMinute > 1439 || startMinute == endMinute) {
+            throw new IllegalArgumentException("Invalid quiet hours");
+        }
+        Calendar now = Calendar.getInstance(zone);
+        now.setTimeInMillis(nowMillis);
+        int minute = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE);
+        boolean quiet = startMinute < endMinute ? minute >= startMinute && minute < endMinute
+                : minute >= startMinute || minute < endMinute;
+        if (!quiet) return 0;
+        Calendar end = (Calendar) now.clone();
+        end.set(Calendar.HOUR_OF_DAY, endMinute / 60);
+        end.set(Calendar.MINUTE, endMinute % 60);
+        end.set(Calendar.SECOND, 0);
+        end.set(Calendar.MILLISECOND, 0);
+        if (end.getTimeInMillis() <= nowMillis) end.add(Calendar.DAY_OF_MONTH, 1);
+        return end.getTimeInMillis() - nowMillis;
+    }
+
+    public static long nextInterval(long nowMillis, long previousDue, int minutes) {
+        long interval = intervalMillis(minutes);
+        if (previousDue <= 0) return checkedAdd(nowMillis, interval);
+        if (previousDue > nowMillis) return previousDue;
+        long periods = (nowMillis - previousDue) / interval + 1;
+        return checkedAdd(previousDue, checkedMultiply(periods, interval));
+    }
+
+    private static long checkedAdd(long a, long b) {
+        if (b > 0 && a > Long.MAX_VALUE - b) throw new IllegalArgumentException("Schedule time overflow");
+        return a + b;
+    }
+    private static long checkedMultiply(long a, long b) {
+        if (a > Long.MAX_VALUE / b) throw new IllegalArgumentException("Schedule time overflow");
+        return a * b;
+    }
+
     public static long intervalMillis(int minutes) {
         if (minutes <= 0) throw new IllegalArgumentException("Interval must be positive");
         return minutes * 60_000L;

@@ -1,0 +1,391 @@
+{
+  "schemaVersion": 1,
+  "completed": true,
+  "passed": false,
+  "platform": "Linux-6.18.44-x86_64-with-glibc2.41",
+  "machine": "x86_64",
+  "logicalCpus": 5,
+  "clock": "monotonic",
+  "metrics": "Linux wait4 per child",
+  "limitations": [
+    "Host local filesystems only; no Android/device/Proton measurement",
+    "Warm page/build caches; no cold-cache or isolated-network claim",
+    "Shared execution host; load is not experimentally isolated",
+    "Host energy, device RSS/PSS and cloud API calls not measured"
+  ],
+  "summary": [
+    {
+      "engine": "baseline",
+      "workload": "empty",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.06295096500002728,
+      "minWallSeconds": 0.05164781000007679,
+      "maxWallSeconds": 0.08530733499992493,
+      "meanWallSeconds": 0.06663537000000967,
+      "stdevWallSeconds": 0.017129566134516425,
+      "maxRssKiB": 62604
+    },
+    {
+      "engine": "baseline",
+      "workload": "empty",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.06266182499985007,
+      "minWallSeconds": 0.0613707389998126,
+      "maxWallSeconds": 0.08296001899998373,
+      "meanWallSeconds": 0.0689975276665488,
+      "stdevWallSeconds": 0.012109091582032789,
+      "maxRssKiB": 61392
+    },
+    {
+      "engine": "baseline",
+      "workload": "small",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.47582923000004484,
+      "minWallSeconds": 0.47320216499997514,
+      "maxWallSeconds": 0.5330497919999289,
+      "meanWallSeconds": 0.4940270623333163,
+      "stdevWallSeconds": 0.03382019279371115,
+      "maxRssKiB": 79916
+    },
+    {
+      "engine": "baseline",
+      "workload": "small",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.1537202370000159,
+      "minWallSeconds": 0.1525817740000548,
+      "maxWallSeconds": 0.24128836500017314,
+      "meanWallSeconds": 0.18253012533341462,
+      "stdevWallSeconds": 0.050889311953029454,
+      "maxRssKiB": 71760
+    },
+    {
+      "engine": "baseline",
+      "workload": "large",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.14224949200001902,
+      "minWallSeconds": 0.13477902800013908,
+      "maxWallSeconds": 0.14537413699986246,
+      "meanWallSeconds": 0.1408008856666735,
+      "stdevWallSeconds": 0.005444072823792988,
+      "maxRssKiB": 68496
+    },
+    {
+      "engine": "baseline",
+      "workload": "large",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.12431815099989763,
+      "minWallSeconds": 0.12280552900006114,
+      "maxWallSeconds": 0.13240140899984,
+      "meanWallSeconds": 0.12650836299993293,
+      "stdevWallSeconds": 0.005159263483905707,
+      "maxRssKiB": 61588
+    },
+    {
+      "engine": "baseline",
+      "workload": "deep",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.3489426480000475,
+      "minWallSeconds": 0.20640386499985652,
+      "maxWallSeconds": 0.4295964309999363,
+      "meanWallSeconds": 0.3283143146666134,
+      "stdevWallSeconds": 0.1130171512714395,
+      "maxRssKiB": 69652
+    },
+    {
+      "engine": "baseline",
+      "workload": "deep",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.29212896699982593,
+      "minWallSeconds": 0.17169508699998914,
+      "maxWallSeconds": 0.32468316299991784,
+      "meanWallSeconds": 0.262835738999911,
+      "stdevWallSeconds": 0.08059099052953278,
+      "maxRssKiB": 64332
+    },
+    {
+      "engine": "candidate",
+      "workload": "empty",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.0627722909998738,
+      "minWallSeconds": 0.06171700699997018,
+      "maxWallSeconds": 0.08146202099987931,
+      "meanWallSeconds": 0.06865043966657443,
+      "stdevWallSeconds": 0.011107694102514153,
+      "maxRssKiB": 65968
+    },
+    {
+      "engine": "candidate",
+      "workload": "empty",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.06135320699991098,
+      "minWallSeconds": 0.06114051400004428,
+      "maxWallSeconds": 0.06144755999980589,
+      "meanWallSeconds": 0.06131376033325372,
+      "stdevWallSeconds": 0.00015727791048071273,
+      "maxRssKiB": 65836
+    },
+    {
+      "engine": "candidate",
+      "workload": "small",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.3808365049999338,
+      "minWallSeconds": 0.3805236959999547,
+      "maxWallSeconds": 0.39847393900004136,
+      "meanWallSeconds": 0.38661137999997663,
+      "stdevWallSeconds": 0.010274467961414322,
+      "maxRssKiB": 83252
+    },
+    {
+      "engine": "candidate",
+      "workload": "small",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.17752993699991748,
+      "minWallSeconds": 0.16892319299995506,
+      "maxWallSeconds": 0.22882579099996292,
+      "meanWallSeconds": 0.1917596403332785,
+      "stdevWallSeconds": 0.032387399625537015,
+      "maxRssKiB": 79336
+    },
+    {
+      "engine": "candidate",
+      "workload": "large",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.15587179800013473,
+      "minWallSeconds": 0.1537036839999928,
+      "maxWallSeconds": 0.20604137899999841,
+      "meanWallSeconds": 0.17187228700004198,
+      "stdevWallSeconds": 0.0296111518799171,
+      "maxRssKiB": 76080
+    },
+    {
+      "engine": "candidate",
+      "workload": "large",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.1317904699999417,
+      "minWallSeconds": 0.12230885799999669,
+      "maxWallSeconds": 0.13239468400001897,
+      "meanWallSeconds": 0.1288313373333191,
+      "stdevWallSeconds": 0.0056567058549730174,
+      "maxRssKiB": 66088
+    },
+    {
+      "engine": "candidate",
+      "workload": "deep",
+      "phase": "initialize",
+      "samples": 3,
+      "medianWallSeconds": 0.11235763500008034,
+      "minWallSeconds": 0.10271971799988933,
+      "maxWallSeconds": 0.11248240300005818,
+      "meanWallSeconds": 0.10918658533334262,
+      "stdevWallSeconds": 0.005600818832529629,
+      "maxRssKiB": 72432
+    },
+    {
+      "engine": "candidate",
+      "workload": "deep",
+      "phase": "no-change",
+      "samples": 3,
+      "medianWallSeconds": 0.08150006300002133,
+      "minWallSeconds": 0.07245702000000165,
+      "maxWallSeconds": 0.08347822400014593,
+      "meanWallSeconds": 0.07914510233338963,
+      "stdevWallSeconds": 0.005875892630846471,
+      "maxRssKiB": 68012
+    }
+  ],
+  "engines": {
+    "baseline": {
+      "source": "94f543c9d4df4f7a29c87c9b76abf7bb341b5d33; immutable archive; buildvcs=false",
+      "sha256": "8dadda1597ece1b2fd14a69a60575741cfa881eb3fcb81d03af5a266079f17e8",
+      "version": "rclone v1.74.3-DEV\n- os/version: debian 13.6 (64 bit)\n- os/kernel: 6.18.44 (x86_64)\n- os/type: linux\n- os/arch: amd64\n- go/version: go1.26.9\n- go/linking: static\n- go/tags: noselfupdate"
+    },
+    "candidate": {
+      "source": "26f6a1c441ed154de77ae7fb9e5f67d45b25bfc5; workflow-only dirty tree",
+      "sha256": "34f4e634249bdb80d1a48f92364ddd65efd6a2afcd65468b96277ee796289762",
+      "version": "rclone v1.76.0-DEV\n- os/version: debian 13.6 (64 bit)\n- os/kernel: 6.18.44 (x86_64)\n- os/type: linux\n- os/arch: amd64\n- go/version: go1.26.9\n- go/linking: static\n- go/tags: noselfupdate"
+    }
+  },
+  "safety": {
+    "baseline": [
+      {
+        "name": "initialize",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 1.5519809669999631,
+        "userSeconds": 0.559232,
+        "systemSeconds": 0.466987,
+        "maxRssKiB": 80976,
+        "interruptSent": false
+      },
+      {
+        "name": "addition",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 0.6592285589999847,
+        "userSeconds": 0.235363,
+        "systemSeconds": 0.111633,
+        "maxRssKiB": 76756,
+        "interruptSent": false
+      },
+      {
+        "name": "same-size-conflict",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 0.8236999660000492,
+        "userSeconds": 0.353269,
+        "systemSeconds": 0.14329799999999998,
+        "maxRssKiB": 72664,
+        "interruptSent": false
+      },
+      {
+        "name": "one-sided-deletion",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 0.25643233300002066,
+        "userSeconds": 0.19233799999999998,
+        "systemSeconds": 0.137377,
+        "maxRssKiB": 71304,
+        "interruptSent": false
+      },
+      {
+        "name": "deletion-threshold",
+        "passed": true,
+        "exit": 1,
+        "wallSeconds": 0.26339915900007327,
+        "userSeconds": 0.199826,
+        "systemSeconds": 0.081941,
+        "maxRssKiB": 73236,
+        "interruptSent": false
+      },
+      {
+        "name": "missing-root",
+        "passed": true,
+        "exit": 7,
+        "wallSeconds": 0.06318140400003358,
+        "userSeconds": 0.048539,
+        "systemSeconds": 0.020038,
+        "maxRssKiB": 62284,
+        "interruptSent": false
+      },
+      {
+        "name": "unicode-default-normalization",
+        "passed": false,
+        "exit": 0,
+        "wallSeconds": 0.060982862999935605,
+        "userSeconds": 0.053957,
+        "systemSeconds": 0.021415999999999998,
+        "maxRssKiB": 62096,
+        "interruptSent": false
+      },
+      {
+        "name": "forced-stop",
+        "passed": true,
+        "exit": -9,
+        "wallSeconds": 0.2621071490000304,
+        "userSeconds": 0.10889,
+        "systemSeconds": 0.015215999999999999,
+        "maxRssKiB": 68048,
+        "interruptSent": true
+      }
+    ],
+    "candidate": [
+      {
+        "name": "initialize",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 0.3770303910000621,
+        "userSeconds": 0.444552,
+        "systemSeconds": 0.261114,
+        "maxRssKiB": 80612,
+        "interruptSent": false
+      },
+      {
+        "name": "addition",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 0.18593377299998792,
+        "userSeconds": 0.233403,
+        "systemSeconds": 0.060569,
+        "maxRssKiB": 77092,
+        "interruptSent": false
+      },
+      {
+        "name": "same-size-conflict",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 0.20360929499997837,
+        "userSeconds": 0.21063099999999998,
+        "systemSeconds": 0.08026799999999999,
+        "maxRssKiB": 79780,
+        "interruptSent": false
+      },
+      {
+        "name": "one-sided-deletion",
+        "passed": true,
+        "exit": 0,
+        "wallSeconds": 0.16313172900004247,
+        "userSeconds": 0.19588899999999998,
+        "systemSeconds": 0.06873699999999999,
+        "maxRssKiB": 75700,
+        "interruptSent": false
+      },
+      {
+        "name": "deletion-threshold",
+        "passed": true,
+        "exit": 1,
+        "wallSeconds": 0.1524194390001412,
+        "userSeconds": 0.166009,
+        "systemSeconds": 0.084675,
+        "maxRssKiB": 74608,
+        "interruptSent": false
+      },
+      {
+        "name": "missing-root",
+        "passed": true,
+        "exit": 7,
+        "wallSeconds": 0.061455779999960214,
+        "userSeconds": 0.048888,
+        "systemSeconds": 0.028066999999999998,
+        "maxRssKiB": 65324,
+        "interruptSent": false
+      },
+      {
+        "name": "unicode-default-normalization",
+        "passed": false,
+        "exit": 0,
+        "wallSeconds": 0.08311441699993338,
+        "userSeconds": 0.051567999999999996,
+        "systemSeconds": 0.047788,
+        "maxRssKiB": 66288,
+        "interruptSent": false
+      },
+      {
+        "name": "forced-stop",
+        "passed": true,
+        "exit": -9,
+        "wallSeconds": 0.2672663650000686,
+        "userSeconds": 0.10949099999999999,
+        "systemSeconds": 0.072818,
+        "maxRssKiB": 72236,
+        "interruptSent": true
+      }
+    ]
+  },
+  "sampleCount": 48,
+  "dateUTC": "2026-10-10",
+  "interpretation": "Baseline/candidate local-only smoke measurements; NFC/NFD collision fails both engines; not Android/device, energy or provider acceptance."
+}

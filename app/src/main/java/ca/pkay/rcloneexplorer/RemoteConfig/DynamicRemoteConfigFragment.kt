@@ -224,6 +224,11 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
                 "string" -> {
                     if(it.isPassword) {
                         val input = getAttachedEditText(it.name, layout)
+                        input.isSaveEnabled = false
+                        input.isSaveFromParentEnabled = false
+                        if (android.os.Build.VERSION.SDK_INT >= 26) {
+                            input.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+                        }
                         input.inputType =
                             InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
                         //input.setText(mOptionMap[it.name])

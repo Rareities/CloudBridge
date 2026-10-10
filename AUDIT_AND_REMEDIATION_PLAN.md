@@ -1,6 +1,6 @@
 # CloudBridge — Audit Report & Multi-Phase Remediation Plan
 
-> **Status:** PLAN ONLY. Nothing implemented. Each phase is designed for coordinated track execution with a mandatory review gate before progression.
+> **Status:** Historical audit/backlog. Implementation has progressed on the review branches; see [the current 45-package execution record](docs/IMPLEMENTATION_STATUS.md). Items in this historical 41-item audit are not automatically complete because a related roadmap package changed.
 >
 > **Method:** 5 parallel specialist audit agents (Bugs, Code-Quality/Features, UI/UX, Security, Build/CI) produced 118 raw findings. An independent review agent family re-verified every finding against the live code: **105 CONFIRMED, 10 PARTIAL (severity-nudged), 2 FALSE POSITIVE (dropped)**. Root-cause deduplication collapsed the 118 to **41 distinct remediation items**.
 >

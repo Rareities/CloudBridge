@@ -50,6 +50,7 @@ import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 import ca.pkay.rcloneexplorer.Database.json.Exporter;
+import ca.pkay.rcloneexplorer.Database.json.Importer;
 import ca.pkay.rcloneexplorer.Database.json.SharedPreferencesBackup;
 import ca.pkay.rcloneexplorer.Items.FileItem;
 import ca.pkay.rcloneexplorer.Items.FilterEntry;
@@ -178,12 +179,16 @@ public class Rclone {
     }
 
     private String getTransfers(String override) {
-        if (override != null && !override.isEmpty()) {
-            return override;
-        }
-        return PreferenceManager
+        String requested = override != null && !override.isEmpty() ? override : PreferenceManager
                 .getDefaultSharedPreferences(context)
                 .getString(context.getString(R.string.pref_key_transfers), "4");
+        try {
+            int count = Integer.parseInt(requested);
+            if (count < 1 || count > 8) throw new IllegalArgumentException("Transfer count must be between 1 and 8");
+            return Integer.toString(count);
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid transfer count", e);
+        }
     }
 
     public String[] getRcloneEnv(String... overwriteOptions) {
@@ -196,7 +201,13 @@ public class Rclone {
             String protocol = pref.getString(context.getString(R.string.pref_key_proxy_protocol), "http");
             String host = pref.getString(context.getString(R.string.pref_key_proxy_host), "localhost");
             String user = pref.getString(context.getString(R.string.pref_key_proxy_username), "");
-            String pass = pref.getString(context.getString(R.string.pref_key_proxy_password), "");
+            String pass;
+            try {
+                pass = ca.pkay.rcloneexplorer.util.SecretSettings.password(context,
+                        context.getString(R.string.pref_key_proxy_password));
+            } catch (IOException e) {
+                throw new IllegalStateException("Proxy credentials cannot be unlocked", e);
+            }
             int port = pref.getInt(context.getString(R.string.pref_key_proxy_port), 8080);
             String auth = "";
             if(!(user + pass).isEmpty()) {
@@ -220,7 +231,10 @@ public class Rclone {
 
         // The pre-built linux rclone binaries do not know how to find the Android certificate store.
         // We set SSL_CERT_DIR to Android's native certificate store path.
-        environmentValues.add("SSL_CERT_DIR=/system/etc/security/cacerts");
+        File conscryptCertificates = new File("/apex/com.android.conscrypt/cacerts");
+        String certificateDirectory = conscryptCertificates.isDirectory() && conscryptCertificates.canRead()
+                ? conscryptCertificates.getPath() : "/system/etc/security/cacerts";
+        environmentValues.add("SSL_CERT_DIR=" + certificateDirectory);
 
         environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
 
@@ -511,6 +525,7 @@ public class Rclone {
     }
 
     private Process getRuntimeProcess(String[] command, String[] env) throws IOException {
+        ensureConfigEncrypted();
         java.io.Closeable admission = ca.pkay.rcloneexplorer.util.OperationAdmission.processLease(
                 new File(context.getFilesDir(), "bisync-admission.lock"));
         try {
@@ -726,6 +741,12 @@ public class Rclone {
     public Process serve(int protocol, int port, boolean allowRemoteAccess, @Nullable String user,
                          @Nullable String password, @NonNull RemoteItem remote, @Nullable String servePath,
                          @Nullable String baseUrl) {
+        if (allowRemoteAccess) {
+            throw new IllegalArgumentException("LAN serving requires protocol-specific TLS setup; only loopback serving is available");
+        }
+        if (port < 1 || port > 65535 || servePath == null || servePath.indexOf('\0') >= 0) {
+            throw new IllegalArgumentException("Invalid serving port or root");
+        }
         String remoteName = remote.getName();
         String localRemotePath = (remote.isRemoteType(RemoteItem.LOCAL)) ? getLocalRemotePathPrefix(remote, context)  + "/" : "";
         String path = (servePath.compareTo("//" + remoteName) == 0) ? remoteName + ":" + localRemotePath : remoteName + ":" + localRemotePath + servePath;
@@ -746,14 +767,7 @@ public class Rclone {
                 commandProtocol = "webdav";
         }
 
-        if (allowRemoteAccess && (user == null || user.length() == 0 || password == null || password.length() == 0)) {
-            FLog.w(TAG, "serve: remote access requested without credentials, binding to localhost");
-            address = "127.0.0.1:" + String.valueOf(port);
-        } else if (allowRemoteAccess) {
-            address = ":" + String.valueOf(port);
-        } else {
-            address = "127.0.0.1:" + String.valueOf(port);
-        }
+        address = "127.0.0.1:" + port;
 
         ArrayList<String> params = new ArrayList<>(Arrays.asList(
                 createCommandWithOptions("serve", commandProtocol, "--addr", address, path)));
@@ -774,16 +788,6 @@ public class Rclone {
         params.add("--dir-cache-time");
         params.add("5m");
 
-        if(null != user && user.length() > 0) {
-            params.add("--user");
-            params.add(user);
-        }
-
-        if(null != password && password.length() > 0) {
-            params.add("--pass");
-            params.add(password);
-        }
-
         if(null != baseUrl && baseUrl.length() > 0) {
             params.add("--baseurl");
             params.add(baseUrl);
@@ -791,7 +795,8 @@ public class Rclone {
 
         // Native raw log files bypass redaction/retention. Drain diagnostics without persisting
         // arbitrary backend messages; application lifecycle diagnostics use private bounded logs.
-        String[] env = getRcloneEnv();
+        String[] env = getRcloneEnv("RCLONE_USER=" + (user == null ? "" : user),
+                "RCLONE_PASS=" + (password == null ? "" : password));
         String[] command = params.toArray(new String[0]);
         try {
             Process serving = getRuntimeProcess(command, env);
@@ -950,7 +955,46 @@ public class Rclone {
         return getRuntimeProcess(createCommandWithOptions(BisyncSession.arguments(context, task, true)), getRcloneEnv());
     }
 
+    /** Creates explicitly approved access markers; ordinary runs never recreate missing markers. */
+    public void createBisyncAccessMarkers(Task task) throws IOException {
+        ca.pkay.rcloneexplorer.bisync.BisyncPolicy.INSTANCE.validate(task);
+        preflightBisync(task, true);
+        String marker = ".cloudbridge-access-" + task.getStableUUID();
+        byte[] content = ("CloudBridge access marker " + task.getStableUUID() + "\n").getBytes(StandardCharsets.UTF_8);
+        File local = new File(new File(task.getLocalPath()).getCanonicalFile(), marker);
+        if (local.exists()) throw new IOException("An access marker already exists; review it before setup");
+        String remote = task.getRemoteId() + ":" + task.getRemotePath().replaceAll("/+$", "") + "/" + marker;
+        Captured existing = capture(createCommand("lsjson", remote, "--stat",
+                "--protondrive-enable-caching=false"), getRcloneEnv(), 65536, 60000);
+        if (existing.exit == 0) throw new IOException("A remote access marker already exists; review it before setup");
+        // Refuse all errors other than a positively identified missing object.
+        if (existing.exit != 3 && existing.exit != 4) throw new IOException("Remote access-marker lookup failed");
+        Captured uploaded = capture(createCommand("rcat", remote,
+                "--protondrive-original-file-size=true", "--protondrive-enable-caching=false"),
+                getRcloneEnv(), 65536, 300000, content);
+        if (uploaded.exit != 0) throw new IOException("Access-marker upload failed; inspect remote before retrying");
+        try {
+            java.io.FileDescriptor descriptor = android.system.Os.open(local.getAbsolutePath(),
+                    android.system.OsConstants.O_WRONLY | android.system.OsConstants.O_CREAT
+                            | android.system.OsConstants.O_EXCL | android.system.OsConstants.O_NOFOLLOW, 0600);
+            try (java.io.FileOutputStream out = new java.io.FileOutputStream(descriptor)) {
+                out.write(content); out.getFD().sync();
+            }
+        } catch (android.system.ErrnoException e) {
+            throw new IOException("Local access marker could not be created exclusively; inspect both roots", e);
+        }
+    }
+
     private void preflightBisync(Task task) throws IOException {
+        preflightBisync(task, false);
+    }
+
+    private void preflightBisync(Task task, boolean settingUpMarkers) throws IOException {
+        Captured help = capture(createCommand("bisync", "--help"), getRcloneEnv(), 256 * 1024, 30000);
+        if (help.exit != 0) throw new IOException("Bisync engine capability discovery failed");
+        Captured globalHelp = capture(createCommand("help", "flags"), getRcloneEnv(), 1024 * 1024, 30000);
+        if (globalHelp.exit != 0) throw new IOException("Global engine capability discovery failed");
+        ca.pkay.rcloneexplorer.bisync.BisyncCapabilities.verify(context, help.text + "\n" + globalHelp.text);
         File local = new File(task.getLocalPath());
         if (!local.isDirectory() || !local.canRead()) throw new IOException("Local bisync root is unavailable");
         String[] roots = {local.getCanonicalPath(), task.getRemoteId() + ":" + task.getRemotePath()};
@@ -961,15 +1005,22 @@ public class Rclone {
             if (result.exit != 0) throw new IOException("Bisync root listing failed; no changes were started");
             try {
                 JSONArray files = new JSONArray(result.text);
+                boolean accessMarkerFound = false;
+                java.util.HashSet<String> normalizedPaths = new java.util.HashSet<>();
                 for (int i = 0; i < files.length(); i++) {
                     JSONObject file = files.getJSONObject(i);
+                    ca.pkay.rcloneexplorer.util.BisyncListingSafety.addPath(normalizedPaths, file.getString("Path"));
                     if (!file.getBoolean("IsDir")) {
+                        if (file.optString("Path").equals(BisyncSession.accessFilename(task))) accessMarkerFound = true;
                         JSONObject hashes = file.optJSONObject("Hashes");
                         String hash = hashes == null ? "" : hashes.optString("SHA-1");
                         if (file.getLong("Size") < 0 || !hash.matches("(?i)[0-9a-f]{40}")) {
                             throw new IOException("Bisync requires verified plaintext size and SHA-1 for every file");
                         }
                     }
+                }
+                if (!settingUpMarkers && task.getBisyncOptions().getRequireAccess() && !accessMarkerFound) {
+                    throw new IOException("Access marker is missing; root is unavailable and no changes were started");
                 }
             } catch (JSONException e) { throw new IOException("Bisync listing was incomplete or invalid", e); }
         }
@@ -1251,38 +1302,14 @@ public class Rclone {
 
     public InputStream downloadToPipe(String rclonePath) throws IOException {
         String[] command = createCommandWithOptions("cat", rclonePath);
-        String[] env = getRcloneEnv();
-        final Process process = getRuntimeProcess(command, env);
-        new Thread() {
-            @Override
-            public void run() {
-                try {
-                    process.waitFor();
-                    logErrorOutput(process);
-                } catch (InterruptedException e) {
-                    FLog.e(TAG, "downloadToPipe: error waiting for process", e);
-                }
-            }
-        }.start();
-        return process.getInputStream();
+        Process process = getRuntimeProcess(command, getRcloneEnv());
+        return ca.pkay.rcloneexplorer.util.NativePipeStreams.download(process);
     }
 
     public OutputStream uploadFromPipe(String rclonePath) throws IOException {
         String[] command = createCommandWithOptions("rcat", rclonePath, "--streaming-upload-cutoff", "500K");
-        String[] env = getRcloneEnv();
-        final Process process = getRuntimeProcess(command, env);
-        new Thread() {
-            @Override
-            public void run() {
-                try {
-                    process.waitFor();
-                    logErrorOutput(process);
-                } catch (InterruptedException e) {
-                    FLog.e(TAG, "uploadFromPipe: error waiting for process", e);
-                }
-            }
-        }.start();
-        return process.getOutputStream();
+        Process process = getRuntimeProcess(command, getRcloneEnv());
+        return ca.pkay.rcloneexplorer.util.NativePipeStreams.upload(process);
     }
 
     public boolean emptyTrashCan(String remote) {
@@ -1794,6 +1821,21 @@ public class Rclone {
         }
     }
 
+    private static final ThreadLocal<Boolean> VAULT_BOOTSTRAP = new ThreadLocal<>();
+
+    /** Called before native operations. Journaled migration never runs recursively in its helpers. */
+    public void ensureConfigEncrypted() throws IOException {
+        if (Boolean.TRUE.equals(VAULT_BOOTSTRAP.get()) || ConfigRestoreJournal.isRestoring()) return;
+        synchronized (Rclone.class) {
+            File config = new File(rcloneConf);
+            if (config.exists() && nativeEncryptedHeader(config)) return;
+            VAULT_BOOTSTRAP.set(true);
+            try {
+                encryptConfigForBackup(ConfigSecretStore.newPassword());
+            } finally { VAULT_BOOTSTRAP.remove(); }
+        }
+    }
+
     /** Encrypt through rclone itself; passwords enter stdin/environment only, never argv or logs. */
     public void encryptConfigForBackup(String password) throws IOException {
         if (password == null || password.trim().isEmpty() || password.length() > 1024
@@ -1806,15 +1848,20 @@ public class Rclone {
                 try { ConfigSecretStore.store(context, password); }
                 catch (IOException e) { throw new IllegalStateException("Cannot protect configuration unlock", e); }
             }, () -> {
-                if (nativeEncryptedHeader(new File(rcloneConf))) {
+                if (new File(rcloneConf).exists() && nativeEncryptedHeader(new File(rcloneConf))) {
                     throw new IOException("Configuration is already encrypted; export it directly");
                 }
-                try (InputStream in = new FileInputStream(rcloneConf); FileOutputStream out = new FileOutputStream(staged)) {
-                    byte[] bytes = new byte[8192]; int n; long total = 0;
-                    while ((n = in.read(bytes)) != -1) {
-                        total += n;
-                        if (total > 16L * 1024 * 1024) throw new IOException("Configuration exceeds size limit");
-                        out.write(bytes, 0, n);
+                File source = new File(rcloneConf);
+                try (FileOutputStream out = new FileOutputStream(staged)) {
+                    if (source.exists()) {
+                        try (InputStream in = new FileInputStream(source)) {
+                            byte[] bytes = new byte[8192]; int n; long total = 0;
+                            while ((n = in.read(bytes)) != -1) {
+                                total += n;
+                                if (total > 16L * 1024 * 1024) throw new IOException("Configuration exceeds size limit");
+                                out.write(bytes, 0, n);
+                            }
+                        }
                     }
                     out.getFD().sync();
                 }
@@ -1864,39 +1911,148 @@ public class Rclone {
         } catch (IOException e) { return false; }
     }
 
-    public void exportConfigFile(Uri uri) throws IOException {
-        // Serialize into private staging first: a destination never receives plaintext config.
-        File staged = File.createTempFile("credential-backup-", ".zip", context.getFilesDir());
+    /** Complete encrypted archive; the device unlock is protected inside an AES-256 entry. */
+    public void exportProtectedBackup(Uri uri, char[] archivePassword) throws IOException {
+        ensureConfigEncrypted();
+        File staged = File.createTempFile("protected-backup-", ".zip", context.getFilesDir());
+        java.util.Map<String, byte[]> components = new java.util.HashMap<>();
         try (java.io.Closeable admission = BisyncSession.INSTANCE.previewLease(context)) {
-            File config = new File(rcloneConf);
-            if (!nativeEncryptedHeader(config)) throw new IOException("Encrypt the configuration before exporting a credential backup");
-            try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(staged))) {
-                out.putNextEntry(new ZipEntry("rcx.json"));
-                out.write(Exporter.create(context).getBytes(StandardCharsets.UTF_8));
-                out.closeEntry();
-                out.putNextEntry(new ZipEntry("rcx.prefs"));
-                out.write(SharedPreferencesBackup.export(context).getBytes(StandardCharsets.UTF_8));
-                out.closeEntry();
-                out.putNextEntry(new ZipEntry("rclone.conf"));
-                try (InputStream in = new FileInputStream(config)) {
-                    byte[] bytes = new byte[8192]; int n; long total = 0;
-                    while ((n = in.read(bytes)) != -1) {
-                        total += n;
-                        if (total > 16L * 1024 * 1024) throw new IOException("Configuration exceeds backup size limit");
-                        out.write(bytes, 0, n);
-                    }
-                }
-                out.closeEntry();
+            String nativePassword = ConfigSecretStore.password(context);
+            if (nativePassword == null || !nativeEncryptedHeader(new File(rcloneConf)))
+                throw new IOException("Configuration must be unlocked and encrypted");
+            components.put("backup.json", ("{\"format\":\"cloudbridge-backup\",\"version\":1}").getBytes(StandardCharsets.UTF_8));
+            components.put("rcx.json", Exporter.create(context).getBytes(StandardCharsets.UTF_8));
+            JSONObject protectedPreferences = new JSONObject(SharedPreferencesBackup.export(context));
+            protectedPreferences.put("proxyPassword", ca.pkay.rcloneexplorer.util.SecretSettings.password(context,
+                    context.getString(R.string.pref_key_proxy_password)));
+            components.put("rcx.prefs", protectedPreferences.toString().getBytes(StandardCharsets.UTF_8));
+            components.put("rclone.conf", readBoundedBackup(new File(rcloneConf)));
+            components.put("config-unlock.txt", nativePassword.getBytes(StandardCharsets.UTF_8));
+            ca.pkay.rcloneexplorer.util.ProtectedBackup.write(staged, archivePassword, components);
+            copyBackupDestination(staged, uri);
+        } catch (JSONException | RuntimeException e) { throw new IOException("Cannot create protected backup", e); }
+        finally {
+            ca.pkay.rcloneexplorer.util.ProtectedBackup.clear(components);
+            staged.delete();
+        }
+    }
+
+    /** Does not include configuration, account names, task names/paths, logs or secret preferences. */
+    public void exportSupportSummary(Uri uri) throws IOException {
+        File staged = File.createTempFile("support-summary-", ".json", context.getFilesDir());
+        try {
+            JSONObject summary = new JSONObject();
+            summary.put("format", "cloudbridge-support-summary");
+            summary.put("appVersion", BuildConfig.VERSION_NAME);
+            summary.put("engineSHA", BuildConfig.RCLONE_SOURCE_SHA);
+            summary.put("androidApi", Build.VERSION.SDK_INT);
+            summary.put("authenticatedVault", ConfigSecretStore.isAuthenticatedMode(context));
+            try (FileOutputStream output = new FileOutputStream(staged)) {
+                output.write(summary.toString(2).getBytes(StandardCharsets.UTF_8));
+                output.getFD().sync();
             }
-            OutputStream raw = context.getContentResolver().openOutputStream(uri, "wt");
-            if (raw == null) throw new IOException("Cannot open backup destination");
-            try (OutputStream out = raw; InputStream in = new FileInputStream(staged)) {
-                byte[] bytes = new byte[8192]; int n;
-                while ((n = in.read(bytes)) != -1) out.write(bytes, 0, n);
-            }
-        } catch (JSONException e) { throw new IOException("Cannot serialize backup", e); }
-        catch (RuntimeException e) { throw new IOException("A running job prevents configuration backup", e); }
+            copyBackupDestination(staged, uri);
+        } catch (JSONException e) { throw new IOException("Cannot create support summary", e); }
         finally { staged.delete(); }
+    }
+
+    private void copyBackupDestination(File staged, Uri uri) throws IOException {
+        OutputStream raw = context.getContentResolver().openOutputStream(uri, "wt");
+        if (raw == null) throw new IOException("Cannot open backup destination");
+        try (InputStream input = new FileInputStream(staged); OutputStream output = raw) {
+            byte[] bytes = new byte[8192]; int n;
+            while ((n = input.read(bytes)) != -1) output.write(bytes, 0, n);
+        }
+    }
+
+    private byte[] readBoundedBackup(File file) throws IOException {
+        try (InputStream input = new FileInputStream(file); java.io.ByteArrayOutputStream output = new java.io.ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192]; int n;
+            while ((n = input.read(buffer)) != -1) {
+                if (output.size() + (long) n > ca.pkay.rcloneexplorer.util.ProtectedBackup.MAX_COMPONENT)
+                    throw new IOException("Backup component exceeds size limit");
+                output.write(buffer, 0, n);
+            }
+            return output.toByteArray();
+        }
+    }
+
+    private File stageBackupUri(Uri uri) throws IOException {
+        File staged = File.createTempFile("archive-import-", ".zip", context.getFilesDir());
+        try {
+            InputStream raw = context.getContentResolver().openInputStream(uri);
+            if (raw == null) throw new IOException("Cannot open backup");
+            try (InputStream input = raw; FileOutputStream output = new FileOutputStream(staged)) {
+                byte[] buffer = new byte[8192]; int n; long total = 0;
+                while ((n = input.read(buffer)) != -1) {
+                    if ((total += n) > ca.pkay.rcloneexplorer.util.ProtectedBackup.MAX_TOTAL)
+                        throw new IOException("Backup exceeds size limit");
+                    output.write(buffer, 0, n);
+                }
+            }
+            return staged;
+        } catch (IOException e) { staged.delete(); throw e; }
+    }
+
+    public boolean isZipBackup(Uri uri) throws IOException {
+        File staged = stageBackupUri(uri);
+        try (net.lingala.zip4j.ZipFile zip = new net.lingala.zip4j.ZipFile(staged)) { return zip.isValidZipFile(); }
+        finally { staged.delete(); }
+    }
+
+    public boolean isProtectedBackup(Uri uri) throws IOException {
+        File staged = stageBackupUri(uri);
+        try { return ca.pkay.rcloneexplorer.util.ProtectedBackup.isEncryptedArchive(staged); }
+        finally { staged.delete(); }
+    }
+
+    public void importProtectedBackup(Uri uri, char[] archivePassword) throws IOException {
+        File archive = stageBackupUri(uri);
+        File config = File.createTempFile("protected-restore-", ".conf", context.getFilesDir());
+        java.util.Map<String, byte[]> components = new java.util.HashMap<>();
+        try {
+            components = ca.pkay.rcloneexplorer.util.ProtectedBackup.read(archive, archivePassword);
+            JSONObject manifest = new JSONObject(new String(components.get("backup.json"), StandardCharsets.UTF_8));
+            if (!"cloudbridge-backup".equals(manifest.getString("format")) || manifest.getInt("version") != 1)
+                throw new IOException("Unsupported backup format");
+            final Importer.PreparedImport metadata = Importer.prepareJson(new String(components.get("rcx.json"), StandardCharsets.UTF_8));
+            final SharedPreferences.Editor settings = SharedPreferencesBackup.prepareImport(
+                    new String(components.get("rcx.prefs"), StandardCharsets.UTF_8), context);
+            final String proxyPassword = new JSONObject(new String(components.get("rcx.prefs"), StandardCharsets.UTF_8))
+                    .optString("proxyPassword", "");
+            if (proxyPassword.length() > 4096) throw new IOException("Invalid protected proxy credential");
+            final String nativePassword = new String(components.get("config-unlock.txt"), StandardCharsets.UTF_8);
+            if (nativePassword.isEmpty() || nativePassword.length() > 1024 || nativePassword.indexOf('\0') >= 0)
+                throw new IOException("Invalid native configuration unlock");
+            try (FileOutputStream output = new FileOutputStream(config)) {
+                output.write(components.get("rclone.conf")); output.getFD().sync();
+            }
+            if (!nativeEncryptedHeader(config)) throw new IOException("Backup configuration is not encrypted");
+            ConfigRestoreJournal.install(context, config, () -> {
+                metadata.apply(context);
+                if (!settings.commit()) throw new IllegalStateException("Cannot restore settings");
+                try { ca.pkay.rcloneexplorer.util.SecretSettings.store(context,
+                        context.getString(R.string.pref_key_proxy_password), proxyPassword); }
+                catch (IOException e) { throw new IllegalStateException("Cannot protect restored proxy credential", e); }
+                try { ConfigSecretStore.clear(context); ConfigSecretStore.store(context, nativePassword); }
+                catch (IOException e) { throw new IllegalStateException("Cannot protect restored unlock", e); }
+            }, () -> {
+                Captured verified = capture(new String[]{rclone, "--config", config.getAbsolutePath(),
+                        "--ask-password=false", "listremotes"}, new String[]{"RCLONE_CONFIG_PASS=" + nativePassword,
+                        "RCLONE_ASK_PASSWORD=false", "TMPDIR=" + context.getCacheDir().getAbsolutePath()}, 1024 * 1024, 30000);
+                if (verified.exit != 0) throw new IOException("Cannot authenticate backup native configuration");
+            });
+            invalidateRemotesCache();
+        } catch (JSONException | RuntimeException e) { throw new IOException("Invalid protected backup", e); }
+        finally {
+            ca.pkay.rcloneexplorer.util.ProtectedBackup.clear(components);
+            archive.delete(); config.delete();
+        }
+    }
+
+    /** Legacy caller compatibility: new exports require an explicit archive password. */
+    public void exportConfigFile(Uri uri) throws IOException {
+        throw new IOException("Use password-protected full backup or credential-free support summary");
     }
 
     public boolean isCompatible() {

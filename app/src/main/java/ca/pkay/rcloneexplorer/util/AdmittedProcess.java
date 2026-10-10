@@ -58,4 +58,14 @@ public final class AdmittedProcess extends Process {
         return code;
     }
     @Override public void destroy() { delegate.destroy(); }
+
+    /** Forces the owned child where supported; admission remains held until verified exit. */
+    @Override public Process destroyForcibly() {
+        try {
+            Process.class.getMethod("destroyForcibly").invoke(delegate);
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            delegate.destroy();
+        }
+        return this;
+    }
 }

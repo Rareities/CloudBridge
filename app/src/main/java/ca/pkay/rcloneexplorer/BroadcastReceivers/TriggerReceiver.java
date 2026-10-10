@@ -36,15 +36,8 @@ public class TriggerReceiver extends BroadcastReceiver {
             if(i==-1)
                 return;
 
-            Intent service = new Intent(context, TriggerService.class);
-            service.setAction(TriggerService.TRIGGER_RECIEVE);
-            service.putExtra(TriggerService.TRIGGER_ID, i);
-            service.putExtra(ca.pkay.rcloneexplorer.util.ConfigEpoch.WORK_KEY, epoch);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(service);
-            }else{
-                context.startService(service);
-            }
+            ca.pkay.rcloneexplorer.Items.Trigger trigger = new ca.pkay.rcloneexplorer.Database.DatabaseHandler(context).getTrigger(i);
+            if (trigger != null) ca.pkay.rcloneexplorer.scheduling.ScheduleCoordinator.alarmDelivered(context, i, epoch);
         }
     }
 

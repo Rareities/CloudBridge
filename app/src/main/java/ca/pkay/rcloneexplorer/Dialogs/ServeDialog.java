@@ -57,11 +57,10 @@ public class ServeDialog extends DialogFragment {
         user = view.findViewById(R.id.edit_text_user);
         password = view.findViewById(R.id.edit_text_password);
 
-        SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
-        if (pref.contains(getString(R.string.pref_choice_serve_dialog_allow_ext))) {
-            boolean checked = pref.getBoolean(getString(R.string.pref_choice_serve_dialog_allow_ext), false);
-            allowRemoteAccess.setChecked(checked);
-        }
+        // Credentials do not encrypt HTTP/WebDAV/FTP. No TLS configuration is available here.
+        allowRemoteAccess.setChecked(false);
+        allowRemoteAccess.setEnabled(false);
+        allowRemoteAccess.setText(R.string.serve_lan_tls_unavailable);
 
         ((TextInputLayout) view.findViewById(R.id.text_input_layout_user)).setHint("Username");
         ((TextInputLayout) view.findViewById(R.id.text_input_layout_password)).setHint("Password");
@@ -99,6 +98,8 @@ public class ServeDialog extends DialogFragment {
         user.addTextChangedListener(credentialsWatcher);
         password.addTextChangedListener(credentialsWatcher);
 
+        password.setSaveEnabled(false);
+        if (android.os.Build.VERSION.SDK_INT >= 26) password.setImportantForAutofill(android.view.View.IMPORTANT_FOR_AUTOFILL_NO);
         dialog = builder.show();
         updateOkButtonState();
         return dialog;
@@ -122,9 +123,6 @@ public class ServeDialog extends DialogFragment {
         if (!user.getText().toString().trim().isEmpty()) {
             outState.putString("user", user.getText().toString());
         }
-        if (!password.getText().toString().trim().isEmpty()) {
-            outState.putString("password", password.getText().toString());
-        }
     }
 
     @Override
@@ -134,16 +132,15 @@ public class ServeDialog extends DialogFragment {
             return;
         }
 
-        allowRemoteAccess.setChecked(savedInstanceState.getBoolean("allowRemoteAccess", false));
+        allowRemoteAccess.setChecked(false);
         String savedUser = savedInstanceState.getString("user");
         if (savedUser != null) {
             user.setText(savedUser);
         }
 
-        String savedPassword = savedInstanceState.getString("password");
-        if (savedPassword != null) {
-            password.setText(savedPassword);
-        }
+        // Serving passwords are ephemeral and must be reentered after recreation.
+        password.setText("");
+        password.setSaveEnabled(false);
 
         int savedProtocol = savedInstanceState.getInt("protocol", -1);
         if (savedProtocol == R.id.radio_http || savedProtocol == R.id.radio_dlna

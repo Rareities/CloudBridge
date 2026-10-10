@@ -19,7 +19,7 @@ public final class ConfigRestoreJournal {
     public static synchronized void recover(Context c) throws IOException {
         File d = dir(c);
         if (!d.exists()) return;
-        try (java.io.Closeable admission = BisyncSession.INSTANCE.previewLease(c)) {
+        try (java.io.Closeable admission = OperationAdmission.configurationLease(new File(c.getFilesDir(), "bisync-admission.lock"))) {
             ca.pkay.rcloneexplorer.RcloneRcd.quiesceForConfigurationChange();
             recoverLocked(c);
         } catch (RuntimeException e) {
@@ -45,6 +45,8 @@ public final class ConfigRestoreJournal {
                 SharedPreferencesBackup.importJson(read(new File(d, "preferences")), c);
                 File secret = new File(d, "unlock");
                 if (secret.exists()) ConfigSecretStore.restore(c, read(secret));
+                File settingsSecrets = new File(d, "secret-settings");
+                if (settingsSecrets.exists()) SecretSettings.restore(c, read(settingsSecrets));
                 File config = new File(c.getFilesDir(), "rclone.conf");
                 if (new File(d, "had-config").exists()) replace(config, new File(d, "config"));
                 else if (config.exists()) {
@@ -65,7 +67,7 @@ public final class ConfigRestoreJournal {
     /** Preparation and installation share admission, so staged encryption cannot overwrite a newer config. */
     public static synchronized void install(Context c, File staged, Runnable metadata, Preparation preparation) throws IOException {
         restoring = true;
-        try (java.io.Closeable admission = BisyncSession.INSTANCE.previewLease(c)) {
+        try (java.io.Closeable admission = OperationAdmission.configurationLease(new File(c.getFilesDir(), "bisync-admission.lock"))) {
             ca.pkay.rcloneexplorer.RcloneRcd.quiesceForConfigurationChange();
             recoverLocked(c);
             preparation.run();
@@ -95,6 +97,7 @@ public final class ConfigRestoreJournal {
             write(new File(d, "database"), Exporter.create(c).getBytes(StandardCharsets.UTF_8));
             write(new File(d, "preferences"), SharedPreferencesBackup.export(c).getBytes(StandardCharsets.UTF_8));
             write(new File(d, "unlock"), ConfigSecretStore.snapshot(c).getBytes(StandardCharsets.UTF_8));
+            write(new File(d, "secret-settings"), SecretSettings.snapshot(c).getBytes(StandardCharsets.UTF_8));
             File config = new File(c.getFilesDir(), "rclone.conf");
             if (config.exists()) {
                 copy(config, new File(d, "config"));

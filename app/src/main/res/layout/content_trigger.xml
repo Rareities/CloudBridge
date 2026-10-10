@@ -19,6 +19,8 @@
             android:orientation="vertical">
 
 
+            <Button android:id="@+id/schedule_policy_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/schedule_policy_button" />
+            <TextView android:id="@+id/schedule_next_run" android:layout_width="match_parent" android:layout_height="wrap_content" android:padding="8dp" />
             <androidx.cardview.widget.CardView
                 style="@style/SecondaryCardStyle"
                 android:layout_width="match_parent"

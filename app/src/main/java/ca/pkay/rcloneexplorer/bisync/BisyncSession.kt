@@ -6,6 +6,10 @@ import ca.pkay.rcloneexplorer.Rclone
 import org.json.JSONObject
 import java.io.File
 import java.util.ArrayList
+import java.util.UUID
+import ca.pkay.rcloneexplorer.BuildConfig
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 
 /** State is durable/private, separate from cache and exports. Unclean exits never auto-resync. */
 object BisyncSession {
@@ -30,7 +34,7 @@ object BisyncSession {
             "Initial bisync support requires a native local directory and a Proton Drive remote"
         }
         // Ignore rotating session secrets, but bind approval to account and all declared options.
-        val rotating = setOf("client_uid", "client_access_token", "client_refresh_token", "client_salted_key_pass")
+        val rotating = setOf("client_uid", "client_access_token", "client_refresh_token", "client_salted_key_pass", "client_token_generation")
         val values = remote.keys().asSequence().filter { it !in rotating }.sorted()
             .joinToString("") { key -> val value = remote.get(key).toString(); "${key.length}:$key${value.length}:$value" }
         val digest = java.security.MessageDigest.getInstance("SHA-256")
@@ -83,6 +87,9 @@ object BisyncSession {
         check(File(task.localPath).isDirectory && File(task.localPath).canRead()) {
             "Local root is missing or unavailable; bisync was not started"
         }
+        if (task.bisyncOptions.requireAccess) check(File(task.localPath, accessFilename(task)).isFile) {
+            "Local access marker is missing; no bisync changes were started"
+        }
         val directory = root(context, task)
         // Conservatively serialize all app bisync jobs, including aliases/overlapping roots.
         val lease = previewLease(context)
@@ -90,12 +97,24 @@ object BisyncSession {
             val p = prefs(context)
             check(!needsReview(context, task)) { "Bisync needs a successful preview and explicit initialization/recovery approval in the task editor" }
             val initialize = p.getString("${task.stableUUID}.state", null) == "approved"
+            val runId = UUID.randomUUID().toString()
             check(initialize || directory.listFiles()?.count { it.name.endsWith(".lst") } == 2) {
                 "Bisync baseline is missing; review initialization again"
             }
+            val generation = p.getLong("${task.stableUUID}.generation", 0)
+            val configGeneration = ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context)
+            val spec = BisyncJobSpec.from(task, approvalIdentity(context, task).substringAfterLast(':'),
+                BuildConfig.RCLONE_SOURCE_SHA, configGeneration, generation)
+            BisyncMetadata.write(File(directory, "job.json"), Json.encodeToString(spec))
             check(p.edit().putBoolean("${task.stableUUID}.initialize", initialize)
+                .putString("${task.stableUUID}.runId", runId)
                 .putString("${task.stableUUID}.state", "running").commit()) { "Cannot persist run state" }
-            return Run(context.applicationContext, task.stableUUID, lease)
+            val record = BisyncRunRecord(runId = runId, startedAt = System.currentTimeMillis(),
+                phase = if (initialize) "initializing" else "running", engineSha = BuildConfig.RCLONE_SOURCE_SHA,
+                configGeneration = configGeneration, baselineGeneration = generation)
+            val history = BisyncHistory(directory)
+            history.save(record)
+            return Run(context.applicationContext, task.stableUUID, lease, history, record)
         } catch (e: Exception) { lease.close(); throw e }
     }
 
@@ -111,17 +130,47 @@ object BisyncSession {
             result.addAll(listOf("--resync", "--resync-mode", "path1"))
         }
         if (preview) result.add("--dry-run")
-        task.transfers?.let { result.addAll(listOf("--transfers", it.toString())) }
+        BisyncCapabilities.validateCustom(context, task.bisyncOptions.customOptions.keys)
+        result.addAll(task.bisyncOptions.arguments(task.transfers))
+        if (task.bisyncOptions.requireAccess) result.addAll(listOf("--check-access", "--check-filename", accessFilename(task)))
+        if (task.bisyncOptions.backupLocalPath.isNotBlank()) {
+            val suffix = if (preview) "preview" else checkNotNull(prefs(context).getString("${task.stableUUID}.runId", null))
+            result.addAll(listOf("--backup-dir1", File(task.bisyncOptions.backupLocalPath, suffix).canonicalPath,
+                "--backup-dir2", "${task.remoteId}:${BisyncPolicy.normalizeRemote(task.bisyncOptions.backupRemotePath)}/$suffix"))
+        }
         return result
     }
 
+    @JvmStatic fun accessFilename(task: Task) = ".cloudbridge-access-${task.stableUUID}"
+
+    fun history(context: Context, task: Task): List<BisyncRunRecord> = BisyncHistory(root(context, task)).records()
+
+    fun status(context: Context, task: Task): String = prefs(context).getString("${task.stableUUID}.state", "needs initialization")
+        ?: "needs initialization"
+
+    fun effectiveCommand(context: Context, task: Task): String = arguments(context, task, true)
+        .joinToString(" ") { arg -> "'" + arg.replace("'", "'\\''") + "'" }
+
     class Run internal constructor(private val context: Context, private val id: String,
-        private val lease: java.io.Closeable) {
+        private val lease: java.io.Closeable, private val history: BisyncHistory,
+        private var record: BisyncRunRecord) {
         private var finished = false
-        @Synchronized fun complete(success: Boolean) {
+        private var lastProgressWrite = 0L
+        @Synchronized fun progress(bytes: Long, transfers: Long, errors: Long) {
+            if (finished) return
+            record = record.copy(bytes = bytes.coerceAtLeast(0), transfers = transfers.coerceAtLeast(0), errors = errors.coerceAtLeast(0))
+            val now = System.currentTimeMillis()
+            if (now - lastProgressWrite >= 5000) {
+                history.save(record); lastProgressWrite = now
+            }
+        }
+        @JvmOverloads @Synchronized fun complete(success: Boolean, exitCode: Int? = null) {
             if (finished) return
             finished = true
             try {
+                // Record durable terminal evidence before promoting a successful baseline.
+                history.save(record.copy(endedAt = System.currentTimeMillis(), exitCode = exitCode,
+                    phase = if (success) "success" else "recovery required"))
                 check(prefs(context).edit().putString("$id.state", if (success) "ready" else "recovery")
                     .putBoolean("$id.initialize", false)
                     .putLong("$id.generation", prefs(context).getLong("$id.generation", 0) + 1).commit()) { "Cannot persist terminal state" }

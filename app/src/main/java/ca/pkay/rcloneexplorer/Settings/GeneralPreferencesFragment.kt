@@ -12,6 +12,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceManager
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import ca.pkay.rcloneexplorer.AppShortcutsHelper
 import ca.pkay.rcloneexplorer.Items.RemoteItem
 import ca.pkay.rcloneexplorer.R
@@ -28,13 +32,59 @@ class GeneralPreferencesFragment : PreferenceFragmentCompat() {
 
 
     private lateinit var sharedPreferences: SharedPreferences
+    private var pendingAuthenticatedMode: Boolean? = null
+    private val credentialRequest = 175
 
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.settings_general_preferences, rootKey)
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(requireContext())
         requireActivity().title = getString(R.string.pref_header_general)
+        val secretKey = getString(R.string.pref_key_proxy_password)
+        findPreference<androidx.preference.EditTextPreference>(secretKey)?.apply {
+            isPersistent = false
+            summaryProvider = null
+            summary = ""
+            try { text = ca.pkay.rcloneexplorer.util.SecretSettings.password(requireContext(), secretKey) }
+            catch (_: java.io.IOException) { text = ""; isEnabled = false }
+            setOnBindEditTextListener { field ->
+                field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                field.isSaveEnabled = false
+                if (Build.VERSION.SDK_INT >= 26) field.importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO
+            }
+            setOnPreferenceChangeListener { _, value ->
+                try {
+                    ca.pkay.rcloneexplorer.util.SecretSettings.store(requireContext(), secretKey, value.toString())
+                    true
+                } catch (_: java.io.IOException) {
+                    Toasty.error(requireContext(), getString(R.string.backup_encrypt_failed), Toast.LENGTH_LONG, true).show()
+                    false
+                }
+            }
+        }
 
+
+
+        val vaultPreference = Preference(requireContext()).apply {
+            key = "vaultModeTempKey"
+            setTitle(R.string.vault_mode_title)
+            setSummary(R.string.vault_mode_explanation)
+            setOnPreferenceClickListener {
+                AlertDialog.Builder(requireContext()).setTitle(R.string.vault_mode_title)
+                    .setItems(arrayOf(getString(R.string.vault_unattended), getString(R.string.vault_authenticated))) { _, choice ->
+                        val keyguard = requireContext().getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+                        val intent = keyguard.createConfirmDeviceCredentialIntent(getString(R.string.vault_mode_title), getString(R.string.vault_mode_explanation))
+                        if (intent == null) {
+                            Toasty.error(requireContext(), getString(R.string.vault_requires_screen_lock), Toast.LENGTH_LONG, true).show()
+                        } else {
+                            pendingAuthenticatedMode = choice == 1
+                            startActivityForResult(intent, credentialRequest)
+                        }
+                    }.show()
+                true
+            }
+        }
+        preferenceScreen.addPreference(vaultPreference)
 
         val thumbnailKey = getString(R.string.pref_key_thumbnail_size_limit)
         val thumbnailSizePreference = findPreference(thumbnailKey) as FilesizePreference?
@@ -65,6 +115,28 @@ class GeneralPreferencesFragment : PreferenceFragmentCompat() {
             true
         }
 
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != credentialRequest) return
+        val authenticated = pendingAuthenticatedMode ?: return
+        pendingAuthenticatedMode = null
+        if (resultCode != android.app.Activity.RESULT_OK) return
+        ca.pkay.rcloneexplorer.util.ConfigSecretStore.deviceCredentialConfirmed()
+        lifecycleScope.launch {
+            val success = withContext(Dispatchers.IO) {
+                try {
+                    Rclone(requireContext()).ensureConfigEncrypted()
+                    ca.pkay.rcloneexplorer.util.ConfigSecretStore.setAuthenticatedMode(requireContext(), authenticated)
+                    true
+                } catch (_: java.io.IOException) { false }
+            }
+            if (isAdded) {
+                if (success) Toasty.success(requireContext(), getString(R.string.vault_mode_changed), Toast.LENGTH_LONG, true).show()
+                else Toasty.error(requireContext(), getString(R.string.vault_mode_failed), Toast.LENGTH_LONG, true).show()
+            }
+        }
     }
 
     private fun showCancelTransfersConfirmation() {

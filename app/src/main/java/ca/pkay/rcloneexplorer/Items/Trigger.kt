@@ -15,6 +15,7 @@ data class Trigger(var id: Long) {
     var time = 0 // minutes since midnight (schedule), or interval minutes
     @JsonNames("target", "whatToTrigger") var triggerTarget = 0L
     var type = TRIGGER_TYPE_SCHEDULE
+    var schedulePolicy = ca.pkay.rcloneexplorer.scheduling.SchedulePolicy()
 
 
     /**
@@ -80,6 +81,7 @@ data class Trigger(var id: Long) {
         const val COLUMN_NAME_ENABLED = "trigger_enabled"
         const val COLUMN_NAME_TARGET = "trigger_target"
         const val COLUMN_NAME_TYPE = "trigger_type"
+        const val COLUMN_NAME_POLICY = "trigger_policy"
 
         const val TRIGGER_TYPE_SCHEDULE = 0
         const val TRIGGER_TYPE_INTERVAL = 1

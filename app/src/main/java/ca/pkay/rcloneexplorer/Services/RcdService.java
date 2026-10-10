@@ -13,6 +13,10 @@ import android.content.res.Configuration;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
+import java.io.Closeable;
+import ca.pkay.rcloneexplorer.util.DemandTracker;
 import android.util.SparseArray;
 
 import androidx.annotation.NonNull;
@@ -52,7 +56,13 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     private static final int ALIVE_SECONDS_CRITICAL = 30;
 
     private RcloneRcd rcloneRcd;
-    private boolean shutdown;
+    private volatile boolean shutdown;
+    private static final long IDLE_GRACE_MILLIS = 60000;
+    private final DemandTracker demand = new DemandTracker();
+    private Handler idleHandler;
+    private final Runnable idleStop = () -> {
+        if (demand.isIdle(System.nanoTime(), TimeUnit.MILLISECONDS.toNanos(IDLE_GRACE_MILLIS))) shutdownIfPossible();
+    };
     private volatile boolean available;
     private final Object onlineLock = new Object();
     private long initNanosTimestamp = 0;
@@ -70,19 +80,15 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
-        initNanosTimestamp = System.nanoTime();
+        onNotifyUse();
         FLog.d(TAG, "onBind: client binds to service");
         return binder;
     }
 
     @Override
     public void onRcdJobsUpdate(@NonNull SparseArray<RcloneRcd.JobStatusResponse> status) {
+        if (shutdown) return;
         onNotifyUse();
-        if(shutdown) {
-            FLog.w(TAG, "Unexpected jobs update after service shutdown, reviving service");
-            showNotification();
-            shutdown = false;
-        }
         int flags = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags = PendingIntent.FLAG_IMMUTABLE;
@@ -147,7 +153,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
 
     @Override
     public void onRebind(Intent intent) {
-        initNanosTimestamp = System.nanoTime();
+        onNotifyUse();
         FLog.v(TAG, "onRebind: client binds again");
         super.onRebind(intent);
     }
@@ -162,7 +168,8 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     @Override
     public void onCreate() {
         super.onCreate();
-        initNanosTimestamp = System.nanoTime();
+        idleHandler = new Handler(Looper.getMainLooper());
+        onNotifyUse();
         FLog.d(TAG, "onCreate: service is being created");
         shutdown = false;
         notificationManager = NotificationManagerCompat.from(getApplicationContext());
@@ -268,14 +275,31 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
      * spans and can use this method to inform the service that when it s in use.
      *
      */
+    @Override public void onRcdUse() { onNotifyUse(); }
+
     public void onNotifyUse() {
         initNanosTimestamp = System.nanoTime();
+        demand.touch(initNanosTimestamp);
+        if (idleHandler != null) {
+            idleHandler.removeCallbacks(idleStop);
+            idleHandler.postDelayed(idleStop, IDLE_GRACE_MILLIS);
+        }
+    }
+
+    /** Open-document streams retain demand until their pipe thread closes both ends. */
+    public Closeable acquireDemand() {
+        Closeable lease = demand.acquire();
+        onNotifyUse();
+        return () -> {
+            lease.close();
+            onNotifyUse();
+        };
     }
 
     private void shutdownIfPossible() {
-        if (null != rcloneRcd) {
-            if (!rcloneRcd.hasPendingJobs()) {
-                FLog.d(TAG, "No running jobs, killing service");
+        synchronized (onlineLock) {
+            if (demand.hasDemand()) return;
+            if (rcloneRcd != null && rcloneRcd.stopIfIdle()) {
                 shutdown();
                 stopForeground(true);
                 stopSelf();
@@ -284,6 +308,9 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     }
 
     private void shutdown() {
+        synchronized (onlineLock) {
+        if (idleHandler != null) idleHandler.removeCallbacks(idleStop);
+        available = false;
         FLog.d(TAG, "Service shutting down");
         if (activeTransferLocks != null) {
             activeTransferLocks.release();
@@ -294,6 +321,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
             rcloneRcd = null;
         }
         shutdown = true;
+        }
     }
 
     /**
@@ -335,7 +363,9 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
                 }
                 try {
                     onlineLock.wait(150);
-                } catch (InterruptedException ignored) {
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return false;
                 }
                 retries--;
             }
@@ -344,13 +374,19 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     }
 
     public RcloneRcd getLocalRcd() {
+        onNotifyUse();
         synchronized (onlineLock) {
+            shutdown = false;
             if (null == rcloneRcd || !rcloneRcd.isAlive()) {
                 FLog.d(TAG, "Creating rcd process");
+                if (rcloneRcd != null) rcloneRcd.stopRcd();
+                available = false;
                 rcloneRcd = new RcloneRcd(getApplicationContext(), this);
                 rcloneRcd.startRcd();
             } else if (rcloneRcd.hasCrashed()) {
                 FLog.d(TAG, "Reviving rclone");
+                if (rcloneRcd != null) rcloneRcd.stopRcd();
+                available = false;
                 rcloneRcd = new RcloneRcd(getApplicationContext(), this);
                 rcloneRcd.startRcd();
             }

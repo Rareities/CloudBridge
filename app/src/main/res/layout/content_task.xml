@@ -136,6 +136,32 @@
                         android:hint="@string/bisync_delete_limit"
                         android:visibility="gone" />
 
+                    <LinearLayout
+                        android:id="@+id/task_bisync_controls"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+                        <Button
+                            android:id="@+id/task_bisync_advanced"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:text="@string/bisync_advanced" />
+                        <Button
+                            android:id="@+id/task_bisync_access"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:text="@string/bisync_access_setup" />
+                        <Button
+                            android:id="@+id/task_bisync_history"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="48dp"
+                            android:text="@string/bisync_history" />
+                    </LinearLayout>
+
                     <TextView
                         android:id="@+id/label_transfers"
                         android:layout_width="match_parent"

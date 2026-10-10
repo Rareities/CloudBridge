@@ -19,6 +19,15 @@ class NotificationUtils {
         @SuppressLint("MissingPermission") // Checked by PermissionManager(context).grantedNotifications()
         @JvmStatic
         fun createNotification(context: Context, notificationId: Int, notification: Notification) {
+            if (notification.visibility != Notification.VISIBILITY_SECRET) {
+                notification.visibility = Notification.VISIBILITY_PRIVATE
+                notification.publicVersion = android.app.Notification.Builder(context)
+                    .setSmallIcon(notification.icon)
+                    .setContentTitle("CloudBridge")
+                    .setContentText("Background operation")
+                    .setVisibility(Notification.VISIBILITY_PUBLIC)
+                    .build()
+            }
             if(PermissionManager(context).grantedNotifications()) {
                 val notificationManager = NotificationManagerCompat.from(context)
                 notificationManager.notify(notificationId, notification)
@@ -38,6 +47,7 @@ class NotificationUtils {
                     importance
                 )
                 channel.description = description
+                channel.lockscreenVisibility = Notification.VISIBILITY_PRIVATE
                 // Register the channel with the system
                 val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager?
                 notificationManager?.createNotificationChannel(channel)

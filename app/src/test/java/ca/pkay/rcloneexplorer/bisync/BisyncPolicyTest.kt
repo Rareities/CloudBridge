@@ -44,4 +44,24 @@ class BisyncPolicyTest {
     fun refusesWorkdirTraversalInJobIdentity() {
         BisyncPolicy.validate(task().apply { stableUUID = "../../other" })
     }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun refusesBackupInsideLocalRoot() {
+        BisyncPolicy.validate(task().apply {
+            bisyncOptions = BisyncOptions(backupLocalPath = "/tmp/cloudbridge/photos/backups", backupRemotePath = "/backup")
+        })
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun refusesRemoteBackupAliasUsingParentSegments() {
+        BisyncPolicy.validate(task().apply {
+            bisyncOptions = BisyncOptions(backupLocalPath = "/tmp/backups", backupRemotePath = "/backup/../photos")
+        })
+    }
+
+    @Test fun pathOverlapComparesComponents() {
+        assertFalse(BisyncPolicy.overlap("/photos", "/photos-backup"))
+        assertTrue(BisyncPolicy.overlap("/photos", "/photos/sub"))
+        assertTrue(BisyncPolicy.overlap("/", "/backup"))
+    }
 }

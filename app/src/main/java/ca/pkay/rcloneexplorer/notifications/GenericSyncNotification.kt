@@ -38,6 +38,13 @@ class GenericSyncNotification(var mContext: Context) {
             mContext,
             channelID
         )
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(NotificationCompat.Builder(mContext, channelID)
+                .setSmallIcon(icon)
+                .setContentTitle("CloudBridge")
+                .setContentText("Background operation")
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .build())
             .setSmallIcon(icon)
             .setContentTitle(title)
             .setContentText(content)
@@ -65,6 +72,7 @@ class GenericSyncNotification(var mContext: Context) {
             // the NotificationChannel class is new and not in the support library
             val channel = NotificationChannel(channelID, channelName, NotificationManager.IMPORTANCE_LOW)
             channel.description = description
+            channel.lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
             // Register the channel with the system
             val notificationManager = mContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannelGroup(NotificationChannelGroup(groupID, groupDescription))

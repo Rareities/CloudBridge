@@ -60,7 +60,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
 
     internal enum class FAILURE_REASON {
-        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION
+        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION, DEADLINE
     }
 
     // Objects
@@ -85,6 +85,16 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     private val receiverRegistered = AtomicBoolean(false)
     private val terminalLock = Any()
     private var silentRun = false
+    @Volatile private var deadline: ProcessDeadline? = null
+    private var activeBisyncRun: ca.pkay.rcloneexplorer.bisync.BisyncSession.Run? = null
+    private var nativeExitCode: Int? = null
+    private var deferred = false
+    private var temporaryExit = false
+    private val automaticPolicy by lazy {
+        inputData.getString("schedule_policy")?.let {
+            Json.decodeFromString<ca.pkay.rcloneexplorer.scheduling.SchedulePolicy>(it).also { policy -> policy.validate() }
+        }
+    }
     private val ongoingNotificationID = Random().nextInt()
 
 
@@ -95,6 +105,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
 
 
     override fun doWork(): Result {
+        // Delay before acquiring foreground quota or transfer locks. Manual work ignores quiet hours.
+        try { if ((automaticPolicy?.quietDelay(System.currentTimeMillis()) ?: 0) > 0) return Result.retry() }
+        catch (invalid: Exception) { return Result.failure() }
         try {
             prepareNotifications()
             registerBroadcastReceivers()
@@ -108,6 +121,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             if (task == null) {
                 failureReason = FAILURE_REASON.NO_TASK
             } else {
+                mRclone.ensureConfigEncrypted()
                 mTask = task
                 if (!isStopped) handleTask() else failureReason = FAILURE_REASON.CANCELLED
             }
@@ -118,13 +132,16 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
             if (failureReason == FAILURE_REASON.NO_FAILURE) failureReason = FAILURE_REASON.RCLONE_ERROR
             log("Sync failed: ${e.javaClass.simpleName}")
         } finally {
+            deferred = !isStopped && ::mTask.isInitialized && mTask.direction != SyncDirectionObject.SYNC_BIDIRECTIONAL &&
+                runAttemptCount < (automaticPolicy?.maxRetries ?: 3) &&
+                (temporaryExit || failureReason == FAILURE_REASON.NO_CONNECTION || failureReason == FAILURE_REASON.NO_UNMETERED)
             try {
                 cleanup()
             } finally {
                 postSync()
             }
         }
-        return if (failureReason == FAILURE_REASON.NO_FAILURE) Result.success() else Result.failure()
+        return if (deferred) Result.retry() else if (failureReason == FAILURE_REASON.NO_FAILURE) Result.success() else Result.failure()
     }
 
     override fun onStopped() {
@@ -132,11 +149,13 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
         synchronized(terminalLock) {
             if (!endNotificationAlreadyPosted) failureReason = FAILURE_REASON.CANCELLED
         }
-        sRcloneProcess?.destroy()
+        deadline?.stop() ?: sRcloneProcess?.destroy()
         // doWork owns final notification and cleanup after its streams have stopped.
     }
 
     private fun cleanup() {
+        deadline?.close()
+        deadline = null
         sRcloneProcess?.destroy()
         sRcloneProcess = null
         if (receiverRegistered.compareAndSet(true, false)) {
@@ -185,6 +204,7 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                         || mTask.direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
                 sRcloneProcess = if (mTask.direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) {
                     bisyncRun = ca.pkay.rcloneexplorer.bisync.BisyncSession.prepare(mContext, mTask)
+                    activeBisyncRun = bisyncRun
                     checkQueuedConfiguration()
                     mRclone.bisync(mTask, taskFilterList)
                 } else if (isCloudToCloud) {
@@ -221,7 +241,12 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                     failureReason = FAILURE_REASON.CANCELLED
                     sRcloneProcess?.destroy()
                 }
+                deadline = ProcessDeadline(sRcloneProcess!!,(automaticPolicy?.maxRuntimeMinutes ?: 300)*60_000L, expired = {
+                    synchronized(terminalLock) { if(!endNotificationAlreadyPosted) failureReason=FAILURE_REASON.DEADLINE }
+                })
                 handleSync(mTitle)
+                deadline?.close()
+                deadline = null
                 if (failureReason != FAILURE_REASON.NO_FAILURE) return
                 bisyncSucceeded = !isStopped
                 if (isCloudToCloud) {
@@ -232,9 +257,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 }
             } finally {
                 try {
-                    bisyncRun?.complete(bisyncSucceeded && !isStopped)
+                    activeBisyncRun = null
+                    bisyncRun?.complete(bisyncSucceeded && !isStopped, nativeExitCode)
                 } finally {
-                    try { mutationLease?.close() } finally { transferLocks?.release() }
+                    try { mutationLease?.close() } finally { transferLocks?.releaseAfterExit(sRcloneProcess) }
                 }
             }
         }
@@ -263,9 +289,12 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                             if (logline.has(key)) logline.put(key,
                                 ca.pkay.rcloneexplorer.util.SecretRedactor.redact(logline.optString(key)))
                         }
+                        logline.optJSONObject("stats")?.let { stats ->
+                            activeBisyncRun?.progress(stats.optLong("bytes"),stats.optLong("transfers"),stats.optLong("errors"))
+                        }
                         statusObject.parseLoglineToStatusObject(logline)
                         val now = android.os.SystemClock.elapsedRealtime()
-                        if (statusObject.notificationContent.isNotEmpty() && now - lastNotifyMs >= 500L) {
+                        if (statusObject.notificationContent.isNotEmpty() && now - lastNotifyMs >= 1000L) {
                             lastNotifyMs = now
                             updateForegroundNotification(mNotificationManager.updateSyncNotification(
                                 title, statusObject.notificationContent, statusObject.notificationBigText,
@@ -275,6 +304,8 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                         log("Ignoring non-JSON progress output")
                     }
                 }
+                nativeExitCode = exitCode
+                temporaryExit = exitCode == 5 && failureReason == FAILURE_REASON.NO_FAILURE
                 if (exitCode != 0 && failureReason == FAILURE_REASON.NO_FAILURE) {
                     failureReason = FAILURE_REASON.RCLONE_ERROR
                 }
@@ -293,9 +324,10 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     }
 
     private fun postSync() {
+        if (deferred) return
         synchronized(terminalLock) {
             if (endNotificationAlreadyPosted) return
-            if (isStopped) failureReason = FAILURE_REASON.CANCELLED
+            if (isStopped && failureReason != FAILURE_REASON.DEADLINE) failureReason = FAILURE_REASON.CANCELLED
             endNotificationAlreadyPosted = true
         }
         if (silentRun) {
@@ -315,6 +347,9 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
                 showCancelledNotification(notificationId)
                 endNotificationAlreadyPosted = true
                 return
+            }
+            FAILURE_REASON.DEADLINE -> {
+                content = "Runtime limit reached; review the run before trying again"
             }
             FAILURE_REASON.NO_TASK -> {
                 content = getString(R.string.operation_failed_notask)

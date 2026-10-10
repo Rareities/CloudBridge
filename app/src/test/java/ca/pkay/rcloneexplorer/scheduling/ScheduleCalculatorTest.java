@@ -62,4 +62,25 @@ public class ScheduleCalculatorTest {
     @Test(expected = IllegalArgumentException.class) public void rejectsInvalidClock() {
         ScheduleCalculator.nextDaily(0, 1440, 127, TimeZone.getTimeZone("UTC"));
     }
+    @Test public void quietHoursCrossMidnightAndBoundaries() {
+        TimeZone zone=TimeZone.getTimeZone("UTC");
+        assertEquals(9*60*60_000L,ScheduleCalculator.quietDelay(time("UTC",2026,10,10,22,0),1320,420,zone));
+        assertEquals(6*60*60_000L,ScheduleCalculator.quietDelay(time("UTC",2026,10,11,1,0),1320,420,zone));
+        assertEquals(0,ScheduleCalculator.quietDelay(time("UTC",2026,10,11,7,0),1320,420,zone));
+        assertEquals(0,ScheduleCalculator.quietDelay(time("UTC",2026,10,11,12,0),-1,-1,zone));
+    }
+    @Test public void quietHoursUseCivilDstEnd() {
+        assertEquals(8*60*60_000L,ScheduleCalculator.quietDelay(time("Europe/Berlin",2026,3,28,22,0),1320,420,TimeZone.getTimeZone("Europe/Berlin")));
+    }
+    @Test public void missedIntervalsCoalesceWithOriginalAnchor() {
+        assertEquals(601_000L,ScheduleCalculator.nextInterval(599_999L,1_000L,1));
+        assertEquals(61_000L,ScheduleCalculator.nextInterval(1_000L,1_000L,1));
+        assertEquals(61_000L,ScheduleCalculator.nextInterval(2_000L,61_000L,1));
+    }
+    @Test(expected=IllegalArgumentException.class) public void dueDateOverflowRejected() {
+        ScheduleCalculator.nextInterval(Long.MAX_VALUE-1,0,1);
+    }
+    @Test(expected=IllegalArgumentException.class) public void quietHoursMustHaveAnEnd() {
+        ScheduleCalculator.quietDelay(0,100,100,TimeZone.getTimeZone("UTC"));
+    }
 }

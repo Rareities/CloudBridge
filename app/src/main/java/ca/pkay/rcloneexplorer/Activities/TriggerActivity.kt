@@ -89,6 +89,7 @@ class TriggerActivity : AppCompatActivity() {
         dbHandler = DatabaseHandler(this)
         mTaskList = dbHandler.allTasks
 
+        mTrigger = Trigger(Trigger.TRIGGER_ID_DOESNTEXIST)
         val extras = intent.extras
         val triggerId: Long
         if (extras != null) {
@@ -204,6 +205,7 @@ class TriggerActivity : AppCompatActivity() {
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
+        findViewById<android.widget.Button>(R.id.schedule_policy_button).setOnClickListener { editPolicy() }
         updateUiFromTrigger()
     }
 
@@ -234,7 +236,7 @@ class TriggerActivity : AppCompatActivity() {
         mTitle.setText(mTrigger.title)
         mEnabled.isChecked = mTrigger.isEnabled
 
-        // seconds if time is schedule, otherwise minutes (as in interval).
+        // Minutes since midnight for daily schedules; minutes between interval occurrences.
         val timeValue = mTrigger.time
         if (mTrigger.type == Trigger.TRIGGER_TYPE_SCHEDULE) {
             mCardWeekday.visibility = View.VISIBLE
@@ -259,12 +261,62 @@ class TriggerActivity : AppCompatActivity() {
             }
         }
 
+        updateNextRun()
         //Todo properly populate the fields
         for (task in mTaskList) {
             if (task.id == mTrigger.triggerTarget) {
                 mTargetDropdown.setSelection(mTaskList.indexOf(task))
             }
         }
+    }
+
+    private fun updateNextRun() {
+        val due = try { ca.pkay.rcloneexplorer.scheduling.ScheduleCoordinator.nextRun(this,mTrigger) }
+            catch (invalid: Exception) { -1L }
+        val text = if(due < 0) getString(R.string.schedule_none) else
+            getString(R.string.schedule_next, java.text.DateFormat.getDateTimeInstance().apply {
+                timeZone=mTrigger.schedulePolicy.timezone()
+            }.format(java.util.Date(due)))
+        findViewById<android.widget.TextView>(R.id.schedule_next_run).text=text
+    }
+
+    private fun editPolicy() {
+        val p=mTrigger.schedulePolicy
+        val form=android.widget.LinearLayout(this).apply { orientation=android.widget.LinearLayout.VERTICAL; setPadding(32,16,32,16) }
+        fun field(label:Int,value:String)=EditText(this).apply { hint=getString(label); setText(value); form.addView(this) }
+        fun flag(label:Int,value:Boolean)=CheckBox(this).apply { text=getString(label); isChecked=value; form.addView(this) }
+        fun civil(minute:Int)=if(minute<0) "" else "%02d:%02d".format(java.util.Locale.ROOT,minute/60,minute%60)
+        val zone=field(R.string.schedule_zone,p.timezoneId)
+        val start=field(R.string.schedule_quiet_start,civil(p.quietStartMinute))
+        val end=field(R.string.schedule_quiet_end,civil(p.quietEndMinute))
+        val runtime=field(R.string.schedule_runtime,p.maxRuntimeMinutes.toString())
+        val retries=field(R.string.schedule_retries,p.maxRetries.toString())
+        val network=flag(R.string.schedule_unmetered,p.unmeteredOnly)
+        val battery=flag(R.string.schedule_battery,p.batteryNotLow)
+        val charging=flag(R.string.schedule_charging,p.chargingOnly)
+        val exact=flag(R.string.schedule_exact,p.exactTime)
+        val scroll=android.widget.ScrollView(this).apply { addView(form) }
+        val dialog=androidx.appcompat.app.AlertDialog.Builder(this).setTitle(R.string.schedule_policy_title)
+            .setView(scroll).setNegativeButton(android.R.string.cancel,null).setPositiveButton(android.R.string.ok,null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    fun parse(v:String):Int {
+                        if(v.isBlank()) return -1
+                        require(v.matches(Regex("[0-9]{2}:[0-9]{2}")))
+                        val parts=v.split(":").map { it.toInt() }; require(parts[0] in 0..23 && parts[1] in 0..59)
+                        return parts[0]*60+parts[1]
+                    }
+                    mTrigger.schedulePolicy=p.copy(timezoneId=zone.text.toString().trim(),
+                        quietStartMinute=parse(start.text.toString()),quietEndMinute=parse(end.text.toString()),
+                        maxRuntimeMinutes=runtime.text.toString().toInt(),maxRetries=retries.text.toString().toInt(),
+                        unmeteredOnly=network.isChecked,batteryNotLow=battery.isChecked,chargingOnly=charging.isChecked,exactTime=exact.isChecked)
+                        .also { it.validate() }
+                    updateNextRun(); dialog.dismiss()
+                } catch(invalid:Exception) { Toasty.error(this,getString(R.string.schedule_invalid)).show() }
+            }
+        }
+        dialog.show()
     }
 
     private fun checkTaskExistence(): Boolean {
@@ -276,6 +328,7 @@ class TriggerActivity : AppCompatActivity() {
     }
 
     private fun saveTrigger() {
+        try { mTrigger.schedulePolicy.validate() } catch(invalid:Exception) { Toasty.error(this,getString(R.string.schedule_invalid)).show(); return }
         // check if title is set
         if (mTrigger.title.isBlank()) {
             Toasty.error(this, this.resources.getString(R.string.trigger_save_notitle)).show()

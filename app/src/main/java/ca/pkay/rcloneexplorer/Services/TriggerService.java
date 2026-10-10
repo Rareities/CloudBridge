@@ -62,90 +62,17 @@ public class TriggerService extends Service {
 
     private void queueSingleTrigger(Trigger trigger, long epoch) {
         if (epoch != ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context)) return;
-        if (!trigger.isEnabled()) {
-            cancelTrigger(trigger.getId());
-        } else if (trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
-            queueSingleScheduleTrigger(trigger, epoch);
-        } else if (trigger.getType() == Trigger.TRIGGER_TYPE_INTERVAL) {
-            queueSingleIntervalTrigger(trigger, epoch);
-        } else {
-            cancelTrigger(trigger.getId());
-            Log.w("TriggerService", "Unsupported trigger type");
-        }
-    }
-
-    @SuppressLint("ScheduleExactAlarm") // this is caught by the PermissionManager itself
-    private void queueSingleScheduleTrigger(Trigger trigger, long epoch){
-        if(trigger.isEnabled()){
-            final long timeToTrigger;
-            try {
-                timeToTrigger = ScheduleCalculator.nextDaily(System.currentTimeMillis(),
-                        trigger.getTime(), trigger.getWeekdays(), TimeZone.getDefault());
-            } catch (IllegalArgumentException e) {
-                cancelTrigger(trigger.getId());
-                Log.w("TriggerService", "Invalid daily schedule");
-                return;
-            }
-            if (timeToTrigger < 0) {
-                cancelTrigger(trigger.getId());
-                return;
-            }
-
-            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId(), epoch);
-            am.cancel(pi);
-
-            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-            boolean allowWhileIdle = sharedPreferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
-
-            if((new PermissionManager(context)).grantedAlarms()) {
-                if (allowWhileIdle) {
-                    am.setExactAndAllowWhileIdle(
-                            AlarmManager.RTC_WAKEUP,
-                            timeToTrigger,
-                            pi
-                    );
-                } else {
-                    am.setExact(
-                            AlarmManager.RTC_WAKEUP,
-                            timeToTrigger,
-                            pi
-                    );
-                }
-            } else {
-                new AppErrorNotificationManager(context).showNotification();
-            }
-        }
-    }
-
-    private void queueSingleIntervalTrigger(Trigger trigger, long epoch){
-        if(trigger.isEnabled()){
-
-            final long intervalMillis;
-            try {
-                intervalMillis = ScheduleCalculator.intervalMillis(trigger.getTime());
-            } catch (IllegalArgumentException e) {
-                cancelTrigger(trigger.getId());
-                Log.w("TriggerService", "Invalid interval schedule");
-                return;
-            }
-            long timeToTrigger = System.currentTimeMillis();
-
-            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId(), epoch);
-            am.cancel(pi);
-            am.setInexactRepeating(
-                    AlarmManager.RTC_WAKEUP,
-                    timeToTrigger+intervalMillis,
-                    intervalMillis,
-                    pi
-            );
-        }
-    }
-
-    public void cancelTrigger(long triggerID){
+        // Retire the previous alarm implementation; automatic work is now deferrable.
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        am.cancel(getIntent(triggerID));
+        if (am != null) am.cancel(getIntent(trigger.getId(), epoch));
+        try { ca.pkay.rcloneexplorer.scheduling.ScheduleCoordinator.schedule(context, trigger); }
+        catch (IllegalArgumentException invalid) { cancelTrigger(trigger.getId()); }
+    }
+
+    public void cancelTrigger(long triggerID) {
+        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (am != null) am.cancel(getIntent(triggerID));
+        ca.pkay.rcloneexplorer.scheduling.ScheduleCoordinator.cancel(context, triggerID);
     }
 
     private void startTask(Trigger trigger, long epoch){

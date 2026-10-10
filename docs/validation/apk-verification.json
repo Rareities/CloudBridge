@@ -1,0 +1,77 @@
+[
+  {
+    "apk": "cloudbridge_v1.0.2-oss-arm64-v8a-debug.apk",
+    "sha256": "be846960ee619dcbdf3e8153c47e9a6a0a5b3b06b7cf91cd20cb4aa5bd2a0b53",
+    "engineCommit": "fc35e4a8c75211abf6f1bca367af482a0aec68f7",
+    "binaries": [
+      {
+        "abi": "arm64-v8a",
+        "sha256": "c9ec871c542892e7d8fecbb9fed18d10183fc298ec9d8e018e772f39d955c1d8",
+        "bytes": 89089184
+      }
+    ]
+  },
+  {
+    "apk": "cloudbridge_v1.0.2-oss-armeabi-v7a-debug.apk",
+    "sha256": "89ccb137097b14d454550457d46bd9d72dabae4dab3d31875173c6c4c9f96948",
+    "engineCommit": "fc35e4a8c75211abf6f1bca367af482a0aec68f7",
+    "binaries": [
+      {
+        "abi": "armeabi-v7a",
+        "sha256": "967a4a67522d8704de9189bee3acb6b362aa9d58dd6edd9e416a0698ead415f4",
+        "bytes": 85365668
+      }
+    ]
+  },
+  {
+    "apk": "cloudbridge_v1.0.2-oss-universal-debug.apk",
+    "sha256": "c8492d77993ac8a3299c8b25f39236f0c24a35055058388c6b1daeb1ae58246f",
+    "engineCommit": "fc35e4a8c75211abf6f1bca367af482a0aec68f7",
+    "binaries": [
+      {
+        "abi": "arm64-v8a",
+        "sha256": "c9ec871c542892e7d8fecbb9fed18d10183fc298ec9d8e018e772f39d955c1d8",
+        "bytes": 89089184
+      },
+      {
+        "abi": "armeabi-v7a",
+        "sha256": "967a4a67522d8704de9189bee3acb6b362aa9d58dd6edd9e416a0698ead415f4",
+        "bytes": 85365668
+      },
+      {
+        "abi": "x86",
+        "sha256": "b33220bcc897f3799266edd7c11b1eba8e56830099a806f4287326b2880c5b9d",
+        "bytes": 109840284
+      },
+      {
+        "abi": "x86_64",
+        "sha256": "8857f9b6aacb48a2f1e181f0bca6c3ee356e7c1e1a17d8bcfcec3076838f0bb0",
+        "bytes": 122279680
+      }
+    ]
+  },
+  {
+    "apk": "cloudbridge_v1.0.2-oss-x86-debug.apk",
+    "sha256": "84544a4a995d51017c815d3f3640db493d8e5c3cd669411d7f2ec1ee3db8a6a4",
+    "engineCommit": "fc35e4a8c75211abf6f1bca367af482a0aec68f7",
+    "binaries": [
+      {
+        "abi": "x86",
+        "sha256": "b33220bcc897f3799266edd7c11b1eba8e56830099a806f4287326b2880c5b9d",
+        "bytes": 109840284
+      }
+    ]
+  },
+  {
+    "apk": "cloudbridge_v1.0.2-oss-x86_64-debug.apk",
+    "sha256": "31b7dcb72f67cc5e316eb5e91bc3bb73750d7dca9c6d8e39c19528a15b70ebcc",
+    "engineCommit": "fc35e4a8c75211abf6f1bca367af482a0aec68f7",
+    "binaries": [
+      {
+        "abi": "x86_64",
+        "sha256": "8857f9b6aacb48a2f1e181f0bca6c3ee356e7c1e1a17d8bcfcec3076838f0bb0",
+        "bytes": 122279680
+      }
+    ]
+  }
+]

@@ -14,6 +14,11 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.CheckBox
+import android.text.InputType
+import android.provider.DocumentsContract
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
@@ -38,6 +43,10 @@ import java.net.URLDecoder
 import androidx.appcompat.app.AlertDialog
 import ca.pkay.rcloneexplorer.bisync.BisyncSession
 import ca.pkay.rcloneexplorer.bisync.BisyncPolicy
+import ca.pkay.rcloneexplorer.bisync.BisyncOptions
+import ca.pkay.rcloneexplorer.bisync.BisyncCapabilities
+import ca.pkay.rcloneexplorer.bisync.BisyncAdvancedOptions
+import ca.pkay.rcloneexplorer.BuildConfig
 import ca.pkay.rcloneexplorer.workmanager.ProcessMonitor
 
 class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
@@ -85,6 +94,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     @Volatile private var previewProcess: Process? = null
     @Volatile private var previewCancelled = false
     private lateinit var bisyncDeleteLimit: EditText
+    private lateinit var bisyncControls: View
+    private var bisyncOptions = BisyncOptions()
 
 
 
@@ -98,27 +109,22 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 localPath.clearFocus()
             }
             REQUEST_CODE_FP_REMOTE -> if (data != null) {
-                var path = data.data.toString()
                 try {
-                    path = URLDecoder.decode(path, "UTF-8")
-                } catch (e: UnsupportedEncodingException) {
-                }
-
-                // Todo: check if this provider is still valid; search other occurences
-                Log.e("TaskActivity provider", "recieved path: $path")
-                val provider = "content://io.github.x0b.rcx.vcp/tree/rclone/remotes/"
-                if (path.startsWith(provider)) {
-                    val parts = path.substring(provider.length).split(":").toTypedArray()
-                    remotePath.setText(parts[1])
-                    var i = 0
-                    for (remote in remoteItems) {
-                        if (remote == parts[0]) {
-                            remoteDropdown.setSelection(i)
-                        }
-                        i++
-                    }
-                } else {
-                    Toasty.error(this, "This Remote is not a RCX-Remote.").show()
+                    val uri = data.data ?: error("No folder selected")
+                    require(uri.scheme == "content" && uri.authority == BuildConfig.VCP_AUTHORITY) { "Choose a CloudBridge remote" }
+                    val document = if (uri.pathSegments.firstOrNull() == "tree") DocumentsContract.getTreeDocumentId(uri)
+                        else DocumentsContract.getDocumentId(uri)
+                    val endpoint = document.removePrefix("rclone/remotes/").removePrefix("remotes/")
+                    val separator = endpoint.indexOf(':')
+                    require(separator > 0) { "Invalid folder identifier" }
+                    val name = endpoint.substring(0, separator)
+                    val index = remoteItems.indexOf(name)
+                    require(index >= 0) { "Selected remote is no longer configured" }
+                    remoteDropdown.setSelection(index)
+                    remotePathHolder = endpoint.substring(separator + 1)
+                    remotePath.setText(remotePathHolder)
+                } catch (e: Exception) {
+                    Toasty.error(this, "Invalid CloudBridge folder selection").show()
                 }
             }
             REQUEST_CODE_FILTER -> if (data != null) {
@@ -151,6 +157,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         syncDirection = findViewById(R.id.task_direction_spinner)
         syncDescription = findViewById(R.id.descriptionSyncDirection)
         bisyncDeleteLimit = findViewById(R.id.task_bisync_max_delete)
+        bisyncControls = findViewById(R.id.task_bisync_controls)
         transfersDropdown = findViewById(R.id.task_transfers_spinner)
         filterDropdown = findViewById(R.id.task_filter_spinner)
         switchDeleteExcluded = findViewById(R.id.task_exclude_delete_toggle)
@@ -202,6 +209,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         switchMD5sum.isChecked = existingTask?.md5sum ?: false
         switchDeleteExcluded.isChecked = existingTask?.deleteExcluded ?: false
         bisyncDeleteLimit.setText((existingTask?.bisyncMaxDelete ?: 10).toString())
+        bisyncOptions = existingTask?.bisyncOptions ?: BisyncOptions()
+        findViewById<Button>(R.id.task_bisync_advanced).setOnClickListener { editBisyncOptions() }
+        findViewById<Button>(R.id.task_bisync_history).setOnClickListener { showBisyncHistory() }
+        findViewById<Button>(R.id.task_bisync_access).setOnClickListener { setupAccessMarkers() }
         prepareSyncDirectionDropdown()
         prepareTransfersDropdown()
         prepareLocal()
@@ -325,11 +336,13 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     private fun getTaskValues(id: Long): Task? {
-        val taskToPopulate = Task(id)
+        // Preserve constraints/options introduced outside this editor when changing basic fields.
+        val taskToPopulate = existingTask?.let { Task.fromString(it.asJSON().toString()).apply { this.id = id } } ?: Task(id)
         existingTask?.let {
             taskToPopulate.stableUUID = it.stableUUID
             taskToPopulate.bisyncMaxDelete = it.bisyncMaxDelete
         }
+        taskToPopulate.bisyncOptions = bisyncOptions
         taskToPopulate.title = findViewById<EditText>(R.id.task_title_textfield).text.toString()
         val remotename = remoteDropdown.selectedItem.toString()
         taskToPopulate.remoteId = remotename
@@ -425,6 +438,110 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
             }
         }
         return taskToPopulate
+    }
+
+    private fun editBisyncOptions() {
+        val form = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 16, 24, 16) }
+        val scroll = ScrollView(this).apply { addView(form) }
+        fun field(label: Int, value: String, numeric: Boolean = false): EditText {
+            val text = TextView(this).apply { setText(label) }
+            val input = EditText(this).apply {
+                setText(value); hint = getString(label); minHeight = (48 * resources.displayMetrics.density).toInt()
+                inputType = if (numeric) InputType.TYPE_CLASS_NUMBER else InputType.TYPE_CLASS_TEXT
+                contentDescription = getString(label)
+            }
+            form.addView(text); form.addView(input)
+            text.labelFor = View.generateViewId().also { input.id = it }
+            return input
+        }
+        val checkers = field(R.string.bisync_checkers, bisyncOptions.checkers.toString(), true)
+        val retries = field(R.string.bisync_retries, bisyncOptions.retries.toString(), true)
+        val lowRetries = field(R.string.bisync_low_retries, bisyncOptions.lowLevelRetries.toString(), true)
+        val bandwidth = field(R.string.bisync_bandwidth, bisyncOptions.bandwidthMiB?.toString() ?: "", true)
+        val rate = field(R.string.bisync_tps, bisyncOptions.tpsLimit?.toString() ?: "", true)
+        val timeout = field(R.string.bisync_timeout, bisyncOptions.timeoutSeconds.toString(), true)
+        val connectTimeout = field(R.string.bisync_connect_timeout, bisyncOptions.connectTimeoutSeconds.toString(), true)
+        val suffix = field(R.string.bisync_conflict_suffix, bisyncOptions.conflictSuffix)
+        val backupLocal = field(R.string.bisync_backup_local, bisyncOptions.backupLocalPath)
+        val backupRemote = field(R.string.bisync_backup_remote, bisyncOptions.backupRemotePath)
+        val access = CheckBox(this).apply { setText(R.string.bisync_require_access); isChecked = bisyncOptions.requireAccess }
+        form.addView(access)
+        val custom = field(R.string.bisync_custom_rows, bisyncOptions.customOptions.entries.joinToString("\n") { "${it.key}=${it.value}" })
+        custom.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        custom.minLines = 3
+        form.addView(TextView(this).apply { text = BisyncAdvancedOptions.supportedNames.sorted().joinToString(", ") })
+        form.addView(TextView(this).apply { setText(R.string.bisync_advanced_policy) })
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.bisync_advanced).setView(scroll)
+            .setNegativeButton(android.R.string.cancel, null).setPositiveButton(android.R.string.ok, null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    val proposed = BisyncOptions(checkers = checkers.text.toString().toInt(),
+                        retries = retries.text.toString().toInt(), lowLevelRetries = lowRetries.text.toString().toInt(),
+                        bandwidthMiB = bandwidth.text.toString().takeIf { it.isNotBlank() }?.toInt(),
+                        tpsLimit = rate.text.toString().takeIf { it.isNotBlank() }?.toInt(),
+                        timeoutSeconds = timeout.text.toString().toInt(), connectTimeoutSeconds = connectTimeout.text.toString().toInt(),
+                        conflictSuffix = suffix.text.toString(), backupLocalPath = backupLocal.text.toString(),
+                        backupRemotePath = backupRemote.text.toString(), requireAccess = access.isChecked,
+                        customOptions = BisyncAdvancedOptions.parseRows(custom.text.toString()))
+                    proposed.validate()
+                    val old = bisyncOptions
+                    bisyncOptions = proposed
+                    val task = getTaskValues(existingTask?.id ?: 0)
+                    if (task == null) { bisyncOptions = old; return@setOnClickListener }
+                    try { BisyncPolicy.validate(task) } catch (e: Exception) { bisyncOptions = old; throw e }
+                    dialog.dismiss()
+                } catch (e: Exception) { Toasty.error(this, e.message ?: "Invalid advanced options").show() }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showBisyncHistory() {
+        val task = getTaskValues(existingTask?.id ?: 0) ?: return
+        try {
+            val records = BisyncSession.history(this, task).reversed()
+            val text = buildString {
+                append("State: ").append(BisyncSession.status(this@TaskActivity, task)).append('\n')
+                append(BisyncCapabilities.describe(this@TaskActivity)).append("\n\n")
+                if (records.isEmpty()) append(getString(R.string.bisync_history_empty))
+                records.forEach { record ->
+                    append(java.text.DateFormat.getDateTimeInstance().format(java.util.Date(record.startedAt)))
+                    append(" — ").append(if (record.endedAt == null) "interrupted or active" else record.phase)
+                    append("\n").append(record.bytes).append(" bytes; ").append(record.transfers)
+                    append(" transfers; ").append(record.errors).append(" errors\n\n")
+                }
+            }
+            AlertDialog.Builder(this).setTitle(R.string.bisync_history).setMessage(text)
+                .setPositiveButton(android.R.string.ok, null).setNeutralButton(R.string.bisync_command) { _, _ ->
+                    try {
+                        AlertDialog.Builder(this).setTitle(R.string.bisync_command)
+                            .setMessage(ca.pkay.rcloneexplorer.util.SecretRedactor.redact(BisyncSession.effectiveCommand(this, task)))
+                            .setPositiveButton(android.R.string.ok, null).show()
+                    } catch (e: Exception) { Toasty.error(this, "Cannot generate validated command").show() }
+                }.show()
+        } catch (e: Exception) { Toasty.error(this, e.message ?: "Cannot read history").show() }
+    }
+
+    private fun setupAccessMarkers() {
+        val task = getTaskValues(existingTask?.id ?: 0) ?: return
+        AlertDialog.Builder(this).setTitle(R.string.bisync_access_setup).setMessage(R.string.bisync_access_warning)
+            .setNegativeButton(android.R.string.cancel, null).setPositiveButton(R.string.bisync_access_setup) { _, _ ->
+                fab.isEnabled = false
+                Thread {
+                    var error: String? = null
+                    try { BisyncSession.previewLease(this).use { rcloneInstance.createBisyncAccessMarkers(task) } }
+                    catch (e: Exception) { error = e.message ?: "Access marker setup failed" }
+                    runOnUiThread {
+                        fab.isEnabled = true
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        if (error == null) {
+                            bisyncOptions = bisyncOptions.copy(requireAccess = true)
+                            Toasty.success(this, getString(R.string.bisync_access_ready)).show()
+                        } else Toasty.error(this, ca.pkay.rcloneexplorer.util.SecretRedactor.redact(error!!)).show()
+                    }
+                }.start()
+            }.show()
     }
 
     private fun startRemotePicker(remote: RemoteItem, initialPath: String, destination: Boolean) {
@@ -545,6 +662,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     private fun updateRemoteFieldVisibility(direction: Int) {
+        bisyncControls.visibility = if (direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) View.VISIBLE else View.GONE
         bisyncDeleteLimit.visibility = if (direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) View.VISIBLE else View.GONE
         val cloudToCloud = direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
                 || direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE

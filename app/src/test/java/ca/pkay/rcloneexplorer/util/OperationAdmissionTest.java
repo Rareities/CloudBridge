@@ -67,5 +67,21 @@ public class OperationAdmissionTest {
             expectBusy(file);
             try (OperationAdmission.Lease child = OperationAdmission.processLease(file)) { assertTrue(file.exists()); }
         } finally { file.delete(); }
+    }    @Test public void configurationLeaseRequiresAnIdleParent() throws Exception {
+        File file = sidecar();
+        try (OperationAdmission.Lease parent = OperationAdmission.acquire(file)) {
+            try (OperationAdmission.Lease configuration = OperationAdmission.configurationLease(file)) {
+                try (OperationAdmission.Lease child = OperationAdmission.processLease(file)) {
+                    assertTrue(file.exists());
+                    try (OperationAdmission.Lease invalid = OperationAdmission.configurationLease(file)) {
+                        fail("Active children must block configuration replacement");
+                    } catch (IOException expected) { }
+                }
+            }
+            try (OperationAdmission.Lease configuration = OperationAdmission.configurationLease(file)) {
+                assertTrue(file.exists());
+            }
+        } finally { file.delete(); }
     }
+
 }

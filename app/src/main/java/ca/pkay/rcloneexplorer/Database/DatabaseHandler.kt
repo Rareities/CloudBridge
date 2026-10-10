@@ -28,6 +28,12 @@ import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
 import java.util.ArrayList
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import ca.pkay.rcloneexplorer.bisync.BisyncOptions
+import ca.pkay.rcloneexplorer.scheduling.SchedulePolicy
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_OPTIONS
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_POLICY
 
 class DatabaseHandler(context: Context?) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -51,6 +57,8 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_UUID)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_OPTIONS)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_POLICY)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -84,6 +92,10 @@ class DatabaseHandler(context: Context?) :
         if (oldVersion < 9) {
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_UUID)
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
+        }
+        if (oldVersion < 10) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_OPTIONS)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_POLICY)
         }
     }
 
@@ -175,7 +187,8 @@ class DatabaseHandler(context: Context?) :
             Task.COLUMN_NAME_REMOTE_TYPE2,
             Task.COLUMN_NAME_REMOTE_PATH2,
             Task.COLUMN_NAME_STABLE_UUID,
-            Task.COLUMN_NAME_BISYNC_MAX_DELETE
+            Task.COLUMN_NAME_BISYNC_MAX_DELETE,
+            Task.COLUMN_NAME_BISYNC_OPTIONS
         )
 
     private fun taskFromCursor(cursor: Cursor): Task {
@@ -200,6 +213,7 @@ class DatabaseHandler(context: Context?) :
         task.stableUUID = cursor.getString(17)?.takeIf { it.isNotBlank() }
             ?: java.util.UUID.nameUUIDFromBytes("cloudbridge-task:${task.id}".toByteArray(Charsets.UTF_8)).toString()
         task.bisyncMaxDelete = if (cursor.isNull(18)) 10 else cursor.getInt(18)
+        task.bisyncOptions = if (cursor.isNull(19)) BisyncOptions() else Json.decodeFromString<BisyncOptions>(cursor.getString(19))
         return task
     }
 
@@ -252,6 +266,7 @@ class DatabaseHandler(context: Context?) :
         values.put(Task.COLUMN_NAME_REMOTE_PATH2, task.remotePath2)
         values.put(Task.COLUMN_NAME_STABLE_UUID, task.stableUUID)
         values.put(Task.COLUMN_NAME_BISYNC_MAX_DELETE, task.bisyncMaxDelete)
+        values.put(Task.COLUMN_NAME_BISYNC_OPTIONS, Json.encodeToString(task.bisyncOptions))
         return values
     }
 
@@ -351,6 +366,7 @@ class DatabaseHandler(context: Context?) :
         values.put(Trigger.COLUMN_NAME_WEEKDAY, t.getWeekdays())
         values.put(Trigger.COLUMN_NAME_TARGET, t.triggerTarget)
         values.put(Trigger.COLUMN_NAME_TYPE, t.type)
+        values.put(Trigger.COLUMN_NAME_POLICY, Json.encodeToString(t.schedulePolicy))
         return values
     }
 
@@ -362,7 +378,8 @@ class DatabaseHandler(context: Context?) :
                 Trigger.COLUMN_NAME_TIME,
                 Trigger.COLUMN_NAME_WEEKDAY,
                 Trigger.COLUMN_NAME_TARGET,
-                Trigger.COLUMN_NAME_TYPE
+                Trigger.COLUMN_NAME_TYPE,
+                Trigger.COLUMN_NAME_POLICY
         )
 
     private fun triggerFromCursor(cursor: Cursor): Trigger {
@@ -374,6 +391,7 @@ class DatabaseHandler(context: Context?) :
         trigger.setWeekdays(weekdays.toByte())
         trigger.triggerTarget = cursor.getLong(5)
         trigger.type = cursor.getInt(6)
+        trigger.schedulePolicy = if (cursor.isNull(7)) SchedulePolicy() else Json.decodeFromString<SchedulePolicy>(cursor.getString(7))
         return trigger
     }
 

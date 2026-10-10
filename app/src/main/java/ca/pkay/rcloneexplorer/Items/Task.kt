@@ -28,6 +28,7 @@ data class Task(var id: Long) {
     var transfers: Int? = null
     var stableUUID = java.util.UUID.randomUUID().toString()
     var bisyncMaxDelete = 10
+    var bisyncOptions = ca.pkay.rcloneexplorer.bisync.BisyncOptions()
 
     override fun toString(): String {
         return "$title: $remoteId: $remoteType: $remotePath: $localPath: $remoteId2: $remoteType2: $remotePath2: $direction"
@@ -55,6 +56,7 @@ data class Task(var id: Long) {
 
         const val COLUMN_NAME_STABLE_UUID = "task_uuid"
         const val COLUMN_NAME_BISYNC_MAX_DELETE = "task_bisync_max_delete"
+        const val COLUMN_NAME_BISYNC_OPTIONS = "task_bisync_options"
 
         const val TASK_MD5SUM_DEFAULT = false
         const val TASK_WIFIONLY_DEFAULT = false

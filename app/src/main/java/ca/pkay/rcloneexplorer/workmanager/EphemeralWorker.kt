@@ -96,6 +96,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private val receiverRegistered = AtomicBoolean(false)
     private val terminalLock = Any()
     private var silentRun = false
+    @Volatile private var deadline: ProcessDeadline? = null
     private val ongoingNotificationID = Random.nextInt()
 
 
@@ -159,6 +160,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 val transferLocks = TransferLocks.acquire(mContext, "ephemeral")
                 var mutationLease: java.io.Closeable? = null
                 try {
+                    Rclone(mContext).ensureConfigEncrypted()
                     mutationLease = ca.pkay.rcloneexplorer.bisync.BisyncSession.previewLease(mContext)
                     check(inputData.getLong(ca.pkay.rcloneexplorer.util.ConfigEpoch.WORK_KEY, -1) ==
                         ca.pkay.rcloneexplorer.util.ConfigEpoch.current(mContext)) {
@@ -249,7 +251,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 }
                 handleSync(mTitle)
                 } finally {
-                    try { mutationLease?.close() } finally { transferLocks?.release() }
+                    try { mutationLease?.close() } finally { transferLocks?.releaseAfterExit(sRcloneProcess) }
                     sCleanupFiles.forEach { it.delete() }
                 }
             } else {
@@ -268,10 +270,12 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
         synchronized(terminalLock) {
             if (!endNotificationAlreadyPosted) failureReason = FAILURE_REASON.CANCELLED
         }
-        sRcloneProcess?.destroy()
+        deadline?.stop() ?: sRcloneProcess?.destroy()
     }
 
     private fun cleanup() {
+        deadline?.close()
+        deadline = null
         sRcloneProcess?.destroy()
         sRcloneProcess = null
         if (receiverRegistered.compareAndSet(true, false)) {
@@ -315,7 +319,11 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 sRcloneProcess?.destroy()
                 break
             }
-            readProcess(sRcloneProcess!!, title)
+            deadline = ProcessDeadline(sRcloneProcess!!,300*60_000L, expired = {
+                synchronized(terminalLock) { if(!endNotificationAlreadyPosted) failureReason=FAILURE_REASON.RCLONE_ERROR }
+                log("Runtime limit reached")
+            })
+            try { readProcess(sRcloneProcess!!, title) } finally { deadline?.close(); deadline=null }
             if (failureReason != FAILURE_REASON.NO_FAILURE) break
         }
         mNotificationManager?.cancelSyncNotification(ongoingNotificationID)
@@ -332,7 +340,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                         }
                 statusObject.parseLoglineToStatusObject(logline)
                 val now = android.os.SystemClock.elapsedRealtime()
-                if (statusObject.notificationContent.isNotEmpty() && now - lastNotifyMs >= 500L) {
+                if (statusObject.notificationContent.isNotEmpty() && now - lastNotifyMs >= 1000L) {
                     lastNotifyMs = now
                     updateForegroundNotification(mNotificationManager?.updateNotification(
                         title, statusObject.notificationContent, statusObject.notificationBigText,

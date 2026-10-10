@@ -94,6 +94,19 @@ public class OauthHelper {
         UrlAuthThread currentAuth = new OauthHelper.UrlAuthThread(process, context);
         oauthProcessToken.acquire(currentAuth);
         currentAuth.start();
+        Thread stdout = new Thread(() -> {
+            try (java.io.InputStream in = process.getInputStream()) {
+                byte[] bytes = new byte[4096];
+                while (in.read(bytes) != -1) { /* auth output is not persisted */ }
+            } catch (IOException ignored) { }
+        }, "rclone-auth-stdout");
+        stdout.setDaemon(true);
+        stdout.start();
+        java.util.concurrent.atomic.AtomicBoolean expired = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.Timer deadline = new java.util.Timer("rclone-auth-deadline", true);
+        deadline.schedule(new java.util.TimerTask() {
+            @Override public void run() { expired.set(true); currentAuth.forceStop(); }
+        }, 10 * 60 * 1000L);
         boolean exitedNormally = false;
         try {
             process.waitFor();
@@ -101,8 +114,11 @@ public class OauthHelper {
         } catch (InterruptedException e) {
             FLog.d(TAG, "Auth stopped by process interrupt");
             currentAuth.forceStop();
+            Thread.currentThread().interrupt();
+        } finally {
+            deadline.cancel();
         }
-        return exitedNormally && 0 == process.exitValue();
+        return exitedNormally && !expired.get() && 0 == process.exitValue();
     }
 
     /**

@@ -19,12 +19,38 @@ object BisyncPolicy {
             "Bisync filters are not supported until baseline-changing filter migration is implemented"
         }
         task.transfers?.let { require(it in 1..8) { "Invalid transfer count" } }
+        task.bisyncOptions.validate()
+        val options = task.bisyncOptions
+        if (options.backupLocalPath.isNotBlank()) {
+            require(options.backupLocalPath.startsWith("/")) { "Local backup must be an absolute native path" }
+            val local = File(task.localPath).canonicalFile
+            val backup = File(options.backupLocalPath).canonicalFile
+            require(!overlap(local.path, backup.path)) { "Local backup must be outside the synchronized root" }
+            require(options.backupRemotePath.startsWith("/") && !options.backupRemotePath.contains(':') &&
+                options.backupRemotePath.none { it.isISOControl() }) { "Invalid remote backup path" }
+            require(!overlap(normalizeRemote(task.remotePath), normalizeRemote(options.backupRemotePath))) {
+                "Remote backup must be outside the synchronized root"
+            }
+        }
+    }
+
+    fun overlap(first: String, second: String): Boolean {
+        val a = first.trimEnd('/').ifEmpty { "/" }
+        val b = second.trimEnd('/').ifEmpty { "/" }
+        return a == "/" || b == "/" || a == b || a.startsWith("$b/") || b.startsWith("$a/")
+    }
+
+    fun normalizeRemote(path: String): String {
+        val parts = path.split('/').filter { it.isNotEmpty() && it != "." }
+        require(parts.none { it == ".." }) { "Parent segments are not allowed in bisync paths" }
+        return "/" + parts.joinToString("/")
     }
 
     fun fingerprint(task: Task): String {
         validate(task)
-        val values = listOf("policy-v1", task.stableUUID, task.remoteId, task.remoteType.toString(),
-            task.remotePath, File(task.localPath).canonicalPath, task.bisyncMaxDelete.toString())
+        val values = listOf("policy-v2", task.stableUUID, task.remoteId, task.remoteType.toString(),
+            normalizeRemote(task.remotePath), File(task.localPath).canonicalPath, task.bisyncMaxDelete.toString(),
+            kotlinx.serialization.json.Json.encodeToString(BisyncOptions.serializer(), task.bisyncOptions))
         // Length-prefix fields so delimiters in filenames cannot create the same identity.
         val bytes = values.joinToString("") { "${it.length}:$it" }.toByteArray(Charsets.UTF_8)
         return MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
