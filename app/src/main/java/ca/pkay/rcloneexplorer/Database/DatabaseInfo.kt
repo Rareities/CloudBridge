@@ -9,7 +9,7 @@ class DatabaseInfo {
     companion object {
 
         // If you change the database schema, you must increment the database version.
-        const val DATABASE_VERSION = 8
+        const val DATABASE_VERSION = 9
         const val DATABASE_NAME = "rcloneExplorer.db"
 
 
@@ -47,6 +47,9 @@ class DatabaseInfo {
         val SQL_UPDATE_TASK_ADD_REMOTE_ID2 = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_REMOTE_ID2} TEXT"
         val SQL_UPDATE_TASK_ADD_REMOTE_TYPE2 = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_REMOTE_TYPE2} INTEGER"
         val SQL_UPDATE_TASK_ADD_REMOTE_PATH2 = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_REMOTE_PATH2} TEXT"
+
+        val SQL_UPDATE_TASK_ADD_UUID = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_STABLE_UUID} TEXT"
+        val SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE = "ALTER TABLE ${Task.TABLE_NAME} ADD COLUMN ${Task.COLUMN_NAME_BISYNC_MAX_DELETE} INTEGER DEFAULT 10"
 
     }
 }

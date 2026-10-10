@@ -22,6 +22,8 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_AD
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_TYPE2
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_PATH2
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_TYPE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_UUID
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
@@ -29,6 +31,8 @@ import java.util.ArrayList
 
 class DatabaseHandler(context: Context?) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+
+    private val applicationContext = context?.applicationContext
 
     override fun onCreate(sqLiteDatabase: SQLiteDatabase) {
         sqLiteDatabase.execSQL(SQL_CREATE_TABLES_TASKS)
@@ -45,6 +49,8 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_UUID)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -74,6 +80,10 @@ class DatabaseHandler(context: Context?) :
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        }
+        if (oldVersion < 9) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_UUID)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
         }
     }
 
@@ -163,7 +173,9 @@ class DatabaseHandler(context: Context?) :
             Task.COLUMN_NAME_TRANSFERS,
             Task.COLUMN_NAME_REMOTE_ID2,
             Task.COLUMN_NAME_REMOTE_TYPE2,
-            Task.COLUMN_NAME_REMOTE_PATH2
+            Task.COLUMN_NAME_REMOTE_PATH2,
+            Task.COLUMN_NAME_STABLE_UUID,
+            Task.COLUMN_NAME_BISYNC_MAX_DELETE
         )
 
     private fun taskFromCursor(cursor: Cursor): Task {
@@ -176,15 +188,18 @@ class DatabaseHandler(context: Context?) :
         task.direction = cursor.getInt(6)
         task.md5sum = getBoolean(cursor, 7)
         task.wifionly = getBoolean(cursor, 8)
-        task.filterId = cursor.getLong(9)
+        task.filterId = if (cursor.isNull(9)) null else cursor.getLong(9)
         task.deleteExcluded = getBoolean(cursor, 10)
-        task.onFailFollowup = cursor.getLong(11)
-        task.onSuccessFollowup = cursor.getLong(12)
+        task.onFailFollowup = if (cursor.isNull(11)) null else cursor.getLong(11)
+        task.onSuccessFollowup = if (cursor.isNull(12)) null else cursor.getLong(12)
         task.transfers = if (cursor.isNull(13)) null else cursor.getInt(13)
         // Columns added in v8 are NULL for rows created under older schema versions; coalesce to defaults.
         task.remoteId2 = cursor.getString(14) ?: ""
         task.remoteType2 = cursor.getInt(15)
         task.remotePath2 = cursor.getString(16) ?: ""
+        task.stableUUID = cursor.getString(17)?.takeIf { it.isNotBlank() }
+            ?: java.util.UUID.nameUUIDFromBytes("cloudbridge-task:${task.id}".toByteArray(Charsets.UTF_8)).toString()
+        task.bisyncMaxDelete = if (cursor.isNull(18)) 10 else cursor.getInt(18)
         return task
     }
 
@@ -195,12 +210,26 @@ class DatabaseHandler(context: Context?) :
     }
 
     fun deleteTask(id: Long): Int {
+        if (applicationContext != null) {
+            ca.pkay.rcloneexplorer.util.TaskShortcutAuthorization.revoke(applicationContext, id)
+        }
         val db = writableDatabase
-        val selection = Task.COLUMN_NAME_ID + " LIKE ?"
-        val selectionArgs = arrayOf(id.toString())
-        val retcode = db.delete(Task.TABLE_NAME, selection, selectionArgs)
-        db.close()
-        return retcode
+        var deleted = 0
+        db.beginTransaction()
+        try {
+            deleted = db.delete(Task.TABLE_NAME, "${Task.COLUMN_NAME_ID} = ?", arrayOf(id.toString()))
+            db.delete(Trigger.TABLE_NAME, "${Trigger.COLUMN_NAME_TARGET} = ?", arrayOf(id.toString()))
+            val cleared = ContentValues().apply { putNull(Task.COLUMN_NAME_ONFAIL_FOLLOWUP) }
+            db.update(Task.TABLE_NAME, cleared, "${Task.COLUMN_NAME_ONFAIL_FOLLOWUP} = ?", arrayOf(id.toString()))
+            cleared.clear()
+            cleared.putNull(Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP)
+            db.update(Task.TABLE_NAME, cleared, "${Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP} = ?", arrayOf(id.toString()))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
+        return deleted
     }
 
     private fun getTaskContentValues(task: Task): ContentValues {
@@ -221,6 +250,8 @@ class DatabaseHandler(context: Context?) :
         values.put(Task.COLUMN_NAME_REMOTE_ID2, task.remoteId2)
         values.put(Task.COLUMN_NAME_REMOTE_TYPE2, task.remoteType2)
         values.put(Task.COLUMN_NAME_REMOTE_PATH2, task.remotePath2)
+        values.put(Task.COLUMN_NAME_STABLE_UUID, task.stableUUID)
+        values.put(Task.COLUMN_NAME_BISYNC_MAX_DELETE, task.bisyncMaxDelete)
         return values
     }
 
@@ -418,11 +449,18 @@ class DatabaseHandler(context: Context?) :
 
     fun deleteFilter(id: Long): Int {
         val db = writableDatabase
-        val selection = Filter.COLUMN_NAME_ID + " LIKE ?"
-        val selectionArgs = arrayOf(id.toString())
-        val retcode = db.delete(Filter.TABLE_NAME, selection, selectionArgs)
-        db.close()
-        return retcode
+        var deleted = 0
+        db.beginTransaction()
+        try {
+            deleted = db.delete(Filter.TABLE_NAME, "${Filter.COLUMN_NAME_ID} = ?", arrayOf(id.toString()))
+            val values = ContentValues().apply { putNull(Task.COLUMN_NAME_FILTER_ID) }
+            db.update(Task.TABLE_NAME, values, "${Task.COLUMN_NAME_FILTER_ID} = ?", arrayOf(id.toString()))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
+        return deleted
     }
 
     private fun getFilterContentValuesWithID(t: Filter): ContentValues {
@@ -450,6 +488,34 @@ class DatabaseHandler(context: Context?) :
         filter.title = cursor.getString(1)
         filter.setFiltersRaw(cursor.getString(2))
         return filter
+    }
+
+    /** Replace a fully validated backup without exposing a partially restored database. */
+    fun replaceAll(tasks: List<Task>, triggers: List<Trigger>, filters: List<Filter>) {
+        // Revoke before changing identities: failure must not leave old capabilities valid for new tasks.
+        if (applicationContext != null) {
+            ca.pkay.rcloneexplorer.util.TaskShortcutAuthorization.revokeAll(applicationContext)
+        }
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(Trigger.TABLE_NAME, null, null)
+            db.delete(Task.TABLE_NAME, null, null)
+            db.delete(Filter.TABLE_NAME, null, null)
+            for (filter in filters) {
+                db.insertOrThrow(Filter.TABLE_NAME, null, getFilterContentValuesWithID(filter))
+            }
+            for (task in tasks) {
+                db.insertOrThrow(Task.TABLE_NAME, null, getTaskContentValuesWithID(task))
+            }
+            for (trigger in triggers) {
+                db.insertOrThrow(Trigger.TABLE_NAME, null, getTriggerContentValuesWithID(trigger))
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
     }
 
     fun deleteEveryting() {

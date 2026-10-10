@@ -38,24 +38,21 @@ public class SyncLog {
 
     public static ArrayList<JSONObject> getLog(Context c){
         File log = new File(c.getFilesDir().getPath() + "/sync.log");
-        StringBuilder file = new StringBuilder();
+        String contents = "";
         try {
-            char[] buffer = new char[4096];
-            InputStream inputStream = new FileInputStream(log);
-            Reader in = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-            for (int numRead; (numRead = in.read(buffer, 0, buffer.length)) > 0; ) {
-                file.append(buffer, 0, numRead);
-            }
+            contents = BoundedLogFile.read(log);
         } catch (IOException e) {
-            e.printStackTrace();
+            FLog.e("SyncLog", "Could not read history");
         }
-
-        String lines[] = file.toString().split("\\r?\\n");
+        String lines[] = contents.split("\\r?\\n");
 
         ArrayList<JSONObject> jsons = new ArrayList<>();
         for (int i = 0; i < lines.length; i++) {
             try {
-                jsons.add(new JSONObject(lines[i]));
+                JSONObject record = new JSONObject(lines[i]);
+                record.put(TITLE, SecretRedactor.redact(record.optString(TITLE)));
+                record.put(CONTENT, SecretRedactor.redact(record.optString(CONTENT)));
+                jsons.add(record);
             } catch (JSONException e) {
             }
         }
@@ -67,13 +64,9 @@ public class SyncLog {
 
         File log = new File(c.getFilesDir().getPath() + "/sync.log");
         try {
-            FileWriter writer = new FileWriter(log, true);
-            writer.append(System.lineSeparator());
-            writer.append(entry);
-            writer.flush();
-            writer.close();
-        } catch (Exception e){
-            e.printStackTrace();
+            BoundedLogFile.append(log, entry);
+        } catch (IOException e) {
+            FLog.e("SyncLog", "Could not write history");
         }
     }
 
@@ -82,8 +75,8 @@ public class SyncLog {
         long now = System.currentTimeMillis();
         try {
             json.put(TIMESTAMP, now);
-            json.put(CONTENT, content);
-            json.put(TITLE, title);
+            json.put(CONTENT, SecretRedactor.redact(content));
+            json.put(TITLE, SecretRedactor.redact(title));
             json.put(TYPE, type);
         } catch (JSONException e) {
             e.printStackTrace();
@@ -102,13 +95,7 @@ public class SyncLog {
 
     public static void delete(Context c){
         File log = new File(c.getFilesDir().getPath() + "/sync.log");
-        if (log.exists()) {
-            if (log.delete()) {
-                System.out.println("file Deleted");
-            } else {
-                System.out.println("file not Deleted");
-            }
-        }
+        BoundedLogFile.delete(log);
     }
 
 }

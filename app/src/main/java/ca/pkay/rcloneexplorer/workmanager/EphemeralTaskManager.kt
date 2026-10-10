@@ -132,7 +132,8 @@ class EphemeralTaskManager(private var mContext: Context) {
 
     protected fun work(inputData: Data, tag: String) {
         val uploadWorkRequest = OneTimeWorkRequestBuilder<EphemeralWorker>()
-        uploadWorkRequest.setInputData(inputData)
+        uploadWorkRequest.setInputData(Data.Builder().putAll(inputData)
+            .putLong(ca.pkay.rcloneexplorer.util.ConfigEpoch.WORK_KEY, ca.pkay.rcloneexplorer.util.ConfigEpoch.current(mContext)).build())
         uploadWorkRequest.addTag(tag)
         WorkManager.getInstance(mContext).enqueue(uploadWorkRequest.build())
     }

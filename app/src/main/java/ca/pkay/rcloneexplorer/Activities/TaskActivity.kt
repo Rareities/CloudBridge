@@ -35,6 +35,10 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import es.dmoral.toasty.Toasty
 import java.io.UnsupportedEncodingException
 import java.net.URLDecoder
+import androidx.appcompat.app.AlertDialog
+import ca.pkay.rcloneexplorer.bisync.BisyncSession
+import ca.pkay.rcloneexplorer.bisync.BisyncPolicy
+import ca.pkay.rcloneexplorer.workmanager.ProcessMonitor
 
 class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
@@ -78,6 +82,9 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     // Tracks which remote field the RemoteFolderPickerFragment is choosing a path for.
     private var pickingDestinationRemote = false
     private var selectedFilter: Filter? = null
+    @Volatile private var previewProcess: Process? = null
+    @Volatile private var previewCancelled = false
+    private lateinit var bisyncDeleteLimit: EditText
 
 
 
@@ -143,6 +150,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskRemote2Card = findViewById(R.id.task_remote2_card)
         syncDirection = findViewById(R.id.task_direction_spinner)
         syncDescription = findViewById(R.id.descriptionSyncDirection)
+        bisyncDeleteLimit = findViewById(R.id.task_bisync_max_delete)
         transfersDropdown = findViewById(R.id.task_transfers_spinner)
         filterDropdown = findViewById(R.id.task_filter_spinner)
         switchDeleteExcluded = findViewById(R.id.task_exclude_delete_toggle)
@@ -193,6 +201,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         switchWifi.isChecked = existingTask?.wifionly ?: false
         switchMD5sum.isChecked = existingTask?.md5sum ?: false
         switchDeleteExcluded.isChecked = existingTask?.deleteExcluded ?: false
+        bisyncDeleteLimit.setText((existingTask?.bisyncMaxDelete ?: 10).toString())
         prepareSyncDirectionDropdown()
         prepareTransfersDropdown()
         prepareLocal()
@@ -239,25 +248,96 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     private fun persistTaskChanges() {
         val updatedTask = getTaskValues(existingTask!!.id)
         if (updatedTask != null) {
-            dbHandler.updateTask(updatedTask)
-            finish()
+            saveWithBisyncReview(updatedTask) { dbHandler.updateTask(updatedTask) }
         }
     }
 
     private fun saveTask() {
         val newTask = getTaskValues(0)
         if (newTask != null) {
-            dbHandler.createTask(newTask)
-            finish()
+            saveWithBisyncReview(newTask) { dbHandler.createTask(newTask) }
         }
+    }
+
+    private fun saveWithBisyncReview(task: Task, save: () -> Unit) {
+        if (task.direction != SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+            save(); finish(); return
+        }
+        try {
+            BisyncPolicy.validate(task)
+            if (!BisyncSession.needsReview(this, task)) { save(); finish(); return }
+        } catch (e: Exception) {
+            Toasty.error(this, e.message ?: "Invalid bisync configuration").show(); return
+        }
+        AlertDialog.Builder(this).setTitle(R.string.bisync_review_title)
+            .setMessage(R.string.bisync_review_explanation)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.bisync_preview) { _, _ -> previewBisync(task, save) }.show()
+    }
+
+    private fun previewBisync(task: Task, save: () -> Unit) {
+        previewCancelled = false
+        fab.isEnabled = false
+        val dialog = AlertDialog.Builder(this).setTitle(R.string.bisync_preview)
+            .setMessage(R.string.bisync_preview_running).setCancelable(false)
+            .setNegativeButton(android.R.string.cancel) { _, _ -> previewCancelled = true; previewProcess?.destroy() }.show()
+        Thread {
+            val output = StringBuilder()
+            var succeeded = false
+            var truncated = false
+            var approval: BisyncSession.PreviewApproval? = null
+            try {
+                BisyncSession.previewLease(this).use {
+                    if (previewCancelled) error("Preview canceled")
+                    approval = BisyncSession.previewApproval(this, task)
+                    val process = rcloneInstance.bisyncPreview(task)
+                        ?: error("Cannot start rclone preview")
+                    previewProcess = process
+                    if (previewCancelled) process.destroy()
+                    succeeded = ProcessMonitor.await(process) { line ->
+                        if (output.length + line.length < 24000) output.append(ca.pkay.rcloneexplorer.util.SecretRedactor.redact(line)).append('\n')
+                        else truncated = true
+                    } == 0 && !previewCancelled && !truncated
+                }
+                if (truncated) output.append("\nPreview exceeded the review limit. Initialization is blocked; use a smaller scope.")
+            } catch (e: Exception) { output.append(e.message ?: "Preview failed") }
+            finally { previewProcess = null }
+            runOnUiThread {
+                dialog.dismiss(); fab.isEnabled = true
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val review = AlertDialog.Builder(this).setTitle(if (succeeded)
+                    R.string.bisync_approve_title else R.string.bisync_preview_failed)
+                    .setMessage(getString(R.string.bisync_approval_warning) + "\n\n" + output)
+                    .setNegativeButton(android.R.string.cancel, null)
+                if (succeeded) review.setPositiveButton(R.string.bisync_approve) { _, _ ->
+                    try { BisyncSession.approve(this, task, checkNotNull(approval)); save(); finish() }
+                    catch (e: Exception) { Toasty.error(this, e.message ?: "Cannot save job").show() }
+                }
+                review.show()
+            }
+        }.start()
+    }
+
+    override fun onDestroy() {
+        previewCancelled = true
+        previewProcess?.destroy()
+        super.onDestroy()
     }
 
     private fun getTaskValues(id: Long): Task? {
         val taskToPopulate = Task(id)
+        existingTask?.let {
+            taskToPopulate.stableUUID = it.stableUUID
+            taskToPopulate.bisyncMaxDelete = it.bisyncMaxDelete
+        }
         taskToPopulate.title = findViewById<EditText>(R.id.task_title_textfield).text.toString()
         val remotename = remoteDropdown.selectedItem.toString()
         taskToPopulate.remoteId = remotename
         val direction = SyncDirectionObject.directionForSpinnerPosition(syncDirection.selectedItemPosition)
+        if (direction < 0 || remoteDropdown.selectedItem == null) {
+            Toasty.error(this, "Choose a supported mode and remote before saving").show()
+            return null
+        }
         for (ri in rcloneInstance.remotes) {
             if (ri.name == taskToPopulate.remoteId) {
                 taskToPopulate.remoteType = ri.type
@@ -288,6 +368,19 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         val transfersValue = resources.getStringArray(R.array.task_transfers_values)
             .getOrNull(transfersDropdown.selectedItemPosition)?.toIntOrNull() ?: -1
         taskToPopulate.transfers = if (transfersValue <= 0) null else transfersValue
+        if (direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) {
+            val percent = bisyncDeleteLimit.text.toString().toIntOrNull()
+            if (percent == null || percent !in 0..25) {
+                bisyncDeleteLimit.error = getString(R.string.bisync_delete_limit)
+                return null
+            }
+            taskToPopulate.bisyncMaxDelete = percent
+            taskToPopulate.md5sum = true
+            if (taskToPopulate.filterId != null || taskToPopulate.deleteExcluded) {
+                Toasty.error(this, "Bisync filters are not yet supported; remove the filter before saving").show()
+                return null
+            }
+        }
 
         // Verify if data is completed
         val isCloudToCloud = direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
@@ -452,6 +545,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     private fun updateRemoteFieldVisibility(direction: Int) {
+        bisyncDeleteLimit.visibility = if (direction == SyncDirectionObject.SYNC_BIDIRECTIONAL) View.VISIBLE else View.GONE
         val cloudToCloud = direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
                 || direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
         taskRemote2Card.visibility = if (cloudToCloud) View.VISIBLE else View.GONE

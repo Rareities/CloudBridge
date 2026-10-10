@@ -14,7 +14,7 @@
 //  - windows x64
 //
 // Prerequisites:
-//  - go 1.25+
+//  - go 1.26+
 //  - Either Android SDK command-line tools, or the expected NDK version (see gradle.properties).
 //
 // rclone source:
@@ -133,11 +133,19 @@ def getCrossCompiler(abi) {
 }
 
 def getCC(abi) {
-    def osName = System.properties['os.name']
-    if (osName.startsWith('Windows')) {
-        return null
+    if (System.properties['os.name'].startsWith('Windows')) {
+        // cgo executes binaries directly; the NDK .cmd wrappers are not executables.
+        def target = [
+            'armeabi-v7a': 'armv7a-linux-androideabi',
+            'arm64-v8a': 'aarch64-linux-android',
+            'x86': 'i686-linux-android',
+            'x86_64': 'x86_64-linux-android',
+        ][abi]
+        def compiler = Paths.get(findNdkDir(), 'toolchains', 'llvm', 'prebuilt',
+                                 'windows-x86_64', 'bin', 'clang.exe').toString()
+        return '"' + compiler + '" --target=' + target + NDK_TOOLCHAIN_VERSION
     }
-    return getCrossCompiler(abi)
+    return '"' + getCrossCompiler(abi) + '"'
 }
 
 def getOutputPath(abi) {
@@ -161,20 +169,36 @@ def buildRclone(abi) {
     ]
 
     return {
+        // Native tools write these files outside Gradle. Declared outputs invalidate the
+        // virtual filesystem before Android snapshots/merges them for packaging.
+        inputs.property('engineRepository', RCLONE_REPO_URL)
+        inputs.property('engineCommit', RCLONE_REF)
+        inputs.property('abi', abi)
+        inputs.property('requiredGoVersion', GO_REQ_VERSION)
+        inputs.property('actualGoVersion', { project.ext.resolvedGoVersion })
+        inputs.property('ndkVersion', NDK_VERSION)
+        inputs.property('androidApi', NDK_TOOLCHAIN_VERSION)
+        inputs.property('buildMode', 'android-cgo-pie-noselfupdate-16k')
+        inputs.files(fileTree(Paths.get(CACHE_PATH, 'rclone-src').toFile()) {
+            exclude '.git/**'
+        }).withPropertyName('engineSource').withPathSensitivity(PathSensitivity.RELATIVE)
+        outputs.file(getOutputPath(abi)).withPropertyName('nativeExecutable')
         doLast {
             def commonEnv = [
                 'GOPATH'      : GOPATH,
-                'GOOS'        : 'linux',
-                'CGO_ENABLED' : '0',
+                'GOOS'        : 'android',
+                'CGO_ENABLED' : '1',
+                'CC'          : getCC(abi),
             ] + abiToEnv[abi]
 
             exec {
                 commonEnv.each { k, v -> environment k, v }
                 workingDir Paths.get(CACHE_PATH, 'rclone-src').toString()
-                def ldflags = "-s -w -X github.com/rclone/rclone/fs.Version=${getSourceVersion()}"
+                def ldflags = "-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384 -X github.com/rclone/rclone/fs.Version=${getSourceVersion()}"
                 commandLine (
                     'go',
                     'build',
+                    '-buildmode=pie',
                     '-tags',
                     'noselfupdate',
                     '-trimpath',
@@ -208,10 +232,11 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             commandLine 'go', 'version'
             standardOutput = goVersionOutput
         }
+        project.ext.resolvedGoVersion = goVersionOutput.toString().trim()
 
         // BUILD-019: fail the build on an incompatible Go toolchain, which would produce an
-        // untested/broken librclone.so. Accept any patch of the required minor (e.g. a "1.25.0"
-        // requirement accepts "1.25.11") and any newer minor, since Go stays forward-compatible.
+        // untested/broken librclone.so. Accept any patch of the required minor (e.g. a "1.26.0"
+        // requirement accepts "1.26.11") and any newer minor, since Go stays forward-compatible.
         def goMatcher = goVersionOutput.toString() =~ /go(\d+)\.(\d+)\.(\d+)/
         if (!goMatcher.find()) {
             throw new GradleException("Unable to determine Go version from: ${goVersionOutput}")
@@ -227,6 +252,9 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             throw new GradleException("The required go version is: ${GO_REQ_VERSION}. You are running: ${goVersionOutput}")
         }
 
+        if (!(RCLONE_REF ==~ /[0-9a-fA-F]{40}/)) {
+            throw new GradleException('rCloneRef must be an immutable full commit SHA.')
+        }
         def srcDir = Paths.get(CACHE_PATH, 'rclone-src').toFile()
 
         if (!srcDir.exists()) {
@@ -237,6 +265,20 @@ task checkoutRclone(dependsOn: createRcloneModule) {
             }
         }
 
+        // A cache made for a different fork must fetch from the selected origin.
+        exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'remote', 'set-url', 'origin', RCLONE_REPO_URL
+        }
+        def dirtyOutput = new ByteArrayOutputStream()
+        exec {
+            workingDir srcDir.absolutePath
+            commandLine 'git', 'status', '--porcelain'
+            standardOutput = dirtyOutput
+        }
+        if (!dirtyOutput.toString().trim().isEmpty()) {
+            throw new GradleException('Cached rclone source is modified. Preserve your changes and clear the cache before building.')
+        }
         // Always sync to the requested ref so upgrades work without manual cache clears
         println "Syncing rclone source to ref: ${RCLONE_REF}"
         exec {
@@ -245,15 +287,18 @@ task checkoutRclone(dependsOn: createRcloneModule) {
         }
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'checkout', RCLONE_REF
+            commandLine 'git', 'checkout', '--detach', RCLONE_REF
         }
 
         // Print resolved commit and version for traceability
         def commitOut = new ByteArrayOutputStream()
         exec {
             workingDir srcDir.absolutePath
-            commandLine 'git', 'rev-parse', '--short', 'HEAD'
+            commandLine 'git', 'rev-parse', 'HEAD'
             standardOutput = commitOut
+        }
+        if (!commitOut.toString().trim().equalsIgnoreCase(RCLONE_REF)) {
+            throw new GradleException('Resolved engine SHA does not match requested source.')
         }
         def version = getSourceVersion()
         println "rclone source: commit=${commitOut.toString().trim()} version=${version} (from ${RCLONE_REPO_URL})"
@@ -276,9 +321,50 @@ task buildx64(dependsOn: checkoutRclone) {
     configure buildRclone('x86_64')
 }
 
-task buildAll {
-    dependsOn buildArm, buildArm64, buildx86, buildx64
+task generateProvenance(dependsOn: [buildArm, buildArm64, buildx86, buildx64]) {
+    inputs.property('engineRepository', RCLONE_REPO_URL)
+    inputs.property('engineCommit', RCLONE_REF)
+    inputs.property('ndkVersion', NDK_VERSION)
+    inputs.property('androidApi', NDK_TOOLCHAIN_VERSION)
+    inputs.property('requiredGoVersion', GO_REQ_VERSION)
+    inputs.property('actualGoVersion', { project.ext.resolvedGoVersion })
+    inputs.files([buildArm, buildArm64, buildx86, buildx64]).withPropertyName('nativeExecutables')
+    inputs.files(['VERSION', 'go.mod', 'go.sum'].collect {
+        Paths.get(CACHE_PATH, 'rclone-src', it).toFile()
+    }).withPropertyName('dependencyInputs').withPathSensitivity(PathSensitivity.RELATIVE)
+    outputs.file(rootProject.file('app/build/generated/rcloneProvenance/rclone-build.json'))
+            .withPropertyName('engineProvenance')
+    doLast {
+        def goVersion = new ByteArrayOutputStream()
+        exec { commandLine 'go', 'version'; standardOutput = goVersion }
+        def manifest = [repository: RCLONE_REPO_URL, commit: RCLONE_REF,
+                        version: getSourceVersion(), go: goVersion.toString().trim(),
+                        ndk: NDK_VERSION, androidApi: NDK_TOOLCHAIN_VERSION, goos: 'android',
+                        cgo: true, buildMode: 'pie', maxPageSize: 16384,
+                        buildTags: ['noselfupdate'], binaries: [:]]
+        manifest.dependencyInputs = [:]
+        ['go.mod', 'go.sum'].each { name ->
+            def dependencyFile = Paths.get(CACHE_PATH, 'rclone-src', name).toFile()
+            manifest.dependencyInputs[name] = java.security.MessageDigest.getInstance('SHA-256')
+                    .digest(dependencyFile.bytes).encodeHex().toString()
+        }
+        ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'].each { abi ->
+            def binary = new File(getOutputPath(abi))
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+            binary.withInputStream { stream ->
+                byte[] buffer = new byte[65536]
+                int length
+                while ((length = stream.read(buffer)) != -1) digest.update(buffer, 0, length)
+            }
+            manifest.binaries[abi] = [sha256: digest.digest().encodeHex().toString(), bytes: binary.length()]
+        }
+        def destination = rootProject.file('app/build/generated/rcloneProvenance/rclone-build.json')
+        destination.parentFile.mkdirs()
+        destination.text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(manifest))
+    }
 }
+
+task buildAll { dependsOn generateProvenance }
 
 task clean {
     doLast {

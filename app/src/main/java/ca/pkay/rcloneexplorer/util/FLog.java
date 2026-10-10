@@ -57,7 +57,7 @@ public abstract class FLog {
 
     public static void w(String tag, String message, Exception e, Object... args) {
         if (isLoggable(tag, Log.WARN)) {
-            Log.w(tag, applyFormatting(message, args), e);
+            Log.w(tag, applyFormatting(message, args), safeThrowable(e));
         }
     }
 
@@ -95,21 +95,29 @@ public abstract class FLog {
     public static void e(String tag, String message, Throwable e, Object... args) {
         String formatted = applyFormatting(message, args);
         if (isLoggable(tag, Log.ERROR)) {
-            Log.e(tag, formatted, e);
+            Log.e(tag, formatted, safeThrowable(e));
         }
+    }
+
+    private static Throwable safeThrowable(Throwable error) {
+        if (error == null) return null;
+        // Original causes/suppressed exceptions may contain unlabelled secrets.
+        Throwable safe = new Throwable(error.getClass().getSimpleName());
+        safe.setStackTrace(error.getStackTrace());
+        return safe;
     }
 
     private static String applyFormatting(String message, Object... args) {
         if (args.length == 0) {
-            return message;
+            return SecretRedactor.redact(message);
         } else {
             try {
-                return String.format(message, args);
+                return SecretRedactor.redact(String.format(message, args));
             } catch (IllegalFormatException e) {
                 // We really shouldn't crash here even if there is a format
                 // error since this is usally used without in error logging
                 // itself.
-                return message;
+                return SecretRedactor.redact(message);
             }
         }
     }

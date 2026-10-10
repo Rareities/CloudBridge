@@ -27,6 +27,11 @@
 
     <PreferenceCategory android:title="@string/preference_category_header_background_work">
         <SwitchPreferenceCompat
+            android:defaultValue="false"
+            android:key="session_guardian_enabled"
+            android:title="@string/session_guardian_optional_title"
+            app:summary="@string/session_guardian_optional_summary" />
+        <SwitchPreferenceCompat
             android:defaultValue="true"
             android:key="@string/shared_preferences_allow_sync_trigger_while_idle"
             android:title="@string/alarm_while_idle"

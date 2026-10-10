@@ -354,6 +354,7 @@
     <string name="sync_direction_copy_remote_local">Copy remote to local</string>
     <string name="sync_direction_remote_remote">Sync remote to remote</string>
     <string name="sync_direction_copy_remote_remote">Copy remote to remote</string>
+    <string name="sync_direction_bidirectional">Bidirectional sync (bisync)</string>
     <string name="copy">Copy</string>
     <string name="operation_success">%s sync successful</string>
     <string name="operation_success_description_zero">There was nothing to do.</string>
@@ -701,4 +702,24 @@
     <string name="remote_options_content_description">Remote options</string>
     <string name="pinned_content_description">Pinned</string>
     <string name="no_log_entries">No sync log entries yet</string>
+    <string name="bisync_delete_limit">Maximum deleted files per side (percent, 0–25)</string>
+    <string name="bisync_review_title">Initialize or recover bidirectional sync</string>
+    <string name="bisync_review_explanation">This needs a new baseline. First preview the operation. Initialization combines both folders; when contents conflict, the LOCAL copy wins. Back up both folders before continuing. This is also the recovery path after interruption; it never runs automatically.</string>
+    <string name="bisync_preview">Preview initialization</string>
+    <string name="bisync_preview_running">Reading both folders without transferring or deleting files…</string>
+    <string name="bisync_approve_title">Review initialization plan</string>
+    <string name="bisync_approval_warning">Review the dry-run output below. A preview is not an atomic snapshot: cloud changes can occur afterwards. Confirm only if combining both folders with LOCAL precedence is intended. Normal runs preserve conflicting copies and stop above the configured deletion percentage.</string>
+    <string name="bisync_preview_failed">Preview failed — initialization blocked</string>
+    <string name="bisync_approve">Approve initialization and save</string>
+    <string name="shortcut_not_authorized">This shortcut is no longer authorized. Recreate it from the task menu.</string>
+    <string name="session_guardian_optional_title">Periodic connection checks</string>
+    <string name="session_guardian_optional_summary">Optionally check authenticated remotes every eight hours. Normal transfers check connections when needed. Enablement takes effect when the app next starts.</string>
+    <string name="backup_encrypt_title">Encrypt credential backup</string>
+    <string name="backup_encrypt_explanation">Choose a password to protect remote credentials. Your configuration will remain encrypted on this device, with its unlock protected by Android Keystore so scheduled tasks can continue. Cloud browsing and active streams close during this change. Keep the password: another device needs it to restore this backup. Task names and preferences in the backup remain readable.</string>
+    <string name="backup_password">Backup password</string>
+    <string name="backup_password_confirmation">Confirm password</string>
+    <string name="backup_password_invalid">Enter a nonempty single-line password.</string>
+    <string name="backup_password_mismatch">Passwords do not match.</string>
+    <string name="backup_encrypt_failed">Could not encrypt the configuration. Stop running transfers and try again.</string>
+    <string name="backup_exported">Backup exported</string>
 </resources>

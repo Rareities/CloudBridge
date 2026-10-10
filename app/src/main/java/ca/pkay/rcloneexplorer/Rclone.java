@@ -55,6 +55,10 @@ import ca.pkay.rcloneexplorer.Items.FileItem;
 import ca.pkay.rcloneexplorer.Items.FilterEntry;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject;
+import ca.pkay.rcloneexplorer.Items.Task;
+import ca.pkay.rcloneexplorer.bisync.BisyncSession;
+import ca.pkay.rcloneexplorer.util.ConfigSecretStore;
+import ca.pkay.rcloneexplorer.util.ConfigRestoreJournal;
 import ca.pkay.rcloneexplorer.rclone.Provider;
 import ca.pkay.rcloneexplorer.util.FLog;
 import ca.pkay.rcloneexplorer.util.SyncLog;
@@ -89,6 +93,11 @@ public class Rclone {
 
     public Rclone(Context context) {
         this.context = context;
+        try {
+            ConfigRestoreJournal.recover(context);
+        } catch (IOException e) {
+            throw new IllegalStateException("Configuration restore needs recovery", e);
+        }
         this.rclone = context.getApplicationInfo().nativeLibraryDir + "/librclone.so";
         this.rcloneConf = context.getFilesDir().getPath() + "/rclone.conf";
         log2File = new Log2File(context);
@@ -112,7 +121,7 @@ public class Rclone {
         command.add(rcloneConf);
 
         if(loggingEnabled) {
-            command.add("-vvv");
+            command.add("--log-level=NOTICE");
         }
 
         command.addAll(Arrays.asList(args));
@@ -157,7 +166,7 @@ public class Rclone {
         command.add(rcloneConf);
 
         if(loggingEnabled) {
-            command.add("-vvv");
+            command.add("--log-level=NOTICE");
         }
 
         command.addAll(args);
@@ -216,37 +225,39 @@ public class Rclone {
         environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
 
         // Allow the caller to overwrite any option for special cases
-        Iterator<String> envVarIter = environmentValues.iterator();
-        while(envVarIter.hasNext()){
-            String envVar = envVarIter.next();
-            String optionName = envVar.substring(0, envVar.indexOf('='));
-            for(String overwrite : overwriteOptions){
-                if(overwrite.startsWith(optionName)) {
-                    envVarIter.remove();
-                    environmentValues.add(overwrite);
-                }
-            }
+        for (String overwrite : overwriteOptions) {
+            int equals = overwrite.indexOf('=');
+            if (equals <= 0) throw new IllegalArgumentException("Invalid environment option");
+            String prefix = overwrite.substring(0, equals + 1);
+            Iterator<String> iter = environmentValues.iterator();
+            while (iter.hasNext()) if (iter.next().startsWith(prefix)) iter.remove();
+            environmentValues.add(overwrite);
         }
         return environmentValues.toArray(new String[0]);
     }
 
     private String getDnsServers() {
-        String fallback = "8.8.8.8:53,8.8.4.4:53";
+        String fallback = "";
         try {
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
             if (cm == null) return fallback;
             Network network = cm.getActiveNetwork();
             if (network == null) return fallback;
             LinkProperties lp = cm.getLinkProperties(network);
+            // Keep Android's encrypted Private DNS resolution instead of issuing raw DNS queries.
+            if (lp != null && android.os.Build.VERSION.SDK_INT >= 28 && lp.isPrivateDnsActive()) return "";
             if (lp == null) return fallback;
             StringBuilder sb = new StringBuilder();
             for (InetAddress dns : lp.getDnsServers()) {
                 if (sb.length() > 0) sb.append(",");
-                sb.append(dns.getHostAddress()).append(":53");
+                String address = dns.getHostAddress();
+                if (address == null) continue;
+                if (address.indexOf(':') >= 0) address = "[" + address + "]";
+                sb.append(address).append(":53");
             }
             return sb.length() > 0 ? sb.toString() : fallback;
         } catch (Exception e) {
-            FLog.e(TAG, "Failed to detect DNS servers, using fallback", e);
+            FLog.e(TAG, "Failed to detect DNS servers; using native resolver", e);
             return fallback;
         }
     }
@@ -318,7 +329,6 @@ public class Rclone {
         JSONArray results;
         Process process = null;
         try {
-            FLog.d(TAG, "getDirectoryContent[ENV]: %s", Arrays.toString(env));
             process = getRuntimeProcess(command, env);
 
             StringBuilder output = new StringBuilder();
@@ -501,7 +511,23 @@ public class Rclone {
     }
 
     private Process getRuntimeProcess(String[] command, String[] env) throws IOException {
-        return Runtime.getRuntime().exec(command, env);
+        java.io.Closeable admission = ca.pkay.rcloneexplorer.util.OperationAdmission.processLease(
+                new File(context.getFilesDir(), "bisync-admission.lock"));
+        try {
+            ArrayList<String> values = new ArrayList<>(Arrays.asList(env));
+            boolean supplied = false;
+            for (String value : values) if (value.startsWith("RCLONE_CONFIG_PASS=")) supplied = true;
+            if (!supplied) {
+                String password = ConfigSecretStore.password(context);
+                if (password != null) values.add("RCLONE_CONFIG_PASS=" + password);
+            }
+            values.add("RCLONE_ASK_PASSWORD=false");
+            return ca.pkay.rcloneexplorer.util.AdmittedProcess.start(command,
+                    values.toArray(new String[0]), admission);
+        } catch (IOException | RuntimeException e) {
+            try { admission.close(); } catch (IOException close) { e.addSuppressed(close); }
+            throw e;
+        }
     }
 
     @Nullable
@@ -763,23 +789,32 @@ public class Rclone {
             params.add(baseUrl);
         }
 
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-        boolean isLoggingEnabled = sharedPreferences.getBoolean(context.getString(R.string.pref_key_logs), false);
-        if (isLoggingEnabled) {
-            File serveLog = new File(context.getExternalFilesDir("logs"), "serve.log");
-            params.add("--log-file");
-            params.add(serveLog.getAbsolutePath());
-        }
-
+        // Native raw log files bypass redaction/retention. Drain diagnostics without persisting
+        // arbitrary backend messages; application lifecycle diagnostics use private bounded logs.
         String[] env = getRcloneEnv();
         String[] command = params.toArray(new String[0]);
         try {
-            return getRuntimeProcess(command, env);
+            Process serving = getRuntimeProcess(command, env);
+            drainServingPipe(serving.getInputStream(), "rclone-serve-stdout");
+            drainServingPipe(serving.getErrorStream(), "rclone-serve-stderr");
+            log2File.log("Serving process started");
+            return serving;
         } catch (IOException e) {
             FLog.e(TAG, "serve: error starting rclone", e);
             // todo: guard callers against null result
             return null;
         }
+    }
+
+    private void drainServingPipe(InputStream stream, String name) {
+        Thread reader = new Thread(() -> {
+            try (InputStream in = stream) {
+                byte[] bytes = new byte[4096];
+                while (in.read(bytes) != -1) { /* Raw backend diagnostics are not retained. */ }
+            } catch (IOException ignored) { }
+        }, name);
+        reader.setDaemon(true);
+        reader.start();
     }
 
     public Process serve(int protocol, int port, boolean allowRemoteAccess, String user, String password, RemoteItem remote, String servePath) {
@@ -899,6 +934,90 @@ public class Rclone {
         } catch (IOException e) {
             FLog.e(TAG, "sync: error starting rclone", e);
             return null;
+        }
+    }
+
+    public Process bisync(Task task, ArrayList<FilterEntry> filters) throws IOException {
+        if (!filters.isEmpty()) throw new IOException("Bisync filter migration is not supported");
+        preflightBisync(task);
+        ArrayList<String> args = BisyncSession.arguments(context, task, false);
+        Collections.addAll(args, "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log");
+        return getRuntimeProcess(createCommandWithOptions(args), getRcloneEnv());
+    }
+
+    public Process bisyncPreview(Task task) throws IOException {
+        preflightBisync(task);
+        return getRuntimeProcess(createCommandWithOptions(BisyncSession.arguments(context, task, true)), getRcloneEnv());
+    }
+
+    private void preflightBisync(Task task) throws IOException {
+        File local = new File(task.getLocalPath());
+        if (!local.isDirectory() || !local.canRead()) throw new IOException("Local bisync root is unavailable");
+        String[] roots = {local.getCanonicalPath(), task.getRemoteId() + ":" + task.getRemotePath()};
+        for (String root : roots) {
+            Captured result = capture(createCommand("lsjson", root, "--recursive", "--hash-type", "SHA-1",
+                    "--no-modtime", "--no-mimetype", "--protondrive-original-file-size=true",
+                    "--protondrive-enable-caching=false"), getRcloneEnv(), 16 * 1024 * 1024, 300000);
+            if (result.exit != 0) throw new IOException("Bisync root listing failed; no changes were started");
+            try {
+                JSONArray files = new JSONArray(result.text);
+                for (int i = 0; i < files.length(); i++) {
+                    JSONObject file = files.getJSONObject(i);
+                    if (!file.getBoolean("IsDir")) {
+                        JSONObject hashes = file.optJSONObject("Hashes");
+                        String hash = hashes == null ? "" : hashes.optString("SHA-1");
+                        if (file.getLong("Size") < 0 || !hash.matches("(?i)[0-9a-f]{40}")) {
+                            throw new IOException("Bisync requires verified plaintext size and SHA-1 for every file");
+                        }
+                    }
+                }
+            } catch (JSONException e) { throw new IOException("Bisync listing was incomplete or invalid", e); }
+        }
+    }
+
+    private static final class Captured {
+        final int exit; final String text;
+        Captured(int exit, String text) { this.exit = exit; this.text = text; }
+    }
+
+    /** Bounded read-only helpers drain both pipes and cannot wait indefinitely. */
+    private Captured capture(String[] command, String[] env, int limit, long timeout) throws IOException {
+        return capture(command, env, limit, timeout, null);
+    }
+
+    private Captured capture(String[] command, String[] env, int limit, long timeout, byte[] stdin) throws IOException {
+        Process process = getRuntimeProcess(command, env);
+        Thread stderr = new Thread(() -> {
+            try (InputStream in = process.getErrorStream()) {
+                byte[] bytes = new byte[4096]; while (in.read(bytes) != -1) { /* no raw diagnostics */ }
+            } catch (IOException ignored) { }
+        }, "rclone-helper-stderr");
+        stderr.setDaemon(true);
+        stderr.start();
+        java.util.concurrent.atomic.AtomicBoolean expired = new java.util.concurrent.atomic.AtomicBoolean();
+        java.util.Timer timer = new java.util.Timer("rclone-helper-deadline", true);
+        timer.schedule(new java.util.TimerTask() {
+            @Override public void run() { expired.set(true); process.destroy(); }
+        }, timeout);
+        try (InputStream in = process.getInputStream(); java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            try (OutputStream input = process.getOutputStream()) {
+                if (stdin != null) input.write(stdin);
+            }
+            byte[] bytes = new byte[8192]; int n;
+            while ((n = in.read(bytes)) != -1) {
+                if (out.size() + n > limit) throw new IOException("Rclone helper output exceeds safe limit");
+                out.write(bytes, 0, n);
+            }
+            int exit = process.waitFor();
+            if (expired.get()) throw new IOException("Rclone helper timed out");
+            return new Captured(exit, new String(out.toByteArray(), StandardCharsets.UTF_8));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); throw new IOException("Rclone helper interrupted", e);
+        } finally {
+            timer.cancel(); process.destroy();
+            try { process.getErrorStream().close(); } catch (IOException ignored) { }
+            try { process.getOutputStream().close(); } catch (IOException ignored) { }
+            try { stderr.join(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
     }
 
@@ -1530,60 +1649,19 @@ public class Rclone {
         return process.exitValue() != 0;
     }
 
+    /** Unlock encrypted configuration without ever writing its plaintext representation. */
     public Boolean decryptConfig(String password) {
-        String[] command = createCommand("--ask-password=false", "config", "show");
-        String[] environmentalVars = {"RCLONE_CONFIG_PASS=" + password};
-        Process process;
-
         try {
-            process = getRuntimeProcess(command, environmentalVars);
+            Captured result = capture(createCommand("--ask-password=false", "listremotes"),
+                    getRcloneEnv("RCLONE_CONFIG_PASS=" + password), 1024 * 1024, 30000);
+            if (result.exit != 0) return false;
+            ConfigSecretStore.store(context, password);
+            invalidateRemotesCache();
+            return true;
         } catch (IOException e) {
-            FLog.e(TAG, "decryptConfig: error running rclone", e);
+            FLog.e(TAG, "Configuration unlock failed");
             return false;
         }
-
-        ArrayList<String> result = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                result.add(line);
-            }
-        } catch (IOException e) {
-            FLog.e(TAG, "decryptConfig: error copying rclone stdout", e);
-            return false;
-        }
-
-        try {
-            process.waitFor();
-        } catch (InterruptedException e) {
-            FLog.e(TAG, "decryptConfig: error waiting for rclone", e);
-            return false;
-        }
-
-        if (process.exitValue() != 0) {
-            return false;
-        }
-
-        String appsFileDir = context.getFilesDir().getPath();
-        File file = new File(appsFileDir, "rclone.conf");
-
-        try {
-            file.delete();
-            file.createNewFile();
-            FileOutputStream fileOutputStream = new FileOutputStream(file);
-            OutputStreamWriter outputStreamWriter = new OutputStreamWriter(fileOutputStream);
-            for (String line2 : result) {
-                outputStreamWriter.append(line2);
-                outputStreamWriter.append("\n");
-            }
-            outputStreamWriter.close();
-            fileOutputStream.flush();
-            fileOutputStream.close();
-        } catch (IOException e) {
-            FLog.e(TAG, "decryptConfig: error reading stdout", e);
-            return false;
-        }
-        return true;
     }
 
     public boolean isConfigFileCreated() {
@@ -1606,38 +1684,32 @@ public class Rclone {
     }
 
     public File getFileFromZip(Uri uri, String target, File targetfile) throws IOException {
-
-        // The exact cause of the NPE is unknown, but the effect is the same
-        // - the copy process has failed, therefore bubble an IOException
-        // for handling at the appropriate layers.
-        InputStream inputStream;
-        try {
-            inputStream = context.getContentResolver().openInputStream(uri);
-        } catch(NullPointerException e) {
-            throw new IOException(e);
-        }
-        ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(inputStream));
-
-        ZipEntry zipEntry;
-        int count = 0;
-        byte[] buffer = new byte[1024];
-
-        while ((zipEntry = zipInputStream.getNextEntry()) != null) {
-            if(zipEntry.getName().equals(target)){
-                FileOutputStream fileOutputStream = new FileOutputStream(targetfile);
-                while ((count = zipInputStream.read(buffer)) != -1) {
-                    fileOutputStream.write(buffer, 0, count);
+        InputStream raw = context.getContentResolver().openInputStream(uri);
+        if (raw == null) throw new IOException("Cannot open import");
+        boolean found = false;
+        long total = 0;
+        int entries = 0;
+        try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(raw))) {
+            ZipEntry entry;
+            byte[] bytes = new byte[8192];
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++entries > 100) throw new IOException("Too many archive entries");
+                boolean selected = target.equals(entry.getName()) && !entry.isDirectory();
+                if (selected && found) throw new IOException("Duplicate archive component");
+                try (OutputStream out = selected ? new FileOutputStream(targetfile) : new java.io.ByteArrayOutputStream(0)) {
+                    int n;
+                    while ((n = zip.read(bytes)) != -1) {
+                        total += n;
+                        if (total > 16L * 1024 * 1024) throw new IOException("Import archive exceeds size limit");
+                        // Unknown entries are bounded but never extracted or accumulated.
+                        if (selected) out.write(bytes, 0, n);
+                    }
                 }
-                fileOutputStream.flush();
-                fileOutputStream.close();
-                zipInputStream.closeEntry();
-                zipInputStream.close();
-                return targetfile;
+                if (selected) found = true;
+                zip.closeEntry();
             }
-            zipInputStream.closeEntry();
-        }
-        zipInputStream.close();
-        return null;
+        } catch (IOException e) { targetfile.delete(); throw e; }
+        return found ? targetfile : null;
     }
 
     public String readDatabaseJson(Uri uri) throws Exception {
@@ -1649,139 +1721,182 @@ public class Rclone {
     }
 
     public String readTextfileFromZip(Uri uri, String tempfile, String targetfile) throws Exception {
-        File temp = new File(context.getFilesDir().getPath(), tempfile);
-        temp = getFileFromZip(uri, targetfile, temp);
+        File temp = new File(context.getFilesDir(), tempfile);
+        try {
+            if (getFileFromZip(uri, targetfile, temp) == null) throw new IOException("Missing archive component");
+            try (Reader in = new InputStreamReader(new FileInputStream(temp), StandardCharsets.UTF_8)) {
+                char[] buffer = new char[4096];
+                StringBuilder text = new StringBuilder();
+                int n;
+                while ((n = in.read(buffer)) != -1) text.append(buffer, 0, n);
+                return text.toString();
+            }
+        } finally { temp.delete(); }
+    }
 
-        char[] buffer = new char[4096];
-        StringBuilder json = new StringBuilder();
-        InputStream inputStream = new FileInputStream(temp);
-        Reader in = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-        for (int numRead; (numRead = in.read(buffer, 0, buffer.length)) > 0; ) {
-            json.append(buffer, 0, numRead);
-        }
-        return json.toString();
+    public void importConfigZipAtomically(Uri uri, Runnable commitMetadata) throws IOException {
+        File staged = File.createTempFile("restore-", ".conf", context.getFilesDir());
+        try {
+            if (getFileFromZip(uri, "rclone.conf", staged) == null || !isValidConfig(staged.getAbsolutePath())) {
+                throw new IOException("Missing or invalid rclone configuration");
+            }
+            ConfigRestoreJournal.install(context, staged, () -> {
+                commitMetadata.run();
+                try { ConfigSecretStore.clear(context); }
+                catch (IOException e) { throw new IllegalStateException("Cannot reset imported configuration unlock", e); }
+            });
+            invalidateRemotesCache();
+        } finally { staged.delete(); }
     }
 
     public boolean copyConfigFileFromZip(Uri uri) throws Exception {
-        String appsFileDir = context.getFilesDir().getPath();
-
-        File tempFile = new File(appsFileDir, "rclone.conf-tmp");
-        File configFile = new File(appsFileDir, "rclone.conf");
-        tempFile = getFileFromZip(uri, "rclone.conf", tempFile);
-
-        if (isValidConfig(tempFile.getAbsolutePath())) {
-            if (!(tempFile.renameTo(configFile) && !tempFile.delete())) {
-                throw new IOException();
-            }
-            return true;
-        }
-        return false;
-    }
-
-
-    /***
-     * This function replaces the config by replacing rclone.conf.
-     * First a rclone.conf-tmp is created, which is then verified to be working.
-     * Then the rclone.conf is beeing replaced by the temp file.
-     * @param uri Uri to the new rclone file.
-     * @return True if rclone.conf has been replaced, false if not.
-     * @throws IOException
-     */
-    public boolean copyConfigFile(Uri uri) throws IOException {
-        String appsFileDir = context.getFilesDir().getPath();
-        InputStream inputStream;
-        // The exact cause of the NPE is unknown, but the effect is the same
-        // - the copy process has failed, therefore bubble an IOException
-        // for handling at the appropriate layers.
-        try {
-            inputStream = context.getContentResolver().openInputStream(uri);
-        } catch(NullPointerException e) {
-            throw new IOException(e);
-        }
-        File tempFile = new File(appsFileDir, "rclone.conf-tmp");
-        File configFile = new File(appsFileDir, "rclone.conf");
-        FileOutputStream fileOutputStream = new FileOutputStream(tempFile);
-
-        byte[] buffer = new byte[4096];
-        int offset;
-        while ((offset = inputStream.read(buffer)) > 0) {
-            fileOutputStream.write(buffer, 0, offset);
-        }
-        inputStream.close();
-        fileOutputStream.flush();
-        fileOutputStream.close();
-
-        if (isValidConfig(tempFile.getAbsolutePath())) {
-            if (!(tempFile.renameTo(configFile) && !tempFile.delete())) {
-                throw new IOException();
-            }
-            return true;
-        }
-        return false;
-    }
-
-    public boolean isValidConfig(String path) {
-        String[] command = {rclone, "-vvv", "--ask-password=false", "--config", path, "listremotes"};
-        try {
-            Process process = getRuntimeProcess(command);
-            process.waitFor();
-            if (process.exitValue() != 0) { //
-                try (BufferedReader stdOut = new BufferedReader(new InputStreamReader(process.getInputStream()));
-                     BufferedReader stdErr = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                    String line;
-                    while ((line = stdOut.readLine()) != null || (line = stdErr.readLine()) != null) {
-                        if (line.contains("could not parse line")) {
-                            return false;
-                        }
-                    }
-                }
-            }
-        } catch (IOException | InterruptedException e) {
-            return false;
-        }
+        importConfigZipAtomically(uri, () -> {});
         return true;
     }
 
-    public void exportConfigFile(Uri uri) throws IOException {
-        File configFile = new File(rcloneConf);
-        Uri config = Uri.fromFile(configFile);
-        InputStream inputStream = context.getContentResolver().openInputStream(config);
-        OutputStream outputStream = context.getContentResolver().openOutputStream(uri);
-
-        if (inputStream == null || outputStream == null) {
-            return;
-        }
-        char[] buffer = new char[4096];
-        StringBuilder out = new StringBuilder();
-        Reader in = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-        for (int numRead; (numRead = in.read(buffer, 0, buffer.length)) > 0; ) {
-            out.append(buffer, 0, numRead);
-        }
-
-        ZipOutputStream zos = new ZipOutputStream(outputStream);
+    /** Validate a bounded private candidate before journaled replacement. */
+    public boolean copyConfigFile(Uri uri) throws IOException {
+        File staged = File.createTempFile("config-import-", ".conf", context.getFilesDir());
         try {
-            ZipEntry zipEntry = new ZipEntry("rcx.json");
-            zos.putNextEntry(zipEntry);
-            zos.write(Exporter.create(this.context).getBytes());
-            zos.closeEntry();
-            zipEntry = new ZipEntry("rcx.prefs");
-            zos.putNextEntry(zipEntry);
-            zos.write(SharedPreferencesBackup.export(context).getBytes());
-            zos.closeEntry();
-            zipEntry = new ZipEntry("rclone.conf");
-            zos.putNextEntry(zipEntry);
-            zos.write(out.toString().getBytes());
-            zos.closeEntry();
+            InputStream raw = context.getContentResolver().openInputStream(uri);
+            if (raw == null) throw new IOException("Cannot open configuration import");
+            try (InputStream in = raw; FileOutputStream out = new FileOutputStream(staged)) {
+                byte[] bytes = new byte[8192]; int n; long total = 0;
+                while ((n = in.read(bytes)) != -1) {
+                    total += n;
+                    if (total > 16L * 1024 * 1024) throw new IOException("Configuration import exceeds size limit");
+                    out.write(bytes, 0, n);
+                }
+                out.getFD().sync();
+            }
+            if (!isValidConfig(staged.getAbsolutePath())) return false;
+            ConfigRestoreJournal.install(context, staged, () -> {
+                try { ConfigSecretStore.clear(context); }
+                catch (IOException e) { throw new IllegalStateException("Cannot reset imported configuration unlock", e); }
+            });
+            invalidateRemotesCache();
+            return true;
+        } finally { staged.delete(); }
+    }
+
+    /** Checks the native encrypted format, independently of whether this device has its unlock key. */
+    public boolean isConfigAtRestEncrypted() throws IOException {
+        return nativeEncryptedHeader(new File(rcloneConf));
+    }
+
+    private boolean nativeEncryptedHeader(File file) throws IOException {
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line;
+            for (int i = 0; i < 8 && (line = in.readLine()) != null; i++) {
+                if (line.equals("RCLONE_ENCRYPT_V0:")) return true;
+            }
+            return false;
         }
-        catch (Exception e) {
-            // unable to write zip
+    }
+
+    /** Encrypt through rclone itself; passwords enter stdin/environment only, never argv or logs. */
+    public void encryptConfigForBackup(String password) throws IOException {
+        if (password == null || password.trim().isEmpty() || password.length() > 1024
+                || password.indexOf('\n') >= 0 || password.indexOf('\r') >= 0 || password.indexOf('\0') >= 0) {
+            throw new IOException("A nonempty single-line configuration password is required");
         }
-        finally {
-            zos.close();
-            inputStream.close();
-            outputStream.flush();
-            outputStream.close();
-        }
+        File staged = File.createTempFile("config-encryption-", ".conf", context.getFilesDir());
+        try {
+            ConfigRestoreJournal.install(context, staged, () -> {
+                try { ConfigSecretStore.store(context, password); }
+                catch (IOException e) { throw new IllegalStateException("Cannot protect configuration unlock", e); }
+            }, () -> {
+                if (nativeEncryptedHeader(new File(rcloneConf))) {
+                    throw new IOException("Configuration is already encrypted; export it directly");
+                }
+                try (InputStream in = new FileInputStream(rcloneConf); FileOutputStream out = new FileOutputStream(staged)) {
+                    byte[] bytes = new byte[8192]; int n; long total = 0;
+                    while ((n = in.read(bytes)) != -1) {
+                        total += n;
+                        if (total > 16L * 1024 * 1024) throw new IOException("Configuration exceeds size limit");
+                        out.write(bytes, 0, n);
+                    }
+                    out.getFD().sync();
+                }
+                byte[] input = (password + "\n" + password + "\n").getBytes(StandardCharsets.UTF_8);
+                try {
+                    Captured encrypted = capture(new String[]{rclone, "--config", staged.getAbsolutePath(),
+                            "--ask-password=true", "config", "encryption", "set"}, getRcloneEnv(), 64 * 1024, 30000, input);
+                    if (encrypted.exit != 0 || !nativeEncryptedHeader(staged)) {
+                        throw new IOException("Native configuration encryption failed");
+                    }
+                    Captured verified = capture(new String[]{rclone, "--config", staged.getAbsolutePath(),
+                            "--ask-password=false", "listremotes"}, getRcloneEnv("RCLONE_CONFIG_PASS=" + password),
+                            1024 * 1024, 30000);
+                    if (verified.exit != 0) throw new IOException("Encrypted configuration validation failed");
+                } finally { Arrays.fill(input, (byte) 0); }
+            });
+            invalidateRemotesCache();
+        } finally { staged.delete(); }
+    }
+
+    public boolean isValidConfig(String path) {
+        File file = new File(path);
+        if (!file.isFile() || file.length() > 16L * 1024 * 1024) return false;
+        // Locked native configs are valid import candidates; unlock is verified separately.
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line;
+            for (int i = 0; i < 8 && (line = reader.readLine()) != null; i++) {
+                if (line.equals("RCLONE_ENCRYPT_V0:")) {
+                    StringBuilder body = new StringBuilder();
+                    while ((line = reader.readLine()) != null) {
+                        for (int j = 0; j < line.length(); j++) {
+                            char c = line.charAt(j);
+                            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+                                    || (c >= '0' && c <= '9') || c == '+' || c == '/' || c == '=') {
+                                body.append(c);
+                            } else if (!Character.isWhitespace(c)) return false;
+                        }
+                    }
+                    try {
+                        // Nonce plus authenticated ciphertext. Authentication still requires the user's password.
+                        return android.util.Base64.decode(body.toString(), android.util.Base64.DEFAULT).length >= 40;
+                    } catch (IllegalArgumentException malformed) { return false; }
+                }
+            }
+            return capture(new String[]{rclone, "--ask-password=false", "--config", path, "listremotes"},
+                    getRcloneEnv(), 1024 * 1024, 30000).exit == 0;
+        } catch (IOException e) { return false; }
+    }
+
+    public void exportConfigFile(Uri uri) throws IOException {
+        // Serialize into private staging first: a destination never receives plaintext config.
+        File staged = File.createTempFile("credential-backup-", ".zip", context.getFilesDir());
+        try (java.io.Closeable admission = BisyncSession.INSTANCE.previewLease(context)) {
+            File config = new File(rcloneConf);
+            if (!nativeEncryptedHeader(config)) throw new IOException("Encrypt the configuration before exporting a credential backup");
+            try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(staged))) {
+                out.putNextEntry(new ZipEntry("rcx.json"));
+                out.write(Exporter.create(context).getBytes(StandardCharsets.UTF_8));
+                out.closeEntry();
+                out.putNextEntry(new ZipEntry("rcx.prefs"));
+                out.write(SharedPreferencesBackup.export(context).getBytes(StandardCharsets.UTF_8));
+                out.closeEntry();
+                out.putNextEntry(new ZipEntry("rclone.conf"));
+                try (InputStream in = new FileInputStream(config)) {
+                    byte[] bytes = new byte[8192]; int n; long total = 0;
+                    while ((n = in.read(bytes)) != -1) {
+                        total += n;
+                        if (total > 16L * 1024 * 1024) throw new IOException("Configuration exceeds backup size limit");
+                        out.write(bytes, 0, n);
+                    }
+                }
+                out.closeEntry();
+            }
+            OutputStream raw = context.getContentResolver().openOutputStream(uri, "wt");
+            if (raw == null) throw new IOException("Cannot open backup destination");
+            try (OutputStream out = raw; InputStream in = new FileInputStream(staged)) {
+                byte[] bytes = new byte[8192]; int n;
+                while ((n = in.read(bytes)) != -1) out.write(bytes, 0, n);
+            }
+        } catch (JSONException e) { throw new IOException("Cannot serialize backup", e); }
+        catch (RuntimeException e) { throw new IOException("A running job prevents configuration backup", e); }
+        finally { staged.delete(); }
     }
 
     public boolean isCompatible() {

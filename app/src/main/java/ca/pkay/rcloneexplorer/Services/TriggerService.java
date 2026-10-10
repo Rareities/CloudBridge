@@ -19,6 +19,8 @@ import androidx.core.app.NotificationCompat;
 import androidx.preference.PreferenceManager;
 
 import java.util.Calendar;
+import java.util.TimeZone;
+import ca.pkay.rcloneexplorer.scheduling.ScheduleCalculator;
 
 import ca.pkay.rcloneexplorer.BroadcastReceivers.TriggerReceiver;
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
@@ -48,46 +50,49 @@ public class TriggerService extends Service {
     }
 
     public void queueTrigger(){
+        long epoch = ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context);
         for(Trigger t : dbHandler.getAllTrigger()){
-            queueSingleTrigger(t);
+            queueSingleTrigger(t, epoch);
         }
     }
 
     public void queueSingleTrigger(Trigger trigger){
-        if(trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
-            queueSingleScheduleTrigger(trigger);
-        } else {
-            queueSingleIntervalTrigger(trigger);
-        }
+        queueSingleTrigger(trigger, ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context));
+    }
 
+    private void queueSingleTrigger(Trigger trigger, long epoch) {
+        if (epoch != ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context)) return;
+        if (!trigger.isEnabled()) {
+            cancelTrigger(trigger.getId());
+        } else if (trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
+            queueSingleScheduleTrigger(trigger, epoch);
+        } else if (trigger.getType() == Trigger.TRIGGER_TYPE_INTERVAL) {
+            queueSingleIntervalTrigger(trigger, epoch);
+        } else {
+            cancelTrigger(trigger.getId());
+            Log.w("TriggerService", "Unsupported trigger type");
+        }
     }
 
     @SuppressLint("ScheduleExactAlarm") // this is caught by the PermissionManager itself
-    private void queueSingleScheduleTrigger(Trigger trigger){
+    private void queueSingleScheduleTrigger(Trigger trigger, long epoch){
         if(trigger.isEnabled()){
-            Calendar calendar = Calendar.getInstance();
-            calendar.setTimeInMillis(System.currentTimeMillis());
-
-            int seconds = trigger.getTime();
-            calendar.set(Calendar.HOUR_OF_DAY, seconds/60);
-            calendar.set(Calendar.MINUTE, seconds%60);
-
-            long difference = calendar.getTimeInMillis()-System.currentTimeMillis();
-            //Properly schedule past events
-            if(difference<0){
-                difference = (24*60*60*1000) + difference;
+            final long timeToTrigger;
+            try {
+                timeToTrigger = ScheduleCalculator.nextDaily(System.currentTimeMillis(),
+                        trigger.getTime(), trigger.getWeekdays(), TimeZone.getDefault());
+            } catch (IllegalArgumentException e) {
+                cancelTrigger(trigger.getId());
+                Log.w("TriggerService", "Invalid daily schedule");
+                return;
             }
-
-            // If a triggered event schedules the next occurence, we need to make sure that it does not create an endless loop for 60 seconds.
-            // If it is "now", do it in 24h
-            if(Calendar.getInstance().get(Calendar.MINUTE) == seconds%60){
-                difference = (24*60*60*1000);
+            if (timeToTrigger < 0) {
+                cancelTrigger(trigger.getId());
+                return;
             }
-
-            long timeToTrigger = System.currentTimeMillis() + difference;
 
             AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId());
+            PendingIntent pi = getIntent(trigger.getId(), epoch);
             am.cancel(pi);
 
             SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
@@ -113,14 +118,21 @@ public class TriggerService extends Service {
         }
     }
 
-    private void queueSingleIntervalTrigger(Trigger trigger){
+    private void queueSingleIntervalTrigger(Trigger trigger, long epoch){
         if(trigger.isEnabled()){
 
-            int intervalMillis = trigger.getTime() * 60 * 1000;
+            final long intervalMillis;
+            try {
+                intervalMillis = ScheduleCalculator.intervalMillis(trigger.getTime());
+            } catch (IllegalArgumentException e) {
+                cancelTrigger(trigger.getId());
+                Log.w("TriggerService", "Invalid interval schedule");
+                return;
+            }
             long timeToTrigger = System.currentTimeMillis();
 
             AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId());
+            PendingIntent pi = getIntent(trigger.getId(), epoch);
             am.cancel(pi);
             am.setInexactRepeating(
                     AlarmManager.RTC_WAKEUP,
@@ -136,7 +148,8 @@ public class TriggerService extends Service {
         am.cancel(getIntent(triggerID));
     }
 
-    private void startTask(Trigger trigger){
+    private void startTask(Trigger trigger, long epoch){
+        if (!trigger.isEnabled()) return;
         boolean skipBecauseOfWeekday;
         //account for monday beeing 1 and sunday beeing 0. Therefor we need to offset by 2
         int day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)-2;
@@ -153,36 +166,54 @@ public class TriggerService extends Service {
         }
 
         SyncManager sm = new SyncManager(this.context);
-        sm.queue(trigger);
+        sm.queueAtEpoch(trigger.getTriggerTarget(), epoch);
     }
 
     private PendingIntent getIntent(long triggerId){
+        return getIntent(triggerId, ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context));
+    }
+
+    private PendingIntent getIntent(long triggerId, long epoch) {
         Intent i = new Intent(context, TriggerReceiver.class);
         i.setAction(TRIGGER_RECIEVE);
+        // Epoch is part of PendingIntent identity, so an old rescheduler cannot overwrite a new alarm.
+        i.setData(android.net.Uri.parse("cloudbridge://trigger/" + triggerId + "/" + epoch));
         i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         i.putExtra(TRIGGER_ID, triggerId);
+        i.putExtra(ca.pkay.rcloneexplorer.util.ConfigEpoch.WORK_KEY, epoch);
 
-        // Todo: Beacause of the long to int cast, this may fail when the user has more than Integer.MAX tasks.
-        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT ^ PendingIntent.FLAG_IMMUTABLE);
+        // URI identity also distinguishes IDs that collide after the request-code int cast.
+        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         createNotification();
-        long id = intent.getLongExtra(TRIGGER_ID, -1);
+        long id = intent == null ? -1 : intent.getLongExtra(TRIGGER_ID, -1);
         this.dbHandler = new DatabaseHandler(getBaseContext());
         this.context = getBaseContext();
+        long epoch = intent == null ? -1 : intent.getLongExtra(ca.pkay.rcloneexplorer.util.ConfigEpoch.WORK_KEY, -1);
+        if (epoch != ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context)) {
+            stopForeground(true);
+            stopSelf(startId);
+            return Service.START_NOT_STICKY;
+        }
         Trigger t = dbHandler.getTrigger(id);
 
         // this can happen if the trigger was scheduled, but then deleted.
         if(t == null) {
             stopForeground(true);
+            stopSelf(startId);
             return Service.START_NOT_STICKY;
         }
 
-        startTask(t);
-        queueSingleTrigger(t);
-        stopForeground(true);
+        try {
+            startTask(t, epoch);
+            queueSingleTrigger(t, epoch);
+        } finally {
+            stopForeground(true);
+            stopSelf(startId);
+        }
         return Service.START_NOT_STICKY;
     }
 

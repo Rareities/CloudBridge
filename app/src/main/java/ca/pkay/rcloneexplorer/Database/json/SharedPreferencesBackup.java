@@ -74,8 +74,23 @@ public class SharedPreferencesBackup {
     }
 
     public static void importJson(String json, Context context) throws JSONException {
+        if (!prepareImport(json, context).commit()) {
+            throw new IllegalStateException("Could not save restored preferences");
+        }
+    }
+
+    /** Returns a fully parsed editor; no settings are changed until commit(). */
+    public static SharedPreferences.Editor prepareImport(String json, Context context) throws JSONException {
         JSONObject jsonObject = new JSONObject(json);
 
+        int port = jsonObject.getInt("proxyPort");
+        if (port < 1 || port > 65535) throw new JSONException("Invalid proxy port");
+        String transfers = jsonObject.optString("transfers", "4");
+        try {
+            if (Integer.parseInt(transfers) <= 0) throw new NumberFormatException();
+        } catch (NumberFormatException e) {
+            throw new JSONException("Invalid transfer count");
+        }
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
         SharedPreferences.Editor editor = sharedPreferences.edit();
 
@@ -102,8 +117,13 @@ public class SharedPreferencesBackup {
         Object darkTheme = jsonObject.get("isDarkTheme");
         int valueForTheme;
         if (darkTheme instanceof String) {
-            valueForTheme = Integer.parseInt((String) darkTheme);
+            try {
+                valueForTheme = Integer.parseInt((String) darkTheme);
+            } catch (NumberFormatException e) {
+                throw new JSONException("Invalid theme");
+            }
         } else {
+           if (!(darkTheme instanceof Boolean)) throw new JSONException("Invalid theme");
            if((boolean) darkTheme) {
                valueForTheme = DARK;
            } else {
@@ -112,6 +132,9 @@ public class SharedPreferencesBackup {
             editor.putString(context.getString(R.string.pref_key_theme), String.valueOf(valueForTheme));
         }
 
+        if (valueForTheme != FOLLOW_SYSTEM && valueForTheme != DARK && valueForTheme != LIGHT) {
+            throw new JSONException("Invalid theme");
+        }
         editor.putString(context.getString(R.string.pref_key_theme), String.valueOf(valueForTheme));
 
         editor.putBoolean(context.getString(R.string.pref_key_wrap_filenames), jsonObject.getBoolean("isWrapFilenames"));
@@ -122,7 +145,7 @@ public class SharedPreferencesBackup {
         // Logging
         editor.putBoolean(context.getString(R.string.pref_key_logs), jsonObject.getBoolean("useLogs"));
 
-        editor.apply();
+        return editor;
     }
 
 }

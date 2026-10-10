@@ -16,8 +16,21 @@ public class TriggerReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         FLog.e(TAG, "Received Intent");
 
-        assert intent != null;
-        if(intent.getAction().equals(TriggerService.TRIGGER_RECIEVE)){
+        if (intent == null || !TriggerService.TRIGGER_RECIEVE.equals(intent.getAction())) return;
+        long epoch = intent.getLongExtra(ca.pkay.rcloneexplorer.util.ConfigEpoch.WORK_KEY, -1);
+        if (epoch != ca.pkay.rcloneexplorer.util.ConfigEpoch.current(context)) {
+            // Retire stale repeating alarms after one ignored delivery; do not wake forever.
+            android.app.PendingIntent stale = android.app.PendingIntent.getBroadcast(context,
+                    (int) intent.getLongExtra(TriggerService.TRIGGER_ID, -1), intent,
+                    android.app.PendingIntent.FLAG_NO_CREATE | android.app.PendingIntent.FLAG_IMMUTABLE);
+            if (stale != null) {
+                android.app.AlarmManager alarms = (android.app.AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+                if (alarms != null) alarms.cancel(stale);
+                stale.cancel();
+            }
+            return;
+        }
+        if (TriggerService.TRIGGER_RECIEVE.equals(intent.getAction())) {
             long i = intent.getLongExtra(TriggerService.TRIGGER_ID, -1);
             FLog.e(TAG, "Start Trigger: "+i);
             if(i==-1)
@@ -26,6 +39,7 @@ public class TriggerReceiver extends BroadcastReceiver {
             Intent service = new Intent(context, TriggerService.class);
             service.setAction(TriggerService.TRIGGER_RECIEVE);
             service.putExtra(TriggerService.TRIGGER_ID, i);
+            service.putExtra(ca.pkay.rcloneexplorer.util.ConfigEpoch.WORK_KEY, epoch);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(service);
             }else{

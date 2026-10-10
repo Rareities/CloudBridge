@@ -26,6 +26,8 @@ data class Task(var id: Long) {
     var onFailFollowup: Long? = null
     var onSuccessFollowup: Long? = null
     var transfers: Int? = null
+    var stableUUID = java.util.UUID.randomUUID().toString()
+    var bisyncMaxDelete = 10
 
     override fun toString(): String {
         return "$title: $remoteId: $remoteType: $remotePath: $localPath: $remoteId2: $remoteType2: $remotePath2: $direction"
@@ -50,6 +52,9 @@ data class Task(var id: Long) {
         var COLUMN_NAME_ONFAIL_FOLLOWUP = "task_onFailFollowupTask"
         var COLUMN_NAME_ONSUCCESS_FOLLOWUP = "task_onSuccessFollowupTask"
         var COLUMN_NAME_TRANSFERS = "task_transfers"
+
+        const val COLUMN_NAME_STABLE_UUID = "task_uuid"
+        const val COLUMN_NAME_BISYNC_MAX_DELETE = "task_bisync_max_delete"
 
         const val TASK_MD5SUM_DEFAULT = false
         const val TASK_WIFIONLY_DEFAULT = false

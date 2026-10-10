@@ -1,6 +1,7 @@
 package ca.pkay.rcloneexplorer.workmanager
 
 import android.content.Context
+import androidx.preference.PreferenceManager
 import androidx.work.*
 import java.util.concurrent.TimeUnit
 
@@ -10,6 +11,7 @@ import java.util.concurrent.TimeUnit
  */
 object SessionGuardianScheduler {
 
+    const val ENABLED_PREFERENCE = "session_guardian_enabled"
     private const val WORK_NAME = "session_guardian_worker"
     private const val TAG = "SessionGuardianScheduler"
 
@@ -18,6 +20,10 @@ object SessionGuardianScheduler {
      */
     @JvmStatic
     fun schedule(context: Context) {
+        if (!PreferenceManager.getDefaultSharedPreferences(context).getBoolean(ENABLED_PREFERENCE, false)) {
+            cancel(context)
+            return
+        }
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)

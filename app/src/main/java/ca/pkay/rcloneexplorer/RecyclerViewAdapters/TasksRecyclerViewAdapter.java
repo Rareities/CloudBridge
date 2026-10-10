@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import ca.pkay.rcloneexplorer.Activities.ShortcutServiceActivity;
+import ca.pkay.rcloneexplorer.util.TaskShortcutAuthorization;
 import ca.pkay.rcloneexplorer.Activities.TaskActivity;
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
@@ -255,6 +256,7 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
         intent.setAction(TASK_SYNC_ACTION);
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
         intent.putExtra(EXTRA_TASK_ID, task.getId());
+        intent.putExtra(TaskShortcutAuthorization.EXTRA_CAPABILITY, TaskShortcutAuthorization.issue(c, task.getId()));
 
         String id = String.valueOf(task.getTitle()+task.getLocalPath()+task.getRemotePath()+task.getDirection());
         ShortcutInfoCompat shortcut = new ShortcutInfoCompat.Builder(c, id)

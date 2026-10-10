@@ -126,6 +126,16 @@
                         android:minHeight="48dp"
                         android:text="@string/description_sync_direction_sync_toremote" />
 
+                    <EditText
+                        android:id="@+id/task_bisync_max_delete"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_margin="8dp"
+                        android:minHeight="48dp"
+                        android:inputType="number"
+                        android:hint="@string/bisync_delete_limit"
+                        android:visibility="gone" />
+
                     <TextView
                         android:id="@+id/label_transfers"
                         android:layout_width="match_parent"

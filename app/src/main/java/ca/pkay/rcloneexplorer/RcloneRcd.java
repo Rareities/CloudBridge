@@ -33,6 +33,7 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import java.io.IOException;
+import java.io.Closeable;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.net.InetAddress;
@@ -60,6 +61,29 @@ import java.util.concurrent.TimeUnit;
 public class RcloneRcd {
 
     private static final String TAG = "RcloneRcd";
+    private static final java.util.concurrent.ConcurrentMap<Process, RcloneRcd> liveDaemons =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Called under configuration admission. Old daemons must never rewrite a newly encrypted config. */
+    public static void quiesceForConfigurationChange() throws IOException {
+        for (Map.Entry<Process, RcloneRcd> entry : liveDaemons.entrySet()) {
+            Process process = entry.getKey();
+            entry.getValue().stopRcd();
+            long deadline = android.os.SystemClock.elapsedRealtime() + 10000;
+            while (true) {
+                try { process.exitValue(); liveDaemons.remove(process); break; }
+                catch (IllegalThreadStateException running) {
+                    if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                        throw new IOException("Existing native service did not stop; configuration was not changed");
+                    }
+                    try { Thread.sleep(50); }
+                    catch (InterruptedException e) {
+                        Thread.currentThread().interrupt(); throw new IOException("Configuration change interrupted", e);
+                    }
+                }
+            }
+        }
+    }
     private static final MediaType JSON = MediaType.parse("application/json");
 
     @Retention(RetentionPolicy.SOURCE)
@@ -81,7 +105,7 @@ public class RcloneRcd {
     private final String configPath;
     private final String rclone;
     private Process rcd;
-    private boolean stopped = false;
+    private volatile boolean stopped = false;
     private Object mainThreadLock = new Object();
 
     final BlockingQueue<Integer> pendingJobs;
@@ -94,6 +118,9 @@ public class RcloneRcd {
     private ScheduledFuture<?> jobsUpdateFuture;
     private int port;
     private Handler mainHandler;
+    // A mutation owns admission until its async job actually finishes, not merely HTTP response.
+    private final Map<Integer, Closeable> mutationLeases = new HashMap<>();
+    private final List<Closeable> uncertainMutationLeases = new ArrayList<>();
 
     private static String initPass() {
         SecureRandom random = new SecureRandom();
@@ -128,12 +155,11 @@ public class RcloneRcd {
      * Starts the rclone daemon subprocess and a job monitor thread
      */
     public void startRcd() {
-        try {
+        try (Closeable startup = ca.pkay.rcloneexplorer.bisync.BisyncSession.previewLease(context)) {
             FLog.d(TAG, "startRcd: starting rclone process");
             port = nextAvailablePort();
             String addr = "localhost:" + port;
             String tmpDir = context.getCacheDir().getAbsolutePath();
-            String logFile = context.getExternalFilesDir("logs").getAbsolutePath() + "/rcd.log";
             SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
             String transfers = pref.getString(context.getString(R.string.pref_key_transfers), "4");
             ArrayList<String> parameters = new ArrayList<>(Arrays.asList(
@@ -141,20 +167,19 @@ public class RcloneRcd {
                     "--config", configPath,
                     "--rc-addr", addr,
                     "--rc-user", rcUser,
-                    "--rc-pass", rcPass,
                     "--rc-serve",
                     // Transfer throughput tuning for VCP/rcd-driven operations.
                     "--transfers", transfers,
                     "--buffer-size", "16M",
-                    "--multi-thread-streams", "4"));
-            if (pref.getBoolean(context.getString(R.string.pref_key_logs), false)) {
-                parameters.addAll(Arrays.asList(
-                        "--log-file", logFile,
-                        "--dump", "headers",
-                        "-vvv"));
-            }
+                    "--multi-thread-streams", "4",
+                    // Native messages are not covered by the Android redactor. Do not retain
+                    // raw daemon diagnostics (tokens/filenames), even when app logs are enabled.
+                    "--log-file", "/dev/null", "--log-level", "NOTICE"));
             parameters.add("rcd");
             rcd = Runtime.getRuntime().exec(parameters.toArray(new String[0]), getEnv());
+            liveDaemons.put(rcd, this);
+            discardDaemonPipe(rcd.getInputStream());
+            discardDaemonPipe(rcd.getErrorStream());
         } catch (IOException e) {
             FLog.e(TAG, "startRcd: error", e);
             throw new RuntimeException(e);
@@ -165,6 +190,14 @@ public class RcloneRcd {
 
     public String[] getEnv() {
         ArrayList<String> environmentValues = new ArrayList<>();
+        try {
+            String configPassword = ca.pkay.rcloneexplorer.util.ConfigSecretStore.password(context);
+            if (configPassword != null) environmentValues.add("RCLONE_CONFIG_PASS=" + configPassword);
+        } catch (IOException e) {
+            throw new IllegalStateException("Configuration is locked", e);
+        }
+        environmentValues.add("RCLONE_ASK_PASSWORD=false");
+        environmentValues.add("RCLONE_RC_PASS=" + rcPass);
         SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
 
         boolean proxyEnabled = pref.getBoolean(context.getString(R.string.pref_key_use_proxy), false);
@@ -199,30 +232,47 @@ public class RcloneRcd {
         // We set SSL_CERT_DIR to Android's native certificate store path.
         environmentValues.add("SSL_CERT_DIR=/system/etc/security/cacerts");
 
-        environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
+        String dnsServers = getDnsServers();
+        if (!dnsServers.isEmpty()) environmentValues.add("RCLONE_DNS_SERVERS=" + dnsServers);
 
         return environmentValues.toArray(new String[0]);
     }
 
     private String getDnsServers() {
-        String fallback = "8.8.8.8:53,8.8.4.4:53";
         try {
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (cm == null) return fallback;
+            if (cm == null) return "";
             Network network = cm.getActiveNetwork();
-            if (network == null) return fallback;
+            if (network == null) return "";
             LinkProperties lp = cm.getLinkProperties(network);
-            if (lp == null) return fallback;
+            // Keep Android's encrypted Private DNS resolution instead of issuing raw DNS queries.
+            if (lp != null && android.os.Build.VERSION.SDK_INT >= 28 && lp.isPrivateDnsActive()) return "";
+            if (lp == null) return "";
             StringBuilder sb = new StringBuilder();
             for (InetAddress dns : lp.getDnsServers()) {
+                String address = dns.getHostAddress();
+                if (address == null || address.isEmpty()) continue;
                 if (sb.length() > 0) sb.append(",");
-                sb.append(dns.getHostAddress()).append(":53");
+                if (address.contains(":")) sb.append('[').append(address).append(']');
+                else sb.append(address);
+                sb.append(":53");
             }
-            return sb.length() > 0 ? sb.toString() : fallback;
+            return sb.toString();
         } catch (Exception e) {
-            FLog.e(TAG, "Failed to detect DNS servers, using fallback", e);
-            return fallback;
+            FLog.e(TAG, "Failed to detect DNS servers; preserving system resolver", e);
+            return "";
         }
+    }
+
+    private static void discardDaemonPipe(java.io.InputStream stream) {
+        Thread drainer = new Thread(() -> {
+            try (java.io.InputStream input = stream) {
+                byte[] buffer = new byte[8192];
+                while (input.read(buffer) != -1) { /* never collect unredacted native output */ }
+            } catch (IOException ignored) { /* expected when daemon is stopped */ }
+        }, "rcd-output-drainer");
+        drainer.setDaemon(true);
+        drainer.start();
     }
 
     /**
@@ -254,15 +304,29 @@ public class RcloneRcd {
      * Stop the rcd server
      */
     public void stopRcd() {
+        stopped = true;
         if (null != rcd) {
             FLog.d(TAG, "Stopping Rclone");
             rcd.destroy();
+            final Process stoppingProcess = rcd;
+            Thread reaper = new Thread(() -> {
+                try {
+                    stoppingProcess.waitFor();
+                    liveDaemons.remove(stoppingProcess);
+                    releaseAllMutationLeases();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    // Retain admission: process exit is not established.
+                }
+            }, "rcd-stop-reaper");
+            reaper.setDaemon(true);
+            reaper.start();
         }
         if (null != jobsUpdateFuture) {
             jobsUpdateFuture.cancel(true);
         }
         jobStatusExecutor.shutdownNow();
-        stopped = true;
+        jobMonitorService.shutdownNow();
     }
 
     /**
@@ -284,7 +348,10 @@ public class RcloneRcd {
      */
     private @ProcessState int getProcessState() {
         try {
-            return rcd.exitValue() != 0 ? ERROR : EXITED;
+            int state = rcd.exitValue() != 0 ? ERROR : EXITED;
+            liveDaemons.remove(rcd);
+            releaseAllMutationLeases(); // exitValue succeeded: no job in this process can mutate.
+            return state;
         } catch (IllegalThreadStateException e) {
             return RUNNING;
         }
@@ -331,9 +398,9 @@ public class RcloneRcd {
             synchronized (mainThreadLock) {
                 StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitNetwork().build();
                 StrictMode.setThreadPolicy(policy);
-                T result = performRcCall(method, params, null, responseType);
-                StrictMode.setThreadPolicy(previous);
-                return result;
+                try {
+                    return performRcCall(method, params, null, responseType);
+                } finally { StrictMode.setThreadPolicy(previous); }
             }
         } else {
             return performRcCall(method, params, null, responseType);
@@ -359,9 +426,9 @@ public class RcloneRcd {
                 }
                 StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitNetwork().build();
                 StrictMode.setThreadPolicy(policy);
-                T result = performRcCall(method, params, typeReference, null);
-                StrictMode.setThreadPolicy(previous);
-                return result;
+                try {
+                    return performRcCall(method, params, typeReference, null);
+                } finally { StrictMode.setThreadPolicy(previous); }
             }
         } else {
             return performRcCall(method, params, typeReference, null);
@@ -369,6 +436,48 @@ public class RcloneRcd {
     }
 
     private OkHttpClient okHttpClient;
+
+    private static boolean isMutatingCall(String method) {
+        if (method.startsWith("sync/")) return true;
+        if (method.startsWith("config/")) {
+            return !Arrays.asList("config/dump", "config/get", "config/listremotes", "config/providers")
+                    .contains(method);
+        }
+        // Provider reads can rotate tokens and write rclone.conf too.
+        if (method.startsWith("operations/")) return true;
+        return false;
+    }
+
+    private static void closeLease(Closeable lease) {
+        if (lease == null) return;
+        try { lease.close(); }
+        catch (IOException e) { FLog.e(TAG, "Cannot release operation admission", e); }
+    }
+
+    private void releaseMutationLease(int jobId) {
+        Closeable lease;
+        synchronized (mutationLeases) { lease = mutationLeases.remove(jobId); }
+        closeLease(lease);
+    }
+
+    private void releaseAllMutationLeases() {
+        List<Closeable> leases;
+        synchronized (mutationLeases) {
+            leases = new ArrayList<>(mutationLeases.values());
+            leases.addAll(uncertainMutationLeases);
+            mutationLeases.clear();
+            uncertainMutationLeases.clear();
+        }
+        for (Closeable lease : leases) closeLease(lease);
+    }
+
+    private void quarantineMutation(Closeable lease) {
+        if (lease == null) return;
+        synchronized (mutationLeases) { uncertainMutationLeases.add(lease); }
+        // A lost async response may conceal a still-running mutation. Stop RC and release only
+        // after waitFor confirms exit; neither a failed poll nor a cancel request proves this.
+        stopRcd();
+    }
 
     private OkHttpClient prepareClient() {
         if (null == okHttpClient) {
@@ -379,12 +488,6 @@ public class RcloneRcd {
                                 .header("Authorization", credential).build();
                     });
 
-            /*if (DEBUG) {
-                okhttp3.logging.HttpLoggingInterceptor logging = new okhttp3.logging.HttpLoggingInterceptor();
-                logging.level(okhttp3.logging.HttpLoggingInterceptor.Level.HEADERS);
-                builder.addInterceptor(logging);
-            }*/
-
             okHttpClient = builder.build();
         }
         return okHttpClient;
@@ -393,6 +496,7 @@ public class RcloneRcd {
     // throws RcdOpException when the server returns an error message
     // do _not_ call directly
     private <T> T performRcCall(String method, RcOpParam params, TypeReference<T> typeReference, Class<T> responseType) {
+        if (stopped) throw new RcdIOException(new IOException("RC service is stopped"));
         OkHttpClient client = prepareClient();
         HttpUrl url = new HttpUrl.Builder()
                 .scheme("http")
@@ -411,18 +515,39 @@ public class RcloneRcd {
         }
         RequestBody body = RequestBody.create(callParams, JSON);
         Request request = new Request.Builder().url(url).post(body).build();
-
+        Closeable lease = null;
+        if (isMutatingCall(method)) {
+            try {
+                lease = ca.pkay.rcloneexplorer.bisync.BisyncSession.previewLease(context);
+            } catch (Exception e) {
+                throw new RcdIOException(new IOException("Another transfer or configuration operation is active", e));
+            }
+        }
+        boolean completedResponse = false;
         try (Response response = client.newCall(request).execute()) {
             try {
                 if (isErrorCode(response.code())) {
                     ErrorResponse error = mapper.readValue(response.body().byteStream(), ErrorResponse.class);
+                    completedResponse = true;
                     throw new RcdOpException(error);
                 } else {
+                    T result;
                     if (typeReference != null) {
-                        return mapper.readValue(response.body().byteStream(), typeReference);
+                        result = mapper.readValue(response.body().byteStream(), typeReference);
                     } else {
-                        return mapper.readValue(response.body().byteStream(), responseType);
+                        result = mapper.readValue(response.body().byteStream(), responseType);
                     }
+                    if (lease != null && result instanceof JobIdResponse) {
+                        if (((JobIdResponse) result).jobid <= 0) throw new IOException("Invalid asynchronous job identity");
+                        synchronized (mutationLeases) {
+                            if (stopped) throw new IOException("RC stopped before operation ownership was recorded");
+                            mutationLeases.put(((JobIdResponse) result).jobid, lease);
+                        }
+                        ((ca.pkay.rcloneexplorer.util.OperationAdmission.Lease) lease).detachContext();
+                        lease = null; // monitor owns the async lease now
+                    }
+                    completedResponse = true;
+                    return result;
                 }
             } catch (JsonProcessingException e) {
                 FLog.e(TAG, "performRcCall: ", e);
@@ -430,6 +555,9 @@ public class RcloneRcd {
             }
         } catch (IOException e) {
             throw new RcdIOException(e);
+        } finally {
+            if (completedResponse) closeLease(lease);
+            else quarantineMutation(lease);
         }
     }
 
@@ -506,6 +634,9 @@ public class RcloneRcd {
                     } catch (RcdOpException e) {
                         FLog.e(TAG, "job error: ", e);
                         if ("job not found".equals(e.getError())) {
+                            synchronized (mutationLeases) {
+                                if (mutationLeases.containsKey(jobId)) stopRcd();
+                            }
                             return -1; // drop unknown job
                         }
                         return jobId; // transient error: retry next tick
@@ -521,6 +652,7 @@ public class RcloneRcd {
                     }
                 } catch (Exception e) {
                     FLog.w(TAG, "job status future failed: %s", e.toString());
+                    if (!stopped) pending.add(currentJobIds.get(futures.indexOf(f)));
                 }
             }
             pendingJobs.addAll(pending);
@@ -628,7 +760,9 @@ public class RcloneRcd {
     }
 
     public JobStatusResponse getJobStatus(int jobId) {
-        return performRcCall("job/status", new JobStatusRcOpParam(jobId), JobStatusResponse.class);
+        JobStatusResponse response = performRcCall("job/status", new JobStatusRcOpParam(jobId), JobStatusResponse.class);
+        if (response.finished) releaseMutationLease(jobId);
+        return response;
     }
 
     public JobListResponse listJobs() {

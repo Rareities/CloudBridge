@@ -2,24 +2,47 @@ apply plugin: 'com.android.application'
 apply plugin: 'kotlin-android'
 apply plugin: 'kotlinx-serialization'
 
-android {
-    // Release signing: credentials come from a git-ignored keystore.properties
-    // (local builds) or CB_* env vars (CI). Falls back to the debug key when
-    // neither is present so fresh checkouts still build an installable APK.
-    def keystoreProperties = new Properties()
-    def keystorePropertiesFile = rootProject.file("keystore.properties")
-    if (keystorePropertiesFile.exists()) {
-        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+def releaseStorePath = keystoreProperties['storeFile'] ?: System.getenv('CB_STORE_FILE')
+def releaseAlias = keystoreProperties['keyAlias'] ?: System.getenv('CB_KEY_ALIAS')
+def releaseStorePassword = keystoreProperties['storePassword'] ?: System.getenv('CB_STORE_PASSWORD')
+def releaseKeyPassword = keystoreProperties['keyPassword'] ?: System.getenv('CB_KEY_PASSWORD')
+def releaseKeyConfigured = releaseStorePath && file(releaseStorePath).isFile() &&
+        releaseAlias && releaseStorePassword && releaseKeyPassword
+
+def validateReleaseSigning = tasks.register('validateReleaseSigning') {
+    doLast {
+        if (!releaseKeyConfigured) {
+            throw new GradleException('Release signing requires a keystore and all CB_* signing credentials. Use assembleOssDebug for unsigned development work.')
+        }
+        def keyStore = java.security.KeyStore.getInstance(file(releaseStorePath), releaseStorePassword.toCharArray())
+        if (!keyStore.isKeyEntry(releaseAlias) || keyStore.getKey(releaseAlias, releaseKeyPassword.toCharArray()) == null) {
+            throw new GradleException('Release signing alias must identify a usable private key.')
+        }
+        def certificate = keyStore.getCertificate(releaseAlias)
+        if (!(certificate instanceof java.security.cert.X509Certificate) ||
+                certificate.subjectX500Principal.name.toLowerCase(java.util.Locale.ROOT).contains('cn=android debug')) {
+            throw new GradleException('An Android debug certificate cannot sign a release artifact.')
+        }
     }
-    def releaseStorePath = keystoreProperties['storeFile'] ?: System.getenv('CB_STORE_FILE')
-    def releaseKeyConfigured = releaseStorePath != null && file(releaseStorePath).exists()
+}
+tasks.configureEach { candidate ->
+    if (candidate.name ==~ /pre.*ReleaseBuild/) candidate.dependsOn(validateReleaseSigning)
+}
+
+android {
+    // Official release tasks fail closed. Development builds retain their separate debug key.
     signingConfigs {
         release {
             if (releaseKeyConfigured) {
-                keyAlias = keystoreProperties['keyAlias'] ?: System.getenv('CB_KEY_ALIAS')
+                keyAlias = releaseAlias
                 storeFile file(releaseStorePath)
-                storePassword = keystoreProperties['storePassword'] ?: System.getenv('CB_STORE_PASSWORD')
-                keyPassword = keystoreProperties['keyPassword'] ?: System.getenv('CB_KEY_PASSWORD')
+                storePassword = releaseStorePassword
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -33,9 +56,11 @@ android {
         targetSdkVersion 36
         // CI bumps these per beta via CB_VERSION_CODE / CB_VERSION_NAME env vars.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
-        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 20
-        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.1'
+        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 30
+        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.2'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField "java.lang.String", "RCLONE_SOURCE_SHA", '"' + project.properties['de.schuelken.cloudbridge.rCloneRef'] + '"'
+        buildConfigField "java.lang.String", "RCLONE_SOURCE_REPO", '"' + project.properties['de.schuelken.cloudbridge.rCloneRepoUrl'] + '"'
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";
         setProperty("archivesBaseName",  "cloudbridge_v"+versionName)
@@ -73,13 +98,14 @@ android {
                     appIcon: "@mipmap/ic_launcher",
                     appIconRound: "@mipmap/ic_launcher_round"
             ]
-            signingConfig releaseKeyConfigured ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 
     sourceSets {
         configureEach {
             jniLibs.srcDirs = ["lib"]
+            assets.srcDir("$buildDir/generated/rcloneProvenance")
         }
     }
 
@@ -156,6 +182,16 @@ android {
 
     gradle.projectsEvaluated {
         preBuild.dependsOn(':rclone:buildAll')
+        // Source sets refer to externally compiled files. Model the actual consumers,
+        // not only preBuild, so their input snapshots always follow the producers.
+        tasks.configureEach { candidate ->
+            if (candidate.name ==~ /merge.*(?:JniLibFolders|NativeLibs)/) {
+                candidate.dependsOn(':rclone:buildAll')
+            }
+            if (candidate.name ==~ /merge.*Assets/) {
+                candidate.dependsOn(':rclone:generateProvenance')
+            }
+        }
     }
 
     namespace 'ca.pkay.rcloneexplorer'

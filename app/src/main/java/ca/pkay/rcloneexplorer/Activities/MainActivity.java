@@ -335,12 +335,7 @@ public class MainActivity extends AppCompatActivity
             if (data != null) {
                 uri = data.getData();
                 if (uri != null) {
-                    try {
-                        rclone.exportConfigFile(uri);
-                    } catch (IOException e) {
-                        FLog.e(TAG, "Could not export config file to %s", e, uri);
-                        Toasty.error(this, getString(R.string.error_exporting_config_file), Toast.LENGTH_SHORT, true).show();
-                    }
+                    new ExportBackup().execute(uri);
                 }
             }
         } else if (requestCode == FileExplorerFragment.STREAMING_INTENT_RESULT) {
@@ -616,14 +611,110 @@ public class MainActivity extends AppCompatActivity
     }
 
     public void exportConfigFile() {
+        try {
+            if (rclone.isConfigAtRestEncrypted()) {
+                chooseBackupDestination();
+                return;
+            }
+        } catch (IOException e) {
+            Toasty.error(this, getString(R.string.error_exporting_config_file), Toast.LENGTH_SHORT, true).show();
+            return;
+        }
+        android.widget.LinearLayout fields = new android.widget.LinearLayout(this);
+        fields.setOrientation(android.widget.LinearLayout.VERTICAL);
+        int padding = (int) (24 * getResources().getDisplayMetrics().density);
+        fields.setPadding(padding, 0, padding, 0);
+        android.widget.EditText password = new android.widget.EditText(this);
+        android.widget.EditText confirmation = new android.widget.EditText(this);
+        password.setHint(R.string.backup_password);
+        confirmation.setHint(R.string.backup_password_confirmation);
+        for (android.widget.EditText field : new android.widget.EditText[]{password, confirmation}) {
+            field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            field.setSaveEnabled(false);
+            if (android.os.Build.VERSION.SDK_INT >= 26) {
+                field.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+            }
+            fields.addView(field);
+        }
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this, R.style.RoundedCornersDialog)
+                .setTitle(R.string.backup_encrypt_title)
+                .setMessage(R.string.backup_encrypt_explanation)
+                .setView(fields)
+                .setNegativeButton(R.string.cancel, null)
+                .setPositiveButton(R.string.continue_statement, null).create();
+        dialog.setOnDismissListener(ignored -> {
+            password.setText("");
+            confirmation.setText("");
+        });
+        dialog.setOnShowListener(ignored -> {
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                String value = password.getText().toString();
+                if (value.trim().isEmpty() || value.length() > 1024 || value.indexOf('\n') >= 0
+                        || value.indexOf('\r') >= 0 || value.indexOf('\0') >= 0) {
+                    password.setError(getString(R.string.backup_password_invalid));
+                    return;
+                }
+                if (!value.equals(confirmation.getText().toString())) {
+                    confirmation.setError(getString(R.string.backup_password_mismatch));
+                    return;
+                }
+                password.setText("");
+                confirmation.setText("");
+                dialog.dismiss();
+                new EncryptBackupConfig().execute(value);
+            });
+        });
+        dialog.show();
+    }
+
+    private void chooseBackupDestination() {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/*");
+        intent.setType("application/zip");
         SimpleDateFormat date = new SimpleDateFormat("yyyy-MM-dd_HHmmss");
         String localTime = date.format(Calendar.getInstance().getTime());
 
         intent.putExtra(Intent.EXTRA_TITLE, getString(R.string.app_name)+"-backup-"+localTime+".zip");
         tryStartActivityForResult(this, intent, WRITE_REQUEST_CODE);
+    }
+
+    @SuppressLint("StaticFieldLeak")
+    private class EncryptBackupConfig extends AsyncTask<String, Void, Boolean> {
+        private LoadingDialog loading;
+        @Override protected void onPreExecute() {
+            loading = new LoadingDialog().setTitle(R.string.backup_encrypt_title).setCanCancel(false);
+            loading.show(getSupportFragmentManager(), "encrypt backup");
+        }
+        @Override protected Boolean doInBackground(String... values) {
+            try {
+                rclone.encryptConfigForBackup(values[0]);
+                return true;
+            } catch (IOException e) {
+                // Encryption errors must never include user passwords or native helper output.
+                FLog.e(TAG, "Configuration encryption failed");
+                return false;
+            } finally { values[0] = null; }
+        }
+        @Override protected void onPostExecute(Boolean success) {
+            Dialogs.dismissSilently(loading);
+            if (success) chooseBackupDestination();
+            else Toasty.error(MainActivity.this, getString(R.string.backup_encrypt_failed), Toast.LENGTH_LONG, true).show();
+        }
+    }
+
+    @SuppressLint("StaticFieldLeak")
+    private class ExportBackup extends AsyncTask<Uri, Void, Boolean> {
+        @Override protected Boolean doInBackground(Uri... values) {
+            try { rclone.exportConfigFile(values[0]); return true; }
+            catch (IOException e) { FLog.e(TAG, "Configuration backup failed"); return false; }
+        }
+        @Override protected void onPostExecute(Boolean success) {
+            if (!success) Toasty.error(MainActivity.this, getString(R.string.error_exporting_config_file), Toast.LENGTH_LONG, true).show();
+            else Toasty.success(MainActivity.this, getString(R.string.backup_exported), Toast.LENGTH_SHORT, true).show();
+        }
     }
 
     public void requestPermissions() {
@@ -738,42 +829,30 @@ public class MainActivity extends AppCompatActivity
             loadingDialog.show(getSupportFragmentManager(), "loading dialog");
         }
 
-        //todo: Check shared preferences if they will be overridden by the onPostExecute
-        //todo: This assumes that zip-files are uncorrupted. That means that if the rclone.conf is valid,
-        //todo: but the jsons are not, we import half a configuration package.
-
         @Override
         protected Boolean doInBackground(Uri... uris) {
 
             ContentResolver resolver = context.getContentResolver();
             String mime = resolver.getType(uris[0]);
 
-            if(mime.equals("application/zip")) {
+            if ("application/zip".equals(mime)) {
                 try {
-                    boolean validRclone = rclone.copyConfigFileFromZip(uris[0]);
-                    if(!validRclone) {
-                        statusCode = FAILURE_ZIP_INVALID_CONF;
-                        return false;
-                    }
+                    // Parse every component before installing any part of the archive.
+                    final Importer.PreparedImport prepared = Importer.prepareJson(rclone.readDatabaseJson(uris[0]));
+                    final SharedPreferences.Editor settings = SharedPreferencesBackup.prepareImport(
+                            rclone.readSharedPrefs(uris[0]), context);
+                    rclone.importConfigZipAtomically(uris[0], () -> {
+                        prepared.apply(context);
+                        if (!settings.commit()) throw new IllegalStateException("Could not restore preferences");
+                    });
                     statusCode = SUCCESS_IMPORT;
-                } catch (Exception e) {
-                    statusCode = FAILURE_ZIP_MISSING_CONF;
-                    return false;
-                }
-
-                try {
-                    String json = rclone.readDatabaseJson(uris[0]);
-                    Importer.importJson(json, context);
-                    json = rclone.readSharedPrefs(uris[0]);
-                    SharedPreferencesBackup.importJson(json, context);
-                } catch (JSONException e) {
+                    return true;
+                } catch (JSONException | IllegalArgumentException e) {
                     statusCode = FAILURE_ZIP_INVALID_JSON;
-                    return false;
                 } catch (Exception e) {
-                    statusCode = FAILURE_ZIP_NO_JSON;
-                    return false;
+                    statusCode = FAILURE_ZIP_INVALID_CONF;
                 }
-                return true;
+                return false;
             }
 
             try {
