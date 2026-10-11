@@ -14,6 +14,7 @@ import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isEnabled
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import org.hamcrest.Matchers.containsString
@@ -104,7 +105,9 @@ class TaskEditorDeviceIntegrationTest {
             val button = it.findViewById<Button>(id)
             assertTrue("Editor action must be enabled", button.isEnabled)
         }
-        onView(withId(id)).perform(scrollTo(), click())
+        onView(withId(id)).perform(scrollTo())
+        instrumentation.waitForIdleSync()
+        onView(withId(id)).check(matches(isDisplayed())).check(matches(isEnabled())).perform(click())
         instrumentation.waitForIdleSync()
     }
 
@@ -209,7 +212,27 @@ class TaskEditorDeviceIntegrationTest {
             assertTrue("The preview must identify affected filenames", state.read().getString("preview").contains("left-change.txt"))
             awaitEnabled(screen, R.id.bisync_preview_report_button)
             press(screen, R.id.bisync_preview_report_button)
-            onView(withText(containsString("left-change.txt"))).inRoot(isDialog()).check(matches(isDisplayed()))
+            try {
+                await("saved preview report dialog") {
+                    try {
+                        onView(withText(containsString("left-change.txt"))).inRoot(isDialog()).check(matches(isDisplayed()))
+                        true
+                    } catch (_: androidx.test.espresso.NoMatchingViewException) { false }
+                    catch (_: androidx.test.espresso.NoMatchingRootException) { false }
+                }
+            } catch (failure: Throwable) {
+                instrumentation.uiAutomation.takeScreenshot()?.let { image ->
+                    File(context.cacheDir, "preview-dialog-failure.png").outputStream().use {
+                        image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                    image.recycle()
+                }
+                screen.onActivity { activity ->
+                    val action = activity.findViewById<Button>(R.id.bisync_preview_report_button)
+                    android.util.Log.e("GuiAcceptance", "Preview dialog absent: finishing=${activity.isFinishing}, enabled=${action.isEnabled}, attached=${action.isAttachedToWindow}, focus=${action.hasWindowFocus()}")
+                }
+                throw failure
+            }
             onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
             awaitEnabled(screen, R.id.task_run_button)
             val beforeRun = jobs(task).map { it.id }.toSet()

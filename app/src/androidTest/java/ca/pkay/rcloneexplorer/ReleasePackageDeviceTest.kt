@@ -7,6 +7,8 @@ import androidx.preference.PreferenceManager
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import ca.pkay.rcloneexplorer.Activities.MainActivity
 import ca.pkay.rcloneexplorer.Activities.TaskActivity
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler
@@ -101,6 +103,21 @@ class ReleasePackageDeviceTest {
                 found != null
             }
             await("Release process did not relinquish ownership") { !NativeSessionGate.GLOBAL.isBusy }
+            // History is persisted before doWork returns. Queueing the next
+            // operation before WorkManager commits SUCCEEDED is coalesced by
+            // the production KEEP policy and does not create another request.
+            // Use the same API as the production task editor. Unused query
+            // methods are correctly removed from the minified release APK.
+            val work = WorkManager.getInstance(context).getWorkInfosByTagLiveData(saved.id.toString())
+            val committed = java.util.concurrent.atomic.AtomicBoolean()
+            val observer = androidx.lifecycle.Observer<List<WorkInfo>> { items ->
+                committed.set(items.isNotEmpty() && items.all { it.state.isFinished } &&
+                    items.any { it.state == WorkInfo.State.SUCCEEDED })
+            }
+            instrumentation.runOnMainSync { work.observeForever(observer) }
+            try {
+                await("WorkManager did not commit the release operation's terminal state") { committed.get() }
+            } finally { instrumentation.runOnMainSync { work.removeObserver(observer) } }
             completedWork.add(found!!)
         }
         val prefs = PreferenceManager.getDefaultSharedPreferences(context)

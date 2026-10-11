@@ -12,7 +12,7 @@ Implemented mechanisms and external acceptance gates are distinct.
 | PD-002 | Persisted rotation adoption, guarded atomic tuple saves and competing-process/failure tests. Live longevity remains open. |
 | PD-003 | Authenticated exact-name fallback and traversal/upload ambiguity guards. Live modern-client objects remain open. |
 | PD-004 | Strict plaintext size/common/per-file hashes; invalid metadata stops before mutation. |
-| PD-005 | Conditional: unknown drafts preserved; no automated repair without ownership evidence. |
+| PD-005 | Conditional: managed jobs preserve unknown drafts and prohibit automatic replacement. Standalone CLI replacement remains explicit, disabled by default and lacks ownership proof. |
 | PD-006 | Contained reviewed libraries and negative signature/block tests. Cross-client crypto migration remains external. |
 | PD-007 | Download Close propagation and cancellation ownership implemented/tested. |
 | PD-008 | Account pause, debounced action, transient OTP and explicit reconnect implemented. Real account/challenge matrix remains open. |
@@ -27,13 +27,13 @@ Implemented mechanisms and external acceptance gates are distinct.
 | BS-008 | Shared DST/timezone calculations, intervals, constraints, quiet hours, coalescing and bounded admission retries. |
 | BS-009 | State/history, affected-file preview, next run, cancel and connection/recovery controls. |
 | CB-001 | Truthful native results in worker, provider and stream paths. |
-| CB-002 | Idempotent terminal results, concurrent pipe draining and process-owned cleanup. |
+| CB-002 | Idempotent terminal results, concurrent pipe draining and process-owned cleanup, including bounded setup/OAuth processes. |
 | CB-003 | Missing/unknown mode guards without destructive one-way fallback. |
 | CB-004 | Bounded parse-first import, encrypted component validation and journalled rollback. |
 | CB-005 | Checked civil/interval scheduling and persisted next occurrence. |
 | CB-006 | Bounded follow-ups with self/cycle protection. |
 | CB-007 | Provider completion requires confirmed native success; timeouts/cancellation fail. |
-| CB-008 | Current URI authority, encoded names, safe descendants, unavailable remote handling and rotation. |
+| CB-008 | Current URI authority, encoded names, safe descendants, unavailable remote handling and rotation. Remote saves run off the UI thread, cancel with their view and execute once. Remote forms restore by identity without saved-state credentials; unchanged task-state refresh preserves queued taps. |
 | CB-009 | Notification-only channel-aware release metadata; no unattended APK installer. |
 | CB-010 | Nullable references, validated selections and stable persisted identities. |
 | SEC-001 | Native encrypted config with Keystore-wrapped unattended access. Optional per-run biometric mode deferred. |

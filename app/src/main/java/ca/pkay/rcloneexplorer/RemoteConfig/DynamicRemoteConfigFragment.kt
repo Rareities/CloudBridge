@@ -26,10 +26,12 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.annotation.VisibleForTesting
 import androidx.cardview.widget.CardView
 import androidx.core.view.setPadding
 import androidx.core.view.size
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import ca.pkay.rcloneexplorer.R
@@ -37,15 +39,43 @@ import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.Rclone.RCLONE_CONFIG_NAME_KEY
 import ca.pkay.rcloneexplorer.rclone.Provider
 import ca.pkay.rcloneexplorer.rclone.ProviderOption
+import ca.pkay.rcloneexplorer.util.ProcessRunner
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import es.dmoral.toasty.Toasty
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 
-class DynamicRemoteConfigFragment(private val mProviderTitle: String, private val optionMap: HashMap<String, String>?) : Fragment() {
+class DynamicRemoteConfigFragment() : Fragment() {
+
+    companion object {
+        private const val ARG_PROVIDER = "config_provider"
+        private const val ARG_REMOTE = "config_remote"
+        private const val ARG_EDIT = "config_edit"
+    }
+
+    // The FragmentManager invokes the public no-arg constructor on recreation.
+    // Only the remote identity is parcelled; backend options may contain secrets.
+    constructor(providerTitle: String, options: HashMap<String, String>?) : this() {
+        arguments = Bundle().apply {
+            putString(ARG_PROVIDER, providerTitle)
+            putString(ARG_REMOTE, options?.get(RCLONE_CONFIG_NAME_KEY).orEmpty())
+            putBoolean(ARG_EDIT, options != null)
+        }
+        if (options != null) mOptionMap = HashMap(options)
+    }
+
+    constructor(providerTitle: String) : this(providerTitle, null)
 
     private val TAG = "DynamicRemoteConfigFragment"
+    private var mProviderTitle = ""
     private lateinit var mContext: Context
     private var rclone: Rclone? = null
 
@@ -62,31 +92,45 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
     private var mAuthTask: AsyncTask<Void?, Void?, Boolean>? = null
     private var mUseOauth = false
     private var mOptionFilter = ""
+    private var configurationUnavailable = false
+    private var submitting = false
+    private var configurationJob: Job? = null
+    private var activeRunner: ProcessRunner? = null
 
-    constructor(providerTitle: String) : this(providerTitle, null)
-
-    init {
-        if(optionMap != null) {
-            // we assume that if the option-map is passed, we are editing.
-            this.mIsEditTask = true
-            mOptionMap = optionMap
-        }
-    }
+    @VisibleForTesting
+    internal var configRunForTests: ((ArrayList<String>, Boolean, ProcessRunner, ProcessRunner.StopCheck) -> RemoteConfigHelper.Result)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (context == null) {
-            return
-        }
         setHasOptionsMenu(true)
-        mContext = context as Context
+        mContext = requireContext()
 
-        rclone = Rclone(this.context)
-        mProvider = rclone!!.getProvider(mProviderTitle)
-        if(mProvider == null) {
-            Log.e(this::class.java.simpleName, "Unknown Provider: $mProviderTitle")
-            Toast.makeText(this.mContext, R.string.dynamic_config_unknown_error, Toast.LENGTH_LONG).show()
+        val identity = arguments
+        mProviderTitle = identity?.getString(ARG_PROVIDER).orEmpty()
+        mIsEditTask = identity?.getBoolean(ARG_EDIT, false) == true
+        val remoteName = identity?.getString(ARG_REMOTE).orEmpty()
+        rclone = Rclone(mContext)
+        // A restored edit must refresh its options from private rclone config.
+        // Neither secrets nor the option map are placed in Fragment arguments.
+        if (mIsEditTask && mOptionMap.isEmpty()) {
+            val persisted = if (remoteName.isNotEmpty()) {
+                runCatching { RemoteConfig.loadEditConfig(rclone!!, remoteName) }.getOrNull()
+            } else null
+            if (persisted == null || persisted[RCLONE_CONFIG_NAME_KEY] != remoteName ||
+                persisted["type"] != mProviderTitle) {
+                configurationUnavailable = true
+            } else {
+                mOptionMap = HashMap(persisted)
+            }
+        }
+        mProvider = if (!configurationUnavailable && mProviderTitle.isNotBlank()) {
+            runCatching { rclone!!.getProvider(mProviderTitle) }.getOrNull()
+        } else null
+        if (mProvider == null) configurationUnavailable = true
+        if (configurationUnavailable) {
+            Toast.makeText(mContext, R.string.dynamic_config_unknown_error, Toast.LENGTH_LONG).show()
             requireActivity().finish()
+            return
         }
 
         this.mUseOauth = when (mProvider?.name) {
@@ -109,8 +153,12 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View? {
+        if (configurationUnavailable) return View(inflater.context)
         val view = inflater.inflate(R.layout.remote_config_form, container, false)
         mFormView = view.findViewById(R.id.form_content)
+        // Android also saves fragment view hierarchy into a Bundle. Exclude
+        // the dynamic options subtree, which includes credentials and tokens.
+        mFormView?.setSaveFromParentEnabled(false)
         mTitleLabel = view.findViewById(R.id.labelTitle)
         mAuthView = view.findViewById(R.id.auth_screen)
 
@@ -126,6 +174,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         setUpForm()
         mFinishButton?.setOnClickListener { setUpRemote() }
         mCancelAuthButton?.setOnClickListener {
+            cancelSubmission()
             mAuthTask?.cancel(true)
             requireActivity().finish()
         }
@@ -154,6 +203,26 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         mAuthTask?.cancel(true)
     }
 
+    override fun onDestroyView() {
+        cancelSubmission()
+        mAuthTask?.cancel(true)
+        mFormView = null
+        mTitleLabel = null
+        mAuthView = null
+        mCancelAuthButton = null
+        mFinishButton = null
+        mRemoteName = null
+        super.onDestroyView()
+    }
+
+    private fun cancelSubmission() {
+        activeRunner?.requestStop()
+        configurationJob?.cancel()
+        configurationJob = null
+        activeRunner = null
+        submitting = false
+    }
+
     fun isEditConfig(): Boolean {
         return mIsEditTask
     }
@@ -168,7 +237,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
 
     fun setSearchterm (term: String) {
         mOptionFilter = term
-        Log.e(TAG, "Filter:: $term")
+        if (configurationUnavailable || mFormView == null) return
         setUpForm()
     }
 
@@ -241,6 +310,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
                 }
                 "bool" -> {
                     val input = CheckBox(mContext)
+                    input.isSaveEnabled = false
                     input.text = it.name
                     updateValue(input, it)
 
@@ -330,6 +400,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         textinput.setPadding(0, padding, 0, 0)
 
         var input = AutoCompleteTextView(textinput.context)
+        input.isSaveEnabled = false
         input.setPadding(padding)
         val items = ArrayList<String>()
 
@@ -382,6 +453,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         valueContainer.layoutParams = LinearLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT, 1.0f)
 
         val valueInput = TextInputEditText(valueContainer.context)
+        valueInput.isSaveEnabled = false
         valueInput.setPadding(padding)
         valueInput.setText(number)
         //@ManualTheming
@@ -404,6 +476,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         )
 
         val suffixSpinner = AutoCompleteTextView(suffixContainer.context)
+        suffixSpinner.isSaveEnabled = false
         suffixSpinner.setPadding(padding)
         suffixSpinner.hint = getString(R.string.dynamic_config_suffixselector_suffix_hint)
         suffixSpinner.setAdapter(adapter)
@@ -440,6 +513,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
         textinput.setPadding(0, padding, 0, 0)
 
         val editText = TextInputEditText(textinput.context)
+        editText.isSaveEnabled = false
         editText.setPadding(padding)
         //@ManualTheming
         editText.setTextColor(convertAttributeToColor(R.attr.colorOnSecondaryContainer))
@@ -508,6 +582,7 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
     }
 
     private fun setUpRemote() {
+        if (submitting) return
 
         val options = java.util.ArrayList<String>()
         val name: String = mRemoteName?.text.toString()
@@ -526,19 +601,48 @@ class DynamicRemoteConfigFragment(private val mProviderTitle: String, private va
             options.add(value)
         }
 
-        if(mIsEditTask) {
-            RemoteConfigHelper.updateAndWait(context, options)
-            requireActivity().finish()
+        submitting = true
+        mFinishButton?.isEnabled = false
+        // Edits and non-OAuth creates each start exactly one native operation.
+        // Authentication wizards keep their existing interactive AsyncTask.
+        if (mIsEditTask || !mUseOauth) {
+            val updating = mIsEditTask
+            val runner = ProcessRunner()
+            val applicationContext = requireContext().applicationContext
+            val testRunner = configRunForTests
+            activeRunner = runner
+            configurationJob = viewLifecycleOwner.lifecycleScope.launch {
+                val work = currentCoroutineContext()
+                try {
+                    val result = withContext(Dispatchers.IO) {
+                        val stop = ProcessRunner.StopCheck { !work.isActive }
+                        testRunner?.invoke(options, updating, runner, stop)
+                            ?: RemoteConfigHelper.runConfig(applicationContext, options, updating, runner, stop)
+                    }
+                    if (!isAdded || view == null) return@launch
+                    if (result.success) {
+                        Toasty.success(requireContext(), getString(R.string.remote_creation_success), Toast.LENGTH_SHORT, true).show()
+                        requireActivity().finish()
+                    } else if (!result.cancelled) {
+                        Toasty.error(requireContext(), getString(R.string.error_creating_remote), Toast.LENGTH_LONG, true).show()
+                    }
+                } finally {
+                    if (activeRunner === runner) {
+                        activeRunner = null
+                        configurationJob = null
+                        submitting = false
+                        mFinishButton?.isEnabled = true
+                    }
+                }
+            }
+            return
         }
 
-        if(mUseOauth){
+        if (mUseOauth) {
             mAuthTask = ConfigCreate(
                 options, mFormView!!, mAuthView!!,
                 requireContext(), rclone!!, mProvider?.name ?: ""
             ).execute()
-        } else {
-            RemoteConfigHelper.setupAndWait(context, options)
-            requireActivity().finish()
         }
     }
 }

@@ -8,10 +8,12 @@ import android.view.MenuItem
 import android.view.View
 import android.widget.SearchView
 import android.widget.Toast
+import androidx.annotation.VisibleForTesting
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.WindowCompat
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentFactory
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.RemoteConfig.ProviderListFragment.Companion.newProviderListConfig
@@ -20,7 +22,6 @@ import ca.pkay.rcloneexplorer.RuntimeConfiguration
 import ca.pkay.rcloneexplorer.rclone.Provider
 import ca.pkay.rcloneexplorer.util.ActivityHelper
 import es.dmoral.toasty.Toasty
-import org.json.JSONException
 
 
 class RemoteConfig : AppCompatActivity(), ProviderSelectedListener {
@@ -33,6 +34,14 @@ class RemoteConfig : AppCompatActivity(), ProviderSelectedListener {
     companion object {
         const val CONFIG_EDIT_CODE = 139
         const val CONFIG_EDIT_TARGET = "CONFIG_EDIT_TARGET"
+
+        @VisibleForTesting
+        internal var editConfigForTests: ((String) -> HashMap<String, String>?)? = null
+
+        internal fun loadEditConfig(rclone: Rclone, remoteName: String): HashMap<String, String>? {
+            val fixture = editConfigForTests
+            return if (fixture != null) fixture(remoteName) else rclone.getConfig(remoteName)
+        }
     }
 
     override fun attachBaseContext(newBase: Context) {
@@ -40,6 +49,15 @@ class RemoteConfig : AppCompatActivity(), ProviderSelectedListener {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The provider picker also uses a constructor parameter. Install its
+        // minimal restoration factory before FragmentActivity restores views.
+        supportFragmentManager.fragmentFactory = object : FragmentFactory() {
+            override fun instantiate(classLoader: ClassLoader, className: String): Fragment {
+                return if (className == ProviderListFragment::class.java.name) {
+                    newProviderListConfig()
+                } else super.instantiate(classLoader, className)
+            }
+        }
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         applyTheme()
@@ -52,40 +70,7 @@ class RemoteConfig : AppCompatActivity(), ProviderSelectedListener {
             actionBar.setDisplayShowHomeEnabled(true)
         }
 
-        val fragmentTransaction = supportFragmentManager.beginTransaction()
-        if (savedInstanceState != null) {
-            mFragment = supportFragmentManager.findFragmentByTag("new config")
-            fragmentTransaction.replace(R.id.flFragment, getCurrentFragment(), "new config")
-            fragmentTransaction.commit()
-            val title = savedInstanceState.getString(OUTSTATE_TITLE)
-            if (title != null) {
-                supportActionBar!!.title = title
-            }
-            return
-        }
-
         mSearchBar = findViewById(R.id.search)
-
-        mFragment = newProviderListConfig()
-        fragmentTransaction.replace(R.id.flFragment, getCurrentFragment(), "config list")
-        fragmentTransaction.commit()
-        val shouldEdit = intent.getStringExtra(CONFIG_EDIT_TARGET)
-        if (shouldEdit != null) {
-            if (shouldEdit.isNotEmpty()) {
-                val rclone = Rclone(this)
-                val config = rclone.getConfig(intent.getStringExtra(CONFIG_EDIT_TARGET))
-                if (config != null) {
-                    try {
-                        val provider = rclone.getProvider(config["type"])
-                        mFragment = DynamicRemoteConfigFragment(provider.name, config)
-                        startConfig(provider)
-                    } catch (e: JSONException) {
-                        throw RuntimeException(e)
-                    }
-                }
-            }
-        }
-
         mSearchBar.setOnCloseListener {
             toggleSearch(false)
             return@setOnCloseListener true
@@ -106,6 +91,37 @@ class RemoteConfig : AppCompatActivity(), ProviderSelectedListener {
                 return true
             }
         })
+
+        if (savedInstanceState != null) {
+            // FragmentManager has already restored the real instance and its
+            // safe identity arguments. Replacing it discards that restoration.
+            mFragment = supportFragmentManager.findFragmentById(R.id.flFragment)
+                ?: supportFragmentManager.findFragmentByTag("new config")
+                ?: supportFragmentManager.findFragmentByTag("config list")
+            if (mFragment == null) startProviderlist()
+            savedInstanceState.getString(OUTSTATE_TITLE)?.let { supportActionBar?.title = it }
+            return
+        }
+
+        mFragment = newProviderListConfig()
+        supportFragmentManager.beginTransaction()
+            .replace(R.id.flFragment, getCurrentFragment(), "config list").commit()
+        val shouldEdit = intent.getStringExtra(CONFIG_EDIT_TARGET)
+        if (!shouldEdit.isNullOrEmpty()) {
+            val rclone = Rclone(this)
+            val config = runCatching { loadEditConfig(rclone, shouldEdit) }.getOrNull()
+            val provider = if (config != null && config[Rclone.RCLONE_CONFIG_NAME_KEY] == shouldEdit &&
+                !config["type"].isNullOrBlank()) {
+                runCatching { rclone.getProvider(config["type"]) }.getOrNull()
+            } else null
+            if (provider == null) {
+                Toasty.error(this, getString(R.string.dynamic_config_unknown_error), Toast.LENGTH_SHORT, true).show()
+                finish()
+                return
+            }
+            mFragment = DynamicRemoteConfigFragment(provider.name, config)
+            startConfig(provider)
+        }
 
     }
 

@@ -168,9 +168,9 @@ class InternxtReauth(
                 } else {
                     ""
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 errorMessage = describeError("Failed to parse Internxt reauth state", stderrSummary)
-                FLog.e(TAG, "Failed to parse Internxt reauth state. stdout=$jsonStr stderr=$stderrSummary", e)
+                FLog.e(TAG, "Failed to parse Internxt reauth state")
                 return false
             }
         }

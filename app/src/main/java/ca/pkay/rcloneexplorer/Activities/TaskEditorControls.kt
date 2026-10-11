@@ -222,14 +222,14 @@ class TaskEditorControls(
 
     fun refresh() {
         val task = taskProvider()
-        previewReport.isEnabled = false
+        var reportEnabled = false
+        var runEnabled = !active && panel.visibility != View.VISIBLE
+        var approvalEnabled = false
         preview.isEnabled = !active
-        run.isEnabled = !active && panel.visibility != View.VISIBLE
-        approve.isEnabled = false
         if (task != null && BisyncPolicy.isBisync(task) && task.bisyncUUID.isNotEmpty()) {
             try {
                 val state = BisyncStateStore(BisyncPolicy.workdir(activity, task)).read()
-                previewReport.isEnabled = !active && state.optLong("previewAt") > 0 && state.optString("preview").isNotBlank()
+                reportEnabled = !active && state.optLong("previewAt") > 0 && state.optString("preview").isNotBlank()
                 val code = state.optString("status", BisyncStateStore.NEEDS_INITIALISATION)
                 val current = draftMatchesSaved(task)
                 val checkable = current && !active &&
@@ -260,14 +260,19 @@ class TaskEditorControls(
                     else activity.getString(R.string.bisync_never_run)
                 status.text = activity.getString(R.string.bisync_status_format, label, last) +
                     state.optString("message").takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
-                approve.isEnabled = !active && current && canApprove
-                run.isEnabled = !active && current && canRun
+                approvalEnabled = !active && current && canApprove
+                runEnabled = !active && current && canRun
                 if (checkable && !verified) verifyInBackground(task, state, key)
-            } catch (e: Exception) { status.text = "Review and save this task before initialising bisync"; run.isEnabled = false }
+            } catch (e: Exception) { status.text = "Review and save this task before initialising bisync"; runEnabled = false }
         } else {
             status.setText(R.string.bisync_status_initial)
-            if (panel.visibility == View.VISIBLE) run.isEnabled = false
+            if (panel.visibility == View.VISIBLE) runEnabled = false
         }
+        // Temporarily disabling an unchanged action cancels Android's queued
+        // click callback. Apply only the final availability once per refresh.
+        previewReport.isEnabled = reportEnabled
+        run.isEnabled = runEnabled
+        approve.isEnabled = approvalEnabled
         val schedules = task?.let { saved -> DatabaseHandler(activity).allTrigger.filter { it.triggerTarget == saved.id } }.orEmpty()
         activity.findViewById<TextView>(R.id.task_schedule_summary).text = if (schedules.isEmpty())
             activity.getString(R.string.schedule_none) else schedules.joinToString("\n") {
