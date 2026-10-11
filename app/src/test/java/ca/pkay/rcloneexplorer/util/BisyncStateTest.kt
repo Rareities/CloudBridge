@@ -19,12 +19,12 @@ class BisyncStateTest {
     @Test fun initialisationRequiresACompletedMatchingPreview() {
         val state = store()
         assertThrows(IllegalArgumentException::class.java) { state.begin("run", "one", null, "run") }
-        assertThrows(IllegalArgumentException::class.java) { state.begin("initialise", "one", "one", "init") }
+        assertThrows(IllegalArgumentException::class.java) { state.begin("initialise", "one", "one", "00000000-0000-0000-0000-000000000001") }
         state.begin("preview", "one", null, "preview")
         state.finish("preview", "one", "preview", true, 0, "preview complete")
-        assertThrows(IllegalArgumentException::class.java) { state.begin("initialise", "changed", "one", "init") }
-        state.begin("initialise", "one", "one", "init")
-        state.finish("initialise", "one", "init", true, 0, "success")
+        assertThrows(IllegalArgumentException::class.java) { state.begin("initialise", "changed", "one", "00000000-0000-0000-0000-000000000001") }
+        state.begin("initialise", "one", "one", "00000000-0000-0000-0000-000000000001")
+        state.finish("initialise", "one", "00000000-0000-0000-0000-000000000001", true, 0, "success")
         assertEquals(BisyncStateStore.READY, state.read().getString("status"))
     }
 
@@ -32,8 +32,8 @@ class BisyncStateTest {
         val state = store()
         state.begin("preview", "one", null, "preview")
         state.finish("preview", "one", "preview", true, 0, "preview complete")
-        state.begin("initialise", "one", "one", "init")
-        state.finish("initialise", "one", "init", true, 0, "success")
+        state.begin("initialise", "one", "one", "00000000-0000-0000-0000-000000000001")
+        state.finish("initialise", "one", "00000000-0000-0000-0000-000000000001", true, 0, "success")
         state.begin("run", "one", null, "run")
         assertThrows(IllegalArgumentException::class.java) { state.begin("run", "one", null, "after-crash") }
         state.finish("run", "one", "run", false, 7, "cancelled")
@@ -92,8 +92,8 @@ class BisyncStateTest {
         assertTrue(BisyncStateStore.isPreviewApproved(state, "first", at + BisyncStateStore.PREVIEW_LIFETIME_MS))
         assertFalse(BisyncStateStore.isPreviewApproved(state, "first", at + BisyncStateStore.PREVIEW_LIFETIME_MS + 1))
         assertFalse(BisyncStateStore.isPreviewApproved(state, "edited", at))
-        store.begin(BisyncStateStore.INITIALISE, "first", "first", "init")
-        store.finish(BisyncStateStore.INITIALISE, "first", "init", true, 0, "ok")
+        store.begin(BisyncStateStore.INITIALISE, "first", "first", "00000000-0000-0000-0000-000000000001")
+        store.finish(BisyncStateStore.INITIALISE, "first", "00000000-0000-0000-0000-000000000001", true, 0, "ok")
         assertTrue(BisyncStateStore.isReady(store.read(), "first"))
         assertFalse(BisyncStateStore.isReady(store.read(), "edited"))
     }
@@ -102,15 +102,15 @@ class BisyncStateTest {
         val store = store()
         store.begin(BisyncStateStore.PREVIEW, "original", null, "preview-initial")
         store.finish(BisyncStateStore.PREVIEW, "original", "preview-initial", true, 0, "ok")
-        store.begin(BisyncStateStore.INITIALISE, "original", "original", "initial")
-        store.finish(BisyncStateStore.INITIALISE, "original", "initial", true, 0, "ok")
+        store.begin(BisyncStateStore.INITIALISE, "original", "original", "00000000-0000-0000-0000-000000000002")
+        store.finish(BisyncStateStore.INITIALISE, "original", "00000000-0000-0000-0000-000000000002", true, 0, "ok")
         val before = store.read()
         assertTrue(BisyncStateStore.isAdvisoryPreview(before, "original"))
         assertFalse(BisyncStateStore.isAdvisoryPreview(before, "edited"))
         store.begin(BisyncStateStore.PREVIEW, "original", null, "advisory")
         store.finish(BisyncStateStore.PREVIEW, "original", "advisory", true, 0, "no changes")
         assertTrue(BisyncStateStore.isReady(store.read(), "original"))
-        assertEquals("initial", store.read().optString("baselineId"))
+        assertEquals("00000000-0000-0000-0000-000000000002", store.read().optString("baselineId"))
         assertFalse(BisyncStateStore.isPreviewApproved(store.read(), "original"))
         store.begin(BisyncStateStore.PREVIEW, "original", null, "advisory-failed")
         store.finish(BisyncStateStore.PREVIEW, "original", "advisory-failed", false, 3, "connection lost")
@@ -121,12 +121,45 @@ class BisyncStateTest {
         val store = store()
         store.begin(BisyncStateStore.PREVIEW, "old", null, "p1")
         store.finish(BisyncStateStore.PREVIEW, "old", "p1", true, 0, "ok")
-        store.begin(BisyncStateStore.INITIALISE, "old", "old", "baseline")
-        store.finish(BisyncStateStore.INITIALISE, "old", "baseline", true, 0, "ok")
+        store.begin(BisyncStateStore.INITIALISE, "old", "old", "00000000-0000-0000-0000-000000000003")
+        store.finish(BisyncStateStore.INITIALISE, "old", "00000000-0000-0000-0000-000000000003", true, 0, "ok")
         store.begin(BisyncStateStore.PREVIEW, "edited", null, "p2")
         store.finish(BisyncStateStore.PREVIEW, "edited", "p2", true, 0, "ok")
         assertFalse(BisyncStateStore.isReady(store.read(), "old"))
         assertTrue(BisyncStateStore.isPreviewApproved(store.read(), "edited"))
         assertThrows(IllegalArgumentException::class.java) { store.begin(BisyncStateStore.RUN, "old", null, "run") }
+    }
+
+    @Test fun firstRunReportsInitialisationInsteadOfParsingAnEmptyUuid() {
+        val error = assertThrows(IllegalArgumentException::class.java) {
+            BisyncStateStore.baselineForRun(store().read(), "current")
+        }
+        assertTrue(error.message!!.contains("Preview"))
+        assertTrue(error.message!!.contains("Initialise"))
+        assertFalse(error.message!!.contains("Invalid UUID"))
+    }
+
+    @Test fun malformedOrMissingBaselineCannotEnableRunOrAdvisoryPreview() {
+        for (baseline in listOf("", "broken", "1-1-1-1-1", "../escape")) {
+            val state = org.json.JSONObject().put("status", BisyncStateStore.READY)
+                .put("fingerprint", "current").put("baselineId", baseline)
+            assertFalse(BisyncStateStore.isReady(state, "current"))
+            assertFalse(BisyncStateStore.isAdvisoryPreview(state, "current"))
+            assertThrows(IllegalArgumentException::class.java) {
+                BisyncStateStore.baselineForRun(state, "current")
+            }
+        }
+    }
+
+    @Test fun savingRepairsMalformedTaskIdentityAndInvalidWorkdirHasAnActionableError() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        val task = Task(7).apply { direction = 6; bisyncUUID = "bad uuid" }
+        val error = assertThrows(IllegalArgumentException::class.java) { BisyncPolicy.workdir(context, task) }
+        assertTrue(error.message!!.contains("save"))
+        assertFalse(error.message!!.contains("Invalid UUID"))
+        val repaired = BisyncPolicy.identityForEdit(task, 6)
+        assertTrue(BisyncPolicy.isValidIdentity(repaired))
+        task.bisyncUUID = repaired
+        assertEquals(repaired, BisyncPolicy.identityForEdit(task, 6))
     }
 }

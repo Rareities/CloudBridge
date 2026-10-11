@@ -221,8 +221,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                 BisyncStateStore.PREVIEW -> File(directory, "previews/$id")
                 BisyncStateStore.INITIALISE -> File(directory, "baselines/$id")
                 BisyncStateStore.RUN -> {
-                    val baseline = state.read().optString("baselineId")
-                    require(java.util.UUID.fromString(baseline).toString() == baseline) { "The bisync baseline identity is invalid. Review initialisation again." }
+                    val baseline = BisyncStateStore.baselineForRun(state.read(), fingerprint)
                     File(directory, "baselines/$baseline").also {
                         require(it.isDirectory) { "The saved bisync baseline is missing. Review recovery before continuing." }
                     }
@@ -231,8 +230,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             }
             require(childDirectory.isDirectory || childDirectory.mkdirs()) { "Cannot create bisync working folder" }
             if (advisory) {
-                val baseline = state.read().getString("baselineId")
-                require(java.util.UUID.fromString(baseline).toString() == baseline) { "Invalid baseline identity" }
+                val baseline = BisyncStateStore.baselineForRun(state.read(), fingerprint)
                 val source = File(directory, "baselines/$baseline")
                 require(source.isDirectory) { "The saved baseline is missing" }
                 // Dry-run may write temporary listings. Copy the listings and the

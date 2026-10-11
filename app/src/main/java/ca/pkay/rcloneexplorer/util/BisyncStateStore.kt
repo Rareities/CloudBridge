@@ -19,7 +19,16 @@ class BisyncStateStore(private val directory: File) {
         private val ioLock = Any()
 
         @JvmStatic fun isReady(state: JSONObject, fingerprint: String): Boolean =
-            state.optString("status") == READY && state.optString("fingerprint") == fingerprint
+            state.optString("status") == READY && state.optString("fingerprint") == fingerprint &&
+                BisyncPolicy.isValidIdentity(state.optString("baselineId"))
+
+        /** Validate readiness before resolving any baseline directory, including a first Run. */
+        @JvmStatic fun baselineForRun(state: JSONObject, fingerprint: String): String {
+            require(isReady(state, fingerprint)) {
+                "Bisync needs initialisation or recovery, or its settings have changed. Open the task, run Preview, review the result and select Initialise before Run."
+            }
+            return state.getString("baselineId")
+        }
 
         /** Use this before begin(PREVIEW) to select ordinary dry-run on saved listings. */
         @JvmStatic fun isAdvisoryPreview(state: JSONObject, fingerprint: String): Boolean =
@@ -62,9 +71,7 @@ class BisyncStateStore(private val directory: File) {
     fun begin(operation: String, fingerprint: String, approval: String?, runId: String) = synchronized(ioLock) {
         val state = read()
         when (operation) {
-            RUN -> require(isReady(state, fingerprint)) {
-                "Bisync needs initialisation or recovery, or its settings have changed. Open the task and preview a new baseline."
-            }
+            RUN -> baselineForRun(state, fingerprint)
             INITIALISE -> {
                 require(approval == fingerprint && isPreviewApproved(state, fingerprint)) {
                     "Initialisation approval is missing, expired or no longer matches the task, configuration or engine. Run a new preview."
