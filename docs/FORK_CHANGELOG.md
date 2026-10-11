@@ -6,6 +6,33 @@ Integration merges are included without counting their features twice.
 
 ## 1.1.1-rc.1 — safety and bisync follow-up
 
+
+### Signed promotion and repository cleanup
+
+The reviewed application source is merged into `master` at
+[`fe23bd52`](https://github.com/Rareities/CloudBridge/commit/fe23bd52d90e46ca63384db4b174bc50b4a3cc05).
+[`461d911d`](https://github.com/Rareities/CloudBridge/commit/461d911d)
+removes temporary debug publishing and the test-branch signing exception;
+debug APK builds are now manual-only. No additional app source blocker was
+found during the aggregate follow-up review. The pinned engine is unchanged;
+rclone's documentation follow-up is merged at
+[`63bf067c`](https://github.com/Rareities/rclone/commit/63bf067cab7ceeddd330aaff45b0f8ffa9e51855).
+
+The [signed prerelease](https://github.com/Rareities/CloudBridge/releases/tag/v1.1.1-rc.1)
+contains five APKs with the previous release's package and certificate.
+176 host tests, lint, dependency checks, native regression checks and signed
+APK verification passed. The downloaded ARM64 APK was independently checked
+for its identity, certificate, checksum and native engine hash. The user
+reports the preceding debug build works perfectly; an independent device or
+live-account matrix was not run.
+
+Obsolete integration/test branches and old Actions artifacts were removed.
+Unmerged historical tips have archive tags; existing normal signed releases,
+current validation artifacts and active engine-review branches were retained.
+The exact audit scope, CI runs and cleanup inventory are recorded in
+[promotion-audit.json](validation/promotion-audit.json).
+
+
 Release candidate following 1.1.0-rc.1. Retains the pinned rclone engine
 `47048daf3c80e1de633ec9a1f09981f4c30f9a30`; no engine source patch is needed for
 these managed-app fixes.

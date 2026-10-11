@@ -1,0 +1,408 @@
+{
+  "release": "v1.1.1-rc.1",
+  "applicationSource": "fe23bd52d90e46ca63384db4b174bc50b4a3cc05",
+  "engineSource": "47048daf3c80e1de633ec9a1f09981f4c30f9a30",
+  "scope": {
+    "cloudbridgePublishedBaseline": "a6589372cbf86e0b72fb374b500ff81ac87cc7a6",
+    "cloudbridgeUpstreamBaseline": "ece9275441e448ec520a7cbc336c59bfe643b22c",
+    "aggregateFollowupReview": "passed; no additional concrete app blocker",
+    "priorForkAudit": "See docs/FORK_CHANGELOG.md for upstream/fork commit analysis"
+  },
+  "verification": {
+    "hostTests": 176,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "lint": "passed with existing baseline",
+    "instrumentationCompilation": "passed",
+    "signedBuildRun": "https://github.com/Rareities/CloudBridge/actions/runs/38138845773",
+    "signedBuildConclusion": "success",
+    "masterLintRun": 38138845480,
+    "masterDependencyAuditRun": 38138845484,
+    "rcloneRegressionRun": 38138863312,
+    "rcloneIntegrationRun": 38138863303,
+    "rcloneChecks": "success",
+    "releaseVersionTests": 6,
+    "independentSourceReview": "passed",
+    "independentCleanupReview": "passed",
+    "publishedAssetDigests": "all match SHA256SUMS.txt",
+    "downloadedArm64Signature": "verified with apksigner",
+    "applicationId": "de.schuelken.cloudbridge",
+    "arm64VersionCode": 117,
+    "debuggable": false,
+    "certificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+    "certificateMatchesPreviousSignedRelease": true,
+    "downloadedArm64EngineHashMatchesProvenance": true,
+    "allFiveApks": "CI verified signatures, engine hashes, ELF architecture, PIE and 16 KiB load alignment"
+  },
+  "deviceAcceptance": "User reports preceding debug build works perfectly; not an independently executed device or live-account matrix",
+  "limits": [
+    "No independent device or live-account testing in this promotion",
+    "No physical power-loss testing",
+    "Standalone rclone cannot enforce Android approval/account policy"
+  ],
+  "cleanup": {
+    "branchesRemoved": [
+      {
+        "repository": "Rareities/CloudBridge",
+        "branch": "test/bisync-startup-1.1.1-rc.1",
+        "sha": "42988641a5848c4560c6aedb85be1a1859849349"
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "branch": "feat/proton-bisync",
+        "sha": "e18a057f1c925510af6dd08d90f697a5ed9307b0"
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "branch": "codex/proton-bisync-integration",
+        "sha": "1339acc9fb7eb9a18c05afec66b162ff17d118f8"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "branch": "test/cloudbridge-1.1.1-rc.1",
+        "sha": "852525046bf0856349eee51b814d11057f2effb5"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "branch": "feat/proton-bisync",
+        "sha": "6a9f0fc48ca23660022fe24615bf5e988710d418"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "branch": "codex/cloudbridge-proton-bisync",
+        "sha": "fc35e4a8c75211abf6f1bca367af482a0aec68f7"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "branch": "audit/oss-proton-integration",
+        "sha": "c32e64db8f3df7b5a55627823009c67f57c1c01f"
+      }
+    ],
+    "artifactsRemoved": [
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11701475642,
+        "name": "bisync-debug-apks",
+        "bytes": 343764842
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11698940019,
+        "name": "signed-fork-distribution",
+        "bytes": 286745527
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11698295232,
+        "name": "bisync-debug-apks",
+        "bytes": 343723126
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11696954530,
+        "name": "Lint Reports",
+        "bytes": 164623
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11697853323,
+        "name": "runtime-dependency-provenance",
+        "bytes": 4834
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11697783230,
+        "name": "bisync-debug-apks",
+        "bytes": 343723110
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11697413164,
+        "name": "Lint Reports",
+        "bytes": 168744
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11697667566,
+        "name": "Lint Reports",
+        "bytes": 164053
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11697757381,
+        "name": "runtime-dependency-provenance",
+        "bytes": 4834
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11695263982,
+        "name": "bisync-debug-apks",
+        "bytes": 343683694
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11695538144,
+        "name": "Lint Reports",
+        "bytes": 159585
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11696460135,
+        "name": "Lint Reports",
+        "bytes": 159421
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11696006379,
+        "name": "bisync-debug-apks",
+        "bytes": 343683683
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11695424948,
+        "name": "runtime-dependency-provenance",
+        "bytes": 4834
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11695489269,
+        "name": "Lint Reports",
+        "bytes": 159720
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11695639083,
+        "name": "Lint Reports",
+        "bytes": 161554
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11695782310,
+        "name": "runtime-dependency-provenance",
+        "bytes": 4834
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11694914879,
+        "name": "runtime-dependency-provenance",
+        "bytes": 4834
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11693364466,
+        "name": "bisync-debug-apks",
+        "bytes": 296806167
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11693463639,
+        "name": "Lint Reports",
+        "bytes": 145831
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11692529946,
+        "name": "Lint Reports",
+        "bytes": 145981
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11691551846,
+        "name": "bisync-debug-apks",
+        "bytes": 296657342
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11690424360,
+        "name": "Lint Reports",
+        "bytes": 128598
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11691031995,
+        "name": "Lint Reports",
+        "bytes": 128608
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11691172783,
+        "name": "Lint Reports",
+        "bytes": 128626
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11691357441,
+        "name": "Lint Reports",
+        "bytes": 128609
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695144216,
+        "name": "engine-windows-amd64",
+        "bytes": 29821324
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695169175,
+        "name": "engine-linux-amd64",
+        "bytes": 29739619
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695074094,
+        "name": "engine-linux-arm64",
+        "bytes": 26963740
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695244139,
+        "name": "engine-darwin-amd64",
+        "bytes": 30094996
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695194013,
+        "name": "engine-darwin-arm64",
+        "bytes": 27814206
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695013567,
+        "name": "bisync-cli-evidence",
+        "bytes": 14348
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11694814094,
+        "name": "bisync-cli-evidence",
+        "bytes": 14351
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695387394,
+        "name": "bisync-cli-evidence",
+        "bytes": 14349
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695481077,
+        "name": "bisync-cli-evidence",
+        "bytes": 14343
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11693223299,
+        "name": "bisync-cli-evidence",
+        "bytes": 14341
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11692654207,
+        "name": "bisync-cli-evidence",
+        "bytes": 14348
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11692813328,
+        "name": "bisync-cli-evidence",
+        "bytes": 12637
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11692633643,
+        "name": "bisync-cli-evidence",
+        "bytes": 12639
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11693525865,
+        "name": "bisync-cli-evidence",
+        "bytes": 9644
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11693251520,
+        "name": "bisync-cli-evidence",
+        "bytes": 12637
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11692034443,
+        "name": "bisync-cli-evidence",
+        "bytes": 12627
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11691874606,
+        "name": "bisync-cli-evidence",
+        "bytes": 12629
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11692776029,
+        "name": "bisync-cli-evidence",
+        "bytes": 9640
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11692303756,
+        "name": "bisync-cli-evidence",
+        "bytes": 9447
+      }
+    ],
+    "temporaryTagsRemoved": [
+      {
+        "repository": "Rareities/CloudBridge",
+        "tag": "test-bisync-startup-d4521de6"
+      }
+    ],
+    "retainedArtifacts": [
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11701219574,
+        "name": "signed-fork-distribution"
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11701333698,
+        "name": "Lint Reports"
+      },
+      {
+        "repository": "Rareities/CloudBridge",
+        "id": 11702063573,
+        "name": "runtime-dependency-provenance"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11701373588,
+        "name": "bisync-cli-evidence"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "id": 11695791706,
+        "name": "bisync-cli-evidence"
+      }
+    ],
+    "preservedArchives": [
+      {
+        "repository": "Rareities/CloudBridge",
+        "branch": "codex/proton-bisync-integration",
+        "tag": "archive/cloudbridge-codex-proton-bisync-1339acc9",
+        "sha": "1339acc9fb7eb9a18c05afec66b162ff17d118f8"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "branch": "codex/cloudbridge-proton-bisync",
+        "tag": "archive/rclone-codex-cloudbridge-proton-bisync-fc35e4a8",
+        "sha": "fc35e4a8c75211abf6f1bca367af482a0aec68f7"
+      },
+      {
+        "repository": "Rareities/rclone",
+        "branch": "audit/oss-proton-integration",
+        "tag": "archive/rclone-oss-proton-integration-c32e64db",
+        "sha": "c32e64db8f3df7b5a55627823009c67f57c1c01f"
+      }
+    ]
+  }
+}
