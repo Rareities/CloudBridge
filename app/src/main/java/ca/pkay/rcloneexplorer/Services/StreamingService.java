@@ -39,6 +39,7 @@ public class StreamingService extends IntentService {
     private final int PERSISTENT_NOTIFICATION_ID = 179;
     private Rclone rclone;
     private Process runningProcess;
+    private volatile ca.pkay.rcloneexplorer.util.NativePipeTransfer transfer;
 
     /**
      * Creates an IntentService.  Invoked by your subclass's constructor.*
@@ -72,7 +73,7 @@ public class StreamingService extends IntentService {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags = PendingIntent.FLAG_IMMUTABLE;
         }
-        Intent foregroundIntent = new Intent(this, StreamingService.class);
+        Intent foregroundIntent = new Intent(this, ca.pkay.rcloneexplorer.Activities.MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, foregroundIntent, flags);
 
         Intent cancelIntent = new Intent(this, ServeCancelAction.class);
@@ -96,6 +97,7 @@ public class StreamingService extends IntentService {
 
         startForeground(PERSISTENT_NOTIFICATION_ID, builder.build());
 
+        try {
         switch (protocol) {
             case SERVE_FTP:
                 runningProcess = rclone.serve(Rclone.SERVE_PROTOCOL_FTP, port, allowRemoteAccess, authenticationUsername, authenticationPassword, remote, servePath);
@@ -112,29 +114,29 @@ public class StreamingService extends IntentService {
                 break;
         }
 
-        boolean exitedNormally = false;
-        if (runningProcess != null) {
-            try {
-                runningProcess.waitFor();
-                exitedNormally = true;
-            } catch (InterruptedException e) {
-                FLog.e(TAG, "onHandleIntent: error waiting for process", e);
-            }
-        }
-
-        if (exitedNormally && runningProcess.exitValue() != 0) {
-            rclone.logErrorOutput(runningProcess);
-        }
-
-        stopForeground(true);
+        if (runningProcess == null) throw new java.io.IOException("Listener could not be started");
+        transfer = new ca.pkay.rcloneexplorer.util.NativePipeTransfer(runningProcess, true);
+        transfer.output().close();
+        transfer.awaitSuccessfulExit();
+        } catch (Exception error) {
+            FLog.e(TAG, "Streaming stopped: %s", ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(error.getMessage()));
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                    android.widget.Toast.makeText(getApplicationContext(), "Streaming stopped: " +
+                            ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(error.getMessage()), android.widget.Toast.LENGTH_LONG).show());
+        } finally { stopForeground(true); }
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (null != runningProcess) {
-            runningProcess.destroy();
-        }
+        if (transfer != null) transfer.cancel();
+        else if (runningProcess != null) runningProcess.destroy();
+    }
+
+    @Override public void onTimeout(int startId, int fgsType) {
+        if (transfer != null) transfer.cancel();
+        stopForeground(true);
+        stopSelf(startId);
     }
 
     private void setNotificationChannel() {

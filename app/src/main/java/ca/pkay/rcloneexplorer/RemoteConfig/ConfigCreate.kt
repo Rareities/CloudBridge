@@ -11,6 +11,7 @@ import android.content.Intent
 import android.view.View
 import ca.pkay.rcloneexplorer.Activities.MainActivity
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.ProcessRunner
 import java.util.ArrayList
 
 @SuppressLint("StaticFieldLeak")
@@ -23,7 +24,8 @@ class ConfigCreate internal constructor(
     private val providerType: String = ""
 ) : AsyncTask<Void?, Void?, Boolean>() {
     private val options: ArrayList<String>
-    private var process: Process? = null
+    @Volatile private var process: Process? = null
+    @Volatile private var activeRunner: ProcessRunner? = null
     private val mContext: Context
     private val mRclone: Rclone
     private val mFormView: View
@@ -100,38 +102,18 @@ class ConfigCreate internal constructor(
         val createProc = process!!
         android.util.Log.e(TAG, "Step 1: Waiting for config create to finish...")
         
-        // Drain output to prevent blocking
-        Thread {
-            try {
-                createProc.inputStream.bufferedReader().forEachLine { }
-            } catch (e: Exception) {}
-        }.start()
-        Thread {
-            try {
-                createProc.errorStream.bufferedReader().forEachLine { }
-            } catch (e: Exception) {}
-        }.start()
-        
-        try {
-            val finished = createProc.waitFor(1, java.util.concurrent.TimeUnit.MINUTES)
-            val exitCode = if (finished) createProc.exitValue() else -1
-            android.util.Log.e(TAG, "Step 1 finished=$finished, exitCode=$exitCode")
-            if (exitCode != 0) {
-                android.util.Log.e(TAG, "Step 1 failed! Aborting configuration.")
-                return false
-            }
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Step 1 EXCEPTION: ${e.message}")
-            createProc.destroyForcibly()
-            return false
-        }
+        val createRunner = ProcessRunner().also { activeRunner = it }
+        val createDeadline = android.os.SystemClock.elapsedRealtime() + 60_000L
+        val created = createRunner.run(createProc,
+            { isCancelled || android.os.SystemClock.elapsedRealtime() >= createDeadline }, null, null)
+        if (!created.success() || isCancelled) return false
         
         // Extract remote name from options (first element)
         val remoteName = if (options.isNotEmpty()) options[0] else {
             android.util.Log.e(TAG, "ERROR: options empty, cannot get remote name")
             return false
         }
-        android.util.Log.e(TAG, "Step 2: Running config reconnect for '$remoteName'...")
+        android.util.Log.d(TAG, "Starting remote authentication")
         
         // Step 2: Run config reconnect to complete the interactive auth
         return runConfigReconnect(remoteName)
@@ -141,12 +123,12 @@ class ConfigCreate internal constructor(
      * Runs config reconnect to complete Internxt authentication.
      * Handles both 2FA and mnemonic confirmation interactively.
      */
-    private fun runConfigReconnect(remoteName: String): Boolean {
+    internal fun runConfigReconnect(remoteName: String): Boolean {
         var state = ""
         var result = ""
-        var isDone = false
+        var remainingSteps = 32
 
-        while (!isDone) {
+        while (!isCancelled && remainingSteps-- > 0) {
             val options = arrayListOf(remoteName, "--non-interactive", "--no-obscure")
             if (state.isNotEmpty()) {
                 options.add("--continue")
@@ -158,59 +140,27 @@ class ConfigCreate internal constructor(
 
             android.util.Log.e(TAG, "Running Internxt config update")
             val proc = mRclone.config("update", options) ?: return false
+            process = proc
 
             val jsonOutput = java.lang.StringBuilder()
-            // Read stdout (JSON output from rclone)
-            val outputReader = Thread {
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(proc.inputStream))
-                try {
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        jsonOutput.append(line).append("\n")
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Output reader error", e)
-                }
-            }
-
-            // Drain stderr without retaining sensitive auth output.
-            val errorReader = Thread {
-                val reader = java.io.BufferedReader(java.io.InputStreamReader(proc.errorStream))
-                try {
-                    var line: String?
-                    while (reader.readLine().also { line = it } != null) {
-                        // Keep draining so rclone cannot block on a full pipe.
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Error reader error", e)
-                }
-            }
-
-            outputReader.start()
-            errorReader.start()
-
-            val completed = proc.waitFor(2, java.util.concurrent.TimeUnit.MINUTES)
-            outputReader.join(1000)
-            errorReader.join(1000)
-
-            if (!completed) {
-                android.util.Log.e(TAG, "Config update timed out")
-                proc.destroyForcibly()
-                return false
-            }
-
-            val exitCode = proc.exitValue()
-            if (exitCode != 0) {
-                android.util.Log.e(TAG, "rclone config update failed with exit code $exitCode")
-                return false
-            }
+            val overflow = java.util.concurrent.atomic.AtomicBoolean()
+            val runner = ProcessRunner().also { activeRunner = it }
+            val deadline = android.os.SystemClock.elapsedRealtime() + 120_000L
+            val outcome = runner.run(proc,
+                { isCancelled || overflow.get() || android.os.SystemClock.elapsedRealtime() >= deadline },
+                { line ->
+                    if (jsonOutput.length + line.length + 1 > 128 * 1024) {
+                        overflow.set(true)
+                        runner.requestStop()
+                    } else jsonOutput.append(line).append('\n')
+                }, null)
+            if (!outcome.success() || isCancelled || overflow.get()) return false
 
             val jsonStr = jsonOutput.toString().trim()
             if (jsonStr.isEmpty()) {
                 // Empty JSON means complete
-                isDone = true
                 android.util.Log.e(TAG, "Config state machine finished successfully")
-                break
+                return true
             }
 
             try {
@@ -218,9 +168,8 @@ class ConfigCreate internal constructor(
                 state = json.optString("State", "")
                 
                 if (state.isEmpty()) {
-                    isDone = true
                     android.util.Log.e(TAG, "Config state machine reached terminal state")
-                    break
+                    return true
                 }
 
                 val optionObj = json.optJSONObject("Option")
@@ -232,7 +181,7 @@ class ConfigCreate internal constructor(
                         result = getTwoFactorCodeFromUser()
                     } else if (helpText.contains("password", ignoreCase = true)) {
                         result = "" 
-                        android.util.Log.e(TAG, "JSON requested password/unknown: $helpText")
+                        android.util.Log.d(TAG, "Authentication requested another credential")
                     } else {
                         // Any other prompt, default to empty
                         result = ""
@@ -242,11 +191,11 @@ class ConfigCreate internal constructor(
                     result = ""
                 }
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to parse rclone JSON output", e)
+                android.util.Log.e(TAG, "Invalid authentication response")
                 return false
             }
         }
-        return true
+        return false
     }
 
     private fun getAuthPreferenceFromUser(): String {
@@ -367,7 +316,7 @@ class ConfigCreate internal constructor(
 
     override fun onCancelled() {
         super.onCancelled()
-        process?.destroy()
+        activeRunner?.requestStop()
     }
 
     override fun onPostExecute(success: Boolean) {

@@ -1,295 +1,159 @@
-// This is the rclone build script. It can build rclone binaries for any target
-// architecture on any target architecture.
-//
-// Supported Android targets:
-//  - arm-v8a (64 bit arm)
-//  - arm-v7a (32 bit arm7)
-//  - x86 (32 bit)
-//  - x64 (64 bit)
-//
-// Supported host systems:
-//  - linux x64
-//  - macOS x64
-//  - macOS arm64 (Silicon)
-//  - windows x64
-//
-// Prerequisites:
-//  - go 1.25+
-//  - Either Android SDK command-line tools, or the expected NDK version (see gradle.properties).
-//
-// rclone source:
-//  Cloned from the URL and ref specified in gradle.properties
-//  (de.schuelken.cloudbridge.rCloneRepoUrl and rCloneRef).
-//  To upgrade: change rCloneRef (or rCloneRepoUrl) and rebuild.
-
-
-import java.nio.file.Paths
+// A pinned Android PIE executable uses bionic DNS, preserving Android Private DNS/VPN policy.
+import groovy.json.JsonOutput
+import java.security.MessageDigest
 
 ext {
-    NDK_VERSION = project.properties['de.schuelken.cloudbridge.ndkVersion']
-    NDK_TOOLCHAIN_VERSION = project.properties['de.schuelken.cloudbridge.ndkToolchainVersion']
-    RCLONE_VERSION = project.properties['de.schuelken.cloudbridge.rCloneVersion']
+    RCLONE_REPO_URL = project.properties['de.schuelken.cloudbridge.rCloneRepoUrl']
+    RCLONE_REF = project.properties['de.schuelken.cloudbridge.rCloneRef']
     GO_REQ_VERSION = project.properties['de.schuelken.cloudbridge.goVersion']
-
-    RCLONE_REPO_URL = project.findProperty('de.schuelken.cloudbridge.rCloneRepoUrl') ?: 'https://github.com/rclone/rclone.git'
-    RCLONE_REF = project.findProperty('de.schuelken.cloudbridge.rCloneRef') ?: "v${RCLONE_VERSION}"
-
-    PROJECT_DIR = projectDir.absolutePath
-    CACHE_PATH = Paths.get(PROJECT_DIR, 'cache').toString()
-    GOPATH = Paths.get(CACHE_PATH, 'gopath').toString()
-    OUTPUT_BASE_PATH = Paths.get(PROJECT_DIR, '..', 'app', 'lib').toAbsolutePath().toString()
+    CACHE_PATH = new File(projectDir, 'cache')
+    SOURCE_PATH = new File(CACHE_PATH, 'rclone-src')
+    OUTPUT_PATH = new File(rootProject.projectDir, 'app/lib')
+    PROVENANCE_PATH = new File(rootProject.projectDir, 'app/build/generated/rcloneAssets')
 }
 
-def findSdkDir() {
-    def androidHome = System.getenv('ANDROID_HOME')
-    if (androidHome != null) {
-        return androidHome
-    }
-
-    def localPropertiesFile = project.rootProject.file('local.properties')
-    if (localPropertiesFile.exists()) {
-        Properties properties = new Properties()
-        properties.load(localPropertiesFile.newDataInputStream())
-        def sdkDir = properties.get('sdk.dir')
-        if (sdkDir != null) {
-            return sdkDir
-        }
-    }
-
-    throw new GradleException(
-        "Couldn't locate your android SDK. Make sure you set sdk.dir property"
-        + " in your local.properties at the root of the project or set"
-        + " ANDROID_HOME environment variable."
-    )
+def capture(List<String> arguments, File directory = projectDir) {
+    def output = new ByteArrayOutputStream()
+    exec { workingDir directory; commandLine arguments; standardOutput output }
+    return output.toString('UTF-8').trim()
 }
 
-def findNdkDir() {
-    def sdkDir = findSdkDir()
-    def ndkPath = Paths.get(sdkDir, 'ndk', NDK_VERSION).toAbsolutePath()
-    if (!ndkPath.toFile().exists()) {
-        def sdkManagerPath = Paths.get(
-            sdkDir,
-            'cmdline-tools',
-            'latest',
-            'bin',
-            'sdkmanager'
-        ).toString()
-        if (System.properties['os.name'].startsWith('Windows')) {
-            sdkManagerPath += '.bat'
-        }
-        try {
-            exec {
-                commandLine sdkManagerPath, "--install", "ndk;${NDK_VERSION}"
-            }
-        } catch (exc) {
-            logger.error(exc.toString())
-            throw new GradleException(
-                "Couldn't find a ndk bundle in ${ndkPath.toString()}. Make sure that you have the"
-                + " proper version installed in Android Studio's SDK Manager or run"
-                + " \"${sdkManagerPath} --install 'ndk;${NDK_VERSION}'\"."
-            )
-        }
+def hashFile(File file) {
+    def digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
     }
-    return ndkPath.toString()
+    return digest.digest().collect { String.format('%02x', it & 0xff) }.join('')
 }
 
-def getCrossCompiler(abi) {
-    def osName = System.properties['os.name']
-    def osArch = System.getProperty('os.arch')
-    def os = null
-    def isWindows = osName.startsWith('Windows')
-    if (isWindows && osArch == 'amd64') {
-        os = 'windows-x86_64'
-    } else if (osName.startsWith('Linux') && (osArch == 'amd64' || osArch == 'aarch64' || osArch == 'arm64')) {
-        os = 'linux-x86_64'
-    } else if (osName.startsWith('Mac') && ['aarch64', 'amd64'].contains(osArch)) {
-        os = 'darwin-x86_64'
-    }
-    if (os == null) {
-        throw new GradleException('Unsupported host OS or architecture.')
-    }
+def targets = [
+    'armeabi-v7a': [arch: 'arm', arm: '7', machine: 40, elfClass: 1, triple: 'armv7a-linux-androideabi'],
+    'arm64-v8a': [arch: 'arm64', machine: 183, elfClass: 2, triple: 'aarch64-linux-android'],
+    'x86': [arch: '386', machine: 3, elfClass: 1, triple: 'i686-linux-android'],
+    'x86_64': [arch: 'amd64', machine: 62, elfClass: 2, triple: 'x86_64-linux-android'],
+]
 
-    def abiToCompiler = [
-        'armeabi-v7a': "armv7a-linux-androideabi${NDK_TOOLCHAIN_VERSION}-clang",
-        'arm64-v8a': "aarch64-linux-android${NDK_TOOLCHAIN_VERSION}-clang",
-        'x86': "i686-linux-android${NDK_TOOLCHAIN_VERSION}-clang",
-        'x86_64': "x86_64-linux-android${NDK_TOOLCHAIN_VERSION}-clang",
-    ]
-
-    def compilerName = abiToCompiler[abi]
-    if (isWindows) {
-        compilerName += '.cmd'
+def androidCompiler(String triple) {
+    def sdk = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+    if (!sdk) {
+        def local = rootProject.file('local.properties')
+        def settings = new Properties()
+        if (local.isFile()) local.withInputStream { settings.load(it) }
+        sdk = settings.getProperty('sdk.dir')
     }
-
-    return Paths.get(
-        findNdkDir(),
-        'toolchains',
-        'llvm',
-        'prebuilt',
-        os,
-        'bin',
-        compilerName,
-    ).toString()
+    if (!sdk) throw new GradleException('Set ANDROID_HOME or sdk.dir before building the Android engine')
+    def windows = System.getProperty('os.name').startsWith('Windows')
+    def host = windows ? 'windows-x86_64' : System.getProperty('os.name').startsWith('Mac') ? 'darwin-x86_64' : 'linux-x86_64'
+    def ndk = project.properties['de.schuelken.cloudbridge.ndkVersion']
+    def api = project.properties['de.schuelken.cloudbridge.ndkToolchainVersion']
+    if (api != '23') throw new GradleException('The engine minimum API must match the application minimum API 23')
+    def compiler = new File(sdk, "ndk/${ndk}/toolchains/llvm/prebuilt/${host}/bin/clang${windows ? '.exe' : ''}")
+    if (!compiler.isFile()) throw new GradleException("Install the pinned Android NDK: sdkmanager 'ndk;${ndk}'")
+    return '"' + compiler.absolutePath + '" --target=' + triple + api
 }
 
-def getCC(abi) {
-    def osName = System.properties['os.name']
-    if (osName.startsWith('Windows')) {
-        return null
-    }
-    return getCrossCompiler(abi)
-}
-
-def getOutputPath(abi) {
-    return Paths.get(OUTPUT_BASE_PATH, abi, 'librclone.so').toString()
-}
-
-def getSourceVersion() {
-    def versionFile = Paths.get(CACHE_PATH, 'rclone-src', 'VERSION').toFile()
-    if (versionFile.exists()) {
-        return versionFile.text.trim()
-    }
-    return RCLONE_VERSION
-}
-
-def buildRclone(abi) {
-    def abiToEnv = [
-        'armeabi-v7a': ['GOARCH': 'arm', 'GOARM': '7'],
-        'arm64-v8a': ['GOARCH': 'arm64'],
-        'x86': ['GOARCH': '386'],
-        'x86_64': ['GOARCH': 'amd64'],
-    ]
-
-    return {
-        doLast {
-            def commonEnv = [
-                'GOPATH'      : GOPATH,
-                'GOOS'        : 'linux',
-                'CGO_ENABLED' : '0',
-            ] + abiToEnv[abi]
-
-            exec {
-                commonEnv.each { k, v -> environment k, v }
-                workingDir Paths.get(CACHE_PATH, 'rclone-src').toString()
-                def ldflags = "-s -w -X github.com/rclone/rclone/fs.Version=${getSourceVersion()}"
-                commandLine (
-                    'go',
-                    'build',
-                    '-tags',
-                    'noselfupdate',
-                    '-trimpath',
-                    '-ldflags',
-                    ldflags,
-                    '-o',
-                    getOutputPath(abi),
-                    '.'
-                )
-            }
-        }
-    }
-}
-
-task createRcloneModule {
-    onlyIf { !Paths.get(CACHE_PATH, 'go.mod').toFile().exists() }
+tasks.register('checkoutRclone') {
     doLast {
-        Paths.get(CACHE_PATH).toFile().mkdirs()
-        exec {
-            workingDir CACHE_PATH
-            environment 'GOPATH', GOPATH
-            commandLine 'go', 'mod', 'init', 'rclone'
-        }
-    }
-}
-
-task checkoutRclone(dependsOn: createRcloneModule) {
-    doLast {
-        def goVersionOutput = new ByteArrayOutputStream()
-        exec {
-            commandLine 'go', 'version'
-            standardOutput = goVersionOutput
-        }
-
-        // BUILD-019: fail the build on an incompatible Go toolchain, which would produce an
-        // untested/broken librclone.so. Accept any patch of the required minor (e.g. a "1.25.0"
-        // requirement accepts "1.25.11") and any newer minor, since Go stays forward-compatible.
-        def goMatcher = goVersionOutput.toString() =~ /go(\d+)\.(\d+)\.(\d+)/
-        if (!goMatcher.find()) {
-            throw new GradleException("Unable to determine Go version from: ${goVersionOutput}")
-        }
-        def installedMajor = goMatcher[0][1] as int
-        def installedMinor = goMatcher[0][2] as int
-        def reqParts = GO_REQ_VERSION.tokenize('.')
-        def reqMajor = reqParts[0] as int
-        def reqMinor = reqParts.size() > 1 ? (reqParts[1] as int) : 0
-        if (installedMajor > reqMajor || (installedMajor == reqMajor && installedMinor >= reqMinor)) {
-            println "You are running a compatible Go version (${GO_REQ_VERSION} required, got ${goMatcher[0][0]})."
+        if (!(RCLONE_REF ==~ /[0-9a-f]{40}/)) throw new GradleException('rCloneRef must be an immutable, full commit SHA')
+        if (new URI(RCLONE_REPO_URL).userInfo != null) throw new GradleException('Do not embed credentials in rCloneRepoUrl')
+        def go = capture(['go', 'version'])
+        def matcher = go =~ /go(\d+)\.(\d+)\.(\d+)/
+        if (!matcher.find()) throw new GradleException('Cannot determine installed Go version')
+        def wanted = GO_REQ_VERSION.tokenize('.').collect { it as int }
+        def major = matcher.group(1) as int
+        def minor = matcher.group(2) as int
+        def patch = matcher.group(3) as int
+        if (major < wanted[0] || (major == wanted[0] && (minor < wanted[1] ||
+                (minor == wanted[1] && patch < wanted[2]))))
+            throw new GradleException("Go ${GO_REQ_VERSION} or newer is required; found ${go}")
+        CACHE_PATH.mkdirs()
+        if (!new File(SOURCE_PATH, '.git').isDirectory()) {
+            if (SOURCE_PATH.exists() && SOURCE_PATH.list().length > 0)
+                throw new GradleException('The engine cache is not a Git checkout; move it aside before rebuilding')
+            SOURCE_PATH.mkdirs()
+            exec { workingDir SOURCE_PATH; commandLine 'git', 'init' }
+            exec { workingDir SOURCE_PATH; commandLine 'git', 'remote', 'add', 'origin', RCLONE_REPO_URL }
         } else {
-            throw new GradleException("The required go version is: ${GO_REQ_VERSION}. You are running: ${goVersionOutput}")
+            if (!capture(['git', 'status', '--porcelain'], SOURCE_PATH).isEmpty())
+                throw new GradleException('The fetched engine checkout contains edits. Preserve them before changing the engine pin.')
+            if (capture(['git', 'remote', 'get-url', 'origin'], SOURCE_PATH) != RCLONE_REPO_URL)
+                exec { workingDir SOURCE_PATH; commandLine 'git', 'remote', 'set-url', 'origin', RCLONE_REPO_URL }
         }
-
-        def srcDir = Paths.get(CACHE_PATH, 'rclone-src').toFile()
-
-        if (!srcDir.exists()) {
-            println "Cloning rclone from ${RCLONE_REPO_URL} (ref: ${RCLONE_REF}) ..."
-            exec {
-                workingDir CACHE_PATH
-                commandLine 'git', 'clone', '--no-tags', RCLONE_REPO_URL, 'rclone-src'
-            }
-        }
-
-        // Always sync to the requested ref so upgrades work without manual cache clears
-        println "Syncing rclone source to ref: ${RCLONE_REF}"
-        exec {
-            workingDir srcDir.absolutePath
-            commandLine 'git', 'fetch', 'origin', '--tags'
-        }
-        exec {
-            workingDir srcDir.absolutePath
-            commandLine 'git', 'checkout', RCLONE_REF
-        }
-
-        // Print resolved commit and version for traceability
-        def commitOut = new ByteArrayOutputStream()
-        exec {
-            workingDir srcDir.absolutePath
-            commandLine 'git', 'rev-parse', '--short', 'HEAD'
-            standardOutput = commitOut
-        }
-        def version = getSourceVersion()
-        println "rclone source: commit=${commitOut.toString().trim()} version=${version} (from ${RCLONE_REPO_URL})"
+        exec { workingDir SOURCE_PATH; commandLine 'git', 'fetch', '--depth=1', 'origin', RCLONE_REF }
+        exec { workingDir SOURCE_PATH; commandLine 'git', 'checkout', '--detach', RCLONE_REF }
+        if (capture(['git', 'rev-parse', 'HEAD'], SOURCE_PATH) != RCLONE_REF)
+            throw new GradleException('Resolved engine commit does not match the approved pin')
+        logger.lifecycle("Engine: ${RCLONE_REPO_URL} @ ${RCLONE_REF}; ${go}")
     }
 }
 
-task buildArm(dependsOn: checkoutRclone) {
-    configure buildRclone('armeabi-v7a')
+def builds = []
+targets.each { abi, target ->
+    builds.add(tasks.register('build-' + abi) {
+        dependsOn 'checkoutRclone'
+        inputs.property('engineCommit', RCLONE_REF)
+        inputs.property('engineRepository', RCLONE_REPO_URL)
+        inputs.property('goRequirement', GO_REQ_VERSION)
+        inputs.property('ndkVersion', project.properties['de.schuelken.cloudbridge.ndkVersion'])
+        inputs.property('nativePolicy', 'android-cgo-pie-api23-16k')
+        outputs.file(new File(OUTPUT_PATH, "${abi}/librclone.so"))
+        // Record outputs so Gradle invalidates its virtual filesystem snapshots
+        // after Go writes the native executables outside Gradle's file APIs.
+        outputs.upToDateWhen { false }
+        doLast {
+            def destination = new File(OUTPUT_PATH, "${abi}/librclone.so")
+            destination.parentFile.mkdirs()
+            def sourceVersion = new File(SOURCE_PATH, 'VERSION').text.trim()
+            exec {
+                workingDir SOURCE_PATH
+                environment 'GOOS', 'android'
+                environment 'GOARCH', target.arch
+                environment 'CGO_ENABLED', '1'
+                environment 'CC', androidCompiler(target.triple)
+                if (target.arm) environment 'GOARM', target.arm
+                commandLine 'go', 'build', '-mod=readonly', '-buildvcs=true', '-buildmode=pie', '-tags', 'noselfupdate',
+                        '-trimpath', '-ldflags', "-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384 -X github.com/rclone/rclone/fs.Version=${sourceVersion}-cloudbridge.${RCLONE_REF.take(12)}",
+                        '-o', destination.absolutePath, '.'
+            }
+            byte[] header = new byte[20]
+            destination.withInputStream { if (it.read(header) != 20) throw new GradleException('Engine binary is truncated') }
+            def machine = (header[18] & 0xff) | ((header[19] & 0xff) << 8)
+            if (header[0] != 0x7f || header[1] != 0x45 || header[2] != 0x4c || header[3] != 0x46 ||
+                    header[4] != target.elfClass || header[16] != 3 || header[17] != 0 || machine != target.machine)
+                throw new GradleException("The generated binary is not the expected ${abi} ELF executable")
+        }
+    })
 }
 
-task buildArm64(dependsOn: checkoutRclone) {
-    configure buildRclone('arm64-v8a')
-}
-
-task buildx86(dependsOn: checkoutRclone) {
-    configure buildRclone('x86')
-}
-
-task buildx64(dependsOn: checkoutRclone) {
-    configure buildRclone('x86_64')
-}
-
-task buildAll {
-    dependsOn buildArm, buildArm64, buildx86, buildx64
-}
-
-task clean {
+tasks.register('buildAll') {
+    dependsOn builds
+    outputs.dir(PROVENANCE_PATH)
+    outputs.upToDateWhen { false }
     doLast {
-        exec {
-            environment 'GOPATH', GOPATH
-            commandLine 'go', 'clean', '-cache', '-testcache', '-modcache', '-fuzzcache'
+        PROVENANCE_PATH.mkdirs()
+        def outputs = targets.collect { abi, ignored ->
+            def binary = new File(OUTPUT_PATH, "${abi}/librclone.so")
+            [abi: abi, sha256: hashFile(binary), bytes: binary.length()]
         }
+        def provenance = [schemaVersion: 1, repository: RCLONE_REPO_URL, commit: RCLONE_REF,
+            sourceVersion: new File(SOURCE_PATH, 'VERSION').text.trim(), goToolchain: capture(['go', 'version']),
+            goos: 'android', cgoEnabled: true, buildMode: 'pie', androidApi: 23, maxPageSize: 16384,
+            ndkVersion: project.properties['de.schuelken.cloudbridge.ndkVersion'],
+            buildTags: ['noselfupdate'], artifacts: outputs]
+        new File(PROVENANCE_PATH, 'engine-provenance.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(provenance))
+        new File(PROVENANCE_PATH, 'engine-modules.txt').text = capture(['go', 'list', '-m', '-mod=readonly',
+            '-f', '{{.Path}} {{.Version}}{{if .Replace}} => {{.Replace.Path}} {{.Replace.Version}}{{end}}', 'all'], SOURCE_PATH) + '\n'
+    }
+}
+
+tasks.register('clean') {
+    doLast {
+        // Only project-generated files are removed. Never clear the user's shared Go caches.
         delete CACHE_PATH
-        delete fileTree(OUTPUT_BASE_PATH).matching {
-            include '**/librclone.so'
-        }
+        delete PROVENANCE_PATH
+        delete fileTree(OUTPUT_PATH).matching { include '**/librclone.so' }
     }
 }
 

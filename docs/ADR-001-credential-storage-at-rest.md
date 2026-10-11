@@ -1,7 +1,11 @@
 # ADR-001: Encryption of cloud credentials at rest
 
-Status: PROPOSED — design gate for remediation item RC-3 (High security).
-Target: implement before the next feature release.
+Status: SUPERSEDED by [ADR-002: native rclone configuration encryption](ADR-002-native-rclone-config.md).
+
+The text below is the historical proposal, not the implemented storage design.
+The app uses native rclone configuration encryption and a Keystore-wrapped
+password. It does not use the proposed EncryptedFile/Tink shim or delete
+credentials automatically after a key failure.
 
 ## Context & problem
 

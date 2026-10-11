@@ -61,7 +61,7 @@
             android:launchMode="singleTask"
             android:noHistory="true"
             android:taskAffinity=""
-            android:theme="@style/HiddenWindowShortcutSyncStartTheme" />
+            android:theme="@style/AppTheme.NoActionBar" />
 
         <provider
             android:name=".VirtualContentProvider"
@@ -105,6 +105,9 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
         <receiver

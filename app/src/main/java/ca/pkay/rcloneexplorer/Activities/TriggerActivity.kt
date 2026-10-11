@@ -1,298 +1,182 @@
 package ca.pkay.rcloneexplorer.Activities
 
-
-import androidx.appcompat.app.AppCompatActivity
-import ca.pkay.rcloneexplorer.Database.DatabaseHandler
-import androidx.cardview.widget.CardView
-import android.widget.EditText
-import android.widget.CheckBox
-import android.widget.Spinner
-import android.widget.TimePicker
 import android.os.Bundle
-import ca.pkay.rcloneexplorer.util.ActivityHelper
-import ca.pkay.rcloneexplorer.R
-import es.dmoral.toasty.Toasty
-import com.google.android.material.floatingactionbutton.FloatingActionButton
-import android.text.TextWatcher
 import android.text.Editable
-import android.text.format.DateFormat
+import android.text.TextWatcher
 import android.view.View
-import android.widget.CompoundButton
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.Spinner
+import android.widget.TextView
+import android.widget.TimePicker
+import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.WindowCompat
+import ca.pkay.rcloneexplorer.Database.DatabaseHandler
 import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
+import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Services.TriggerService
+import ca.pkay.rcloneexplorer.util.ActivityHelper
+import ca.pkay.rcloneexplorer.util.ScheduleCalculator
+import ca.pkay.rcloneexplorer.workmanager.ScheduleDispatchWorker
+import com.google.android.material.floatingactionbutton.FloatingActionButton
+import es.dmoral.toasty.Toasty
+import java.text.DateFormat
+import java.util.Date
+import java.util.TimeZone
 
 class TriggerActivity : AppCompatActivity() {
-
-    companion object {
-        const val ID_EXTRA = "TRIGGER_EDIT_ID"
-    }
-
-    private lateinit var mTrigger: Trigger
-    private lateinit var dbHandler: DatabaseHandler
-    private var mTaskList: List<Task> = ArrayList()
-
-    private lateinit var mCardInterval: CardView
-    private lateinit var mCardWeekday: CardView
-    private lateinit var mCardTime: CardView
-
-    private lateinit var mTitle: EditText
-    private lateinit var mEnabled: CheckBox
-    private lateinit var mType: Spinner
-    private lateinit var mInterval: Spinner
-
-    private lateinit var mWeekdayMon: CheckBox
-    private lateinit var mWeekdayTue: CheckBox
-    private lateinit var mWeekdayWed: CheckBox
-    private lateinit var mWeekdayThu: CheckBox
-    private lateinit var mWeekdayFri: CheckBox
-    private lateinit var mWeekdaySat: CheckBox
-    private lateinit var mWeekdaySun: CheckBox
-
-    private lateinit var mTargetDropdown: Spinner
-    private lateinit var mTimepicker: TimePicker
-
+    companion object { const val ID_EXTRA = "TRIGGER_EDIT_ID" }
+    private lateinit var db: DatabaseHandler
+    private var original: Trigger? = null
+    private var tasks: List<Task> = emptyList()
+    private lateinit var titleField: EditText
+    private lateinit var enabled: CheckBox
+    private lateinit var type: Spinner
+    private lateinit var interval: EditText
+    private lateinit var presets: Spinner
+    private lateinit var time: TimePicker
+    private lateinit var target: Spinner
+    private lateinit var zone: AutoCompleteTextView
+    private lateinit var days: List<CheckBox>
+    private lateinit var nextRun: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, true)
         ActivityHelper.applyTheme(this)
         setContentView(R.layout.activity_trigger)
-        val toolbar = findViewById<Toolbar>(R.id.toolbar)
-        setSupportActionBar(toolbar)
-        val actionBar = supportActionBar
-        actionBar?.setDisplayHomeAsUpEnabled(true)
-
-
-        mCardInterval = findViewById(R.id.intervalCard)
-        mCardWeekday = findViewById(R.id.weekdaysCard)
-        mCardTime = findViewById(R.id.timeCard)
-        mTitle = findViewById(R.id.trigger_name_edit)
-        mEnabled = findViewById(R.id.cb_is_enabled)
-        mType = findViewById(R.id.triggerType)
-        mInterval = findViewById(R.id.spinnerIntervals)
-
-        mWeekdayMon = findViewById(R.id.trigger_cb_monday)
-        mWeekdayTue = findViewById(R.id.trigger_cb_tuesday)
-        mWeekdayWed = findViewById(R.id.trigger_cb_wednesday)
-        mWeekdayThu = findViewById(R.id.trigger_cb_thursday)
-        mWeekdayFri = findViewById(R.id.trigger_cb_friday)
-        mWeekdaySat = findViewById(R.id.trigger_cb_saturday)
-        mWeekdaySun = findViewById(R.id.trigger_cb_sunday)
-        mTimepicker = findViewById(R.id.trigger_time)
-        mTargetDropdown = findViewById(R.id.trigger_targets)
-
-        dbHandler = DatabaseHandler(this)
-        mTaskList = dbHandler.allTasks
-
-        val extras = intent.extras
-        val triggerId: Long
-        if (extras != null) {
-            triggerId = extras.getLong(ID_EXTRA)
-            if (triggerId != 0L) {
-                val notNullTrigger = dbHandler.getTrigger(triggerId)
-                if (notNullTrigger == null) {
-                    Toasty.error(
-                        this,
-                        this.resources.getString(R.string.triggeractivity_trigger_not_found)
-                    ).show()
-                    finish()
-                    return
-                }
-                mTrigger = notNullTrigger!!
-            }
-        } else {
-            mTrigger = Trigger(Trigger.TRIGGER_ID_DOESNTEXIST)
+        setSupportActionBar(findViewById<Toolbar>(R.id.toolbar))
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        db = DatabaseHandler(this)
+        val id = intent.getLongExtra(ID_EXTRA, Trigger.TRIGGER_ID_DOESNTEXIST)
+        original = if (id >= 0) db.getTrigger(id) else null
+        if (id >= 0 && original == null) {
+            Toasty.error(this, getString(R.string.triggeractivity_trigger_not_found)).show()
+            finish(); return
         }
-        
-        val saveButton = findViewById<FloatingActionButton>(R.id.saveButton)
-        saveButton.setOnClickListener { saveTrigger() }
-        setUpTargetsDropdown()
+        tasks = db.allTasks
+        val value = original ?: Trigger(Trigger.TRIGGER_ID_DOESNTEXIST).apply {
+            time = 9 * 60
+            triggerTarget = intent.getLongExtra("TASK_TARGET_ID", tasks.firstOrNull()?.id ?: -1)
+        }
+        titleField = findViewById(R.id.trigger_name_edit)
+        enabled = findViewById(R.id.cb_is_enabled)
+        type = findViewById(R.id.triggerType)
+        presets = findViewById(R.id.spinnerIntervals)
+        interval = findViewById(R.id.trigger_custom_interval)
+        time = findViewById(R.id.trigger_time)
+        target = findViewById(R.id.trigger_targets)
+        zone = findViewById(R.id.trigger_zone)
+        nextRun = findViewById(R.id.trigger_next_run)
+        days = listOf(R.id.trigger_cb_monday, R.id.trigger_cb_tuesday, R.id.trigger_cb_wednesday,
+            R.id.trigger_cb_thursday, R.id.trigger_cb_friday, R.id.trigger_cb_saturday, R.id.trigger_cb_sunday)
+            .map { findViewById<CheckBox>(it) }
 
-        // Todo: use KTX Extensions. https://stackoverflow.com/a/60409004
-        mTitle.addTextChangedListener(object : TextWatcher {
-            override fun afterTextChanged(s: Editable) {}
-            override fun beforeTextChanged(s: CharSequence, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence, start: Int, before: Int, count: Int) {
-                mTrigger.title = s.toString()
-            }
-        })
-
-        mEnabled.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.isEnabled = isChecked
+        // Restore the complete form first. Listeners never rewrite other input fields.
+        titleField.setText(value.title)
+        enabled.isChecked = value.isEnabled
+        type.setSelection(value.type.takeIf { it in 0..1 } ?: -1)
+        time.setIs24HourView(android.text.format.DateFormat.is24HourFormat(this))
+        time.hour = if (value.type == 0) (value.time / 60).coerceIn(0, 23) else 9
+        time.minute = if (value.type == 0) (value.time % 60).coerceIn(0, 59) else 0
+        interval.setText((if (value.type == 1) value.time else 60).toString())
+        days.forEachIndexed { index, checkbox -> checkbox.isChecked = value.isEnabledAtDay(index) }
+        zone.setText(value.zoneId)
+        zone.setAdapter(ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, TimeZone.getAvailableIDs().sorted()))
+        target.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, tasks.map { it.title })
+        target.setSelection(tasks.indexOfFirst { it.id == value.triggerTarget })
+        val presetValues = listOf(0, 15, 30, 60, 120, 360, 720, 1440)
+        presets.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+            listOf("Custom") + presetValues.drop(1).map { "$it minutes" })
+        presets.setSelection(presetValues.indexOf(interval.text.toString().toIntOrNull()).coerceAtLeast(0))
+        type.onItemSelectedListener = selectionListener { refresh() }
+        presets.onItemSelectedListener = selectionListener {
+            presetValues.getOrNull(presets.selectedItemPosition)?.takeIf { it > 0 }?.let { interval.setText(it.toString()) }
+            refresh()
         }
-
-        val initialTriggerType = mTrigger.type
-        mType.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View, pos: Int, id: Long) {
-                if (pos == Trigger.TRIGGER_TYPE_SCHEDULE) {
-                    mTrigger.type = Trigger.TRIGGER_TYPE_SCHEDULE
-                } else {
-                    mTrigger.type = Trigger.TRIGGER_TYPE_INTERVAL
-                }
-
-                //update ui here, because typechanges also changes displayed items.
-                updateUiFromTrigger()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        target.onItemSelectedListener = selectionListener { refresh() }
+        time.setOnTimeChangedListener { _, _, _ -> refresh() }
+        days.forEach { it.setOnCheckedChangeListener { _, _ -> refresh() } }
+        enabled.setOnCheckedChangeListener { _, _ -> refresh() }
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { refresh() }
+            override fun afterTextChanged(s: Editable?) {}
         }
-
-        //restore initial triggerstate here
-        mType.setSelection(initialTriggerType)
-        mWeekdayMon.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.setEnabledAtDay(
-                Trigger.TRIGGER_DAY_MON, isChecked
-            )
-        }
-        mWeekdayTue.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.setEnabledAtDay(
-                Trigger.TRIGGER_DAY_TUE, isChecked
-            )
-        }
-        mWeekdayWed.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.setEnabledAtDay(
-                Trigger.TRIGGER_DAY_WED, isChecked
-            )
-        }
-        mWeekdayThu.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.setEnabledAtDay(
-                Trigger.TRIGGER_DAY_THU, isChecked
-            )
-        }
-        mWeekdayFri.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.setEnabledAtDay(
-                Trigger.TRIGGER_DAY_FRI, isChecked
-            )
-        }
-        mWeekdaySat.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.setEnabledAtDay(
-                Trigger.TRIGGER_DAY_SAT, isChecked
-            )
-        }
-        mWeekdaySun.setOnCheckedChangeListener { _: CompoundButton?, isChecked: Boolean ->
-            mTrigger.setEnabledAtDay(
-                Trigger.TRIGGER_DAY_SUN, isChecked
-            )
-        }
-        mTimepicker.setOnTimeChangedListener { _: TimePicker?, hourOfDay: Int, minute: Int ->
-            mTrigger.time = hourOfDay * 60 + minute
-        }
-
-        mInterval.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View, pos: Int, id: Long) {
-                when (pos) {
-                    0 -> mTrigger.time = 15
-                    1 -> mTrigger.time = 30
-                    3 -> mTrigger.time = 120
-                    2 -> mTrigger.time = 60
-                    else -> mTrigger.time = 60
-                }
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        mTargetDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View, pos: Int, id: Long) {
-                mTrigger.triggerTarget = mTaskList[pos].id
-            }
-
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-
-        updateUiFromTrigger()
+        interval.addTextChangedListener(watcher)
+        zone.addTextChangedListener(watcher)
+        findViewById<FloatingActionButton>(R.id.saveButton).setOnClickListener { save() }
+        refresh()
     }
 
-    override fun onSupportNavigateUp(): Boolean {
-        finish()
-        return true
+    private fun selectionListener(block: () -> Unit) = object : AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { block() }
+        override fun onNothingSelected(parent: AdapterView<*>?) { block() }
     }
 
-    /**
-     * Set up Task-Target Dropdown
-     */
-    private fun setUpTargetsDropdown() {
-        val items = arrayOfNulls<String>(this.mTaskList.size)
-        for (i in this.mTaskList.indices) {
-            items[i] = this.mTaskList[i].title
-        }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
-        mTargetDropdown.adapter = adapter
+    private fun form(requireName: Boolean): Trigger {
+        val selected = tasks.getOrNull(target.selectedItemPosition)
+            ?: throw IllegalArgumentException(getString(R.string.trigger_save_notasks))
+        val result = Trigger(original?.id ?: Trigger.TRIGGER_ID_DOESNTEXIST)
+        result.title = titleField.text.toString().trim()
+        if (requireName) require(result.title.isNotEmpty()) { getString(R.string.trigger_save_notitle) }
+        result.isEnabled = enabled.isChecked
+        result.type = type.selectedItemPosition
+        require(result.type in 0..1) { "Choose a supported schedule type" }
+        result.triggerTarget = selected.id
+        result.zoneId = zone.text.toString().trim()
+        ScheduleCalculator.resolveZone(result.zoneId)
+        result.time = if (result.type == 0) time.hour * 60 + time.minute else
+            interval.text.toString().toIntOrNull()?.takeIf { it in 15..525600 }
+                ?: throw IllegalArgumentException("Choose an interval from 15 minutes to 365 days")
+        result.setWeekdays(0)
+        days.forEachIndexed { index, checkbox -> result.setEnabledAtDay(index, checkbox.isChecked) }
+        require(result.getWeekdays() != 0) { "Select at least one weekday" }
+        val unchanged = original?.let { it.type == result.type && it.time == result.time &&
+            it.zoneId == result.zoneId && it.getWeekdays() == result.getWeekdays() && it.isEnabled == result.isEnabled } ?: false
+        result.nextDue = if (unchanged) original!!.nextDue else 0
+        return result
     }
 
-    private fun updateUiFromTrigger() {
-        if (DateFormat.is24HourFormat(this)) {
-            mTimepicker.setIs24HourView(true)
-        }
-        mCardInterval.visibility = View.GONE
-        mCardWeekday.visibility = View.GONE
-        mCardTime.visibility = View.GONE
-        mTitle.setText(mTrigger.title)
-        mEnabled.isChecked = mTrigger.isEnabled
-
-        // seconds if time is schedule, otherwise minutes (as in interval).
-        val timeValue = mTrigger.time
-        if (mTrigger.type == Trigger.TRIGGER_TYPE_SCHEDULE) {
-            mCardWeekday.visibility = View.VISIBLE
-            mCardTime.visibility = View.VISIBLE
-            mWeekdayMon.isChecked = mTrigger.isEnabledAtDay(Trigger.TRIGGER_DAY_MON)
-            mWeekdayTue.isChecked = mTrigger.isEnabledAtDay(Trigger.TRIGGER_DAY_TUE)
-            mWeekdayWed.isChecked = mTrigger.isEnabledAtDay(Trigger.TRIGGER_DAY_WED)
-            mWeekdayThu.isChecked = mTrigger.isEnabledAtDay(Trigger.TRIGGER_DAY_THU)
-            mWeekdayFri.isChecked = mTrigger.isEnabledAtDay(Trigger.TRIGGER_DAY_FRI)
-            mWeekdaySat.isChecked = mTrigger.isEnabledAtDay(Trigger.TRIGGER_DAY_SAT)
-            mWeekdaySun.isChecked = mTrigger.isEnabledAtDay(Trigger.TRIGGER_DAY_SUN)
-            mTimepicker.hour = timeValue / 60
-            mTimepicker.minute = timeValue % 60
-        } else {
-            mCardInterval.visibility = View.VISIBLE
-            when (timeValue) {
-                15 -> mInterval.setSelection(0)
-                30 -> mInterval.setSelection(1)
-                120 -> mInterval.setSelection(3)
-                60 -> mInterval.setSelection(2)
-                else -> mInterval.setSelection(2)
+    private fun refresh() {
+        findViewById<View>(R.id.intervalCard).visibility = if (type.selectedItemPosition == 1) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.timeCard).visibility = if (type.selectedItemPosition == 0) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.weekdaysCard).visibility = View.VISIBLE
+        nextRun.text = try {
+            val schedule = form(false)
+            if (!schedule.isEnabled) "Schedule disabled" else {
+                val now = System.currentTimeMillis()
+                val due = if (schedule.type == 0) ScheduleCalculator.nextWeeklyTime(now, schedule.time,
+                    schedule.getWeekdays(), ScheduleCalculator.resolveZone(schedule.zoneId))
+                else ScheduleCalculator.nextInterval(now, schedule.time, schedule.nextDue)
+                val formatter = DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
+                formatter.timeZone = ScheduleCalculator.resolveZone(schedule.zoneId)
+                getString(R.string.schedule_next_run, formatter.format(Date(due)) + " " + formatter.timeZone.id)
             }
-        }
+        } catch (e: IllegalArgumentException) { e.message }
+    }
 
-        //Todo properly populate the fields
-        for (task in mTaskList) {
-            if (task.id == mTrigger.triggerTarget) {
-                mTargetDropdown.setSelection(mTaskList.indexOf(task))
+    private fun save() {
+        try {
+            time.clearFocus()
+            val value = form(true)
+            require(db.getTask(value.triggerTarget) != null) { "The selected task no longer exists" }
+            if (original == null) db.createTrigger(value) else db.updateTrigger(value)
+            try {
+                TriggerService(this).queueSingleTrigger(value)
+            } catch (error: Exception) {
+                // The schedule was saved to SQLite. Retry dispatch durably if
+                // AlarmManager was briefly unavailable after that commit.
+                ScheduleDispatchWorker.enqueue(this, value.id)
+                Toasty.info(this, "Schedule saved; Android will retry alarm registration").show()
             }
-        }
+            finish()
+        } catch (e: Exception) { Toasty.error(this, e.message ?: "Could not save schedule").show() }
     }
-
-    private fun checkTaskExistence(): Boolean {
-        if (mTaskList.isEmpty()) {
-            Toasty.error(this, this.resources.getString(R.string.trigger_save_notasks)).show()
-            return false
-        }
-        return true
-    }
-
-    private fun saveTrigger() {
-        // check if title is set
-        if (mTrigger.title.isBlank()) {
-            Toasty.error(this, this.resources.getString(R.string.trigger_save_notitle)).show()
-            return
-        }
-
-        // check if target task is set
-        if (!checkTaskExistence()) {
-            Toasty.error(this, this.resources.getString(R.string.trigger_save_notasks)).show()
-            return
-        }
-        if (mTrigger.id == Trigger.TRIGGER_ID_DOESNTEXIST) {
-            mTrigger = dbHandler.createTrigger(mTrigger)
-        } else {
-            dbHandler.updateTrigger(mTrigger)
-        }
-        TriggerService(this).queueSingleTrigger(mTrigger)
-        finish()
-    }
+    override fun onSupportNavigateUp(): Boolean { finish(); return true }
 }

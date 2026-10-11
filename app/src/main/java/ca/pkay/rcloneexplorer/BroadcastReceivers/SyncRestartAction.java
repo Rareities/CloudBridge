@@ -15,7 +15,12 @@ public class SyncRestartAction extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (intent == null) return;
+        ca.pkay.rcloneexplorer.Items.Task task = new ca.pkay.rcloneexplorer.Database.DatabaseHandler(context)
+                .getTask(intent.getLongExtra(EXTRA_TASK_ID, -1));
+        if (task == null || task.getBisyncUUID().isEmpty() ||
+                !task.getBisyncUUID().equals(intent.getStringExtra("TASK_UUID"))) return;
         SyncManager sm = new SyncManager(context);
-        sm.queue(intent.getLongExtra(EXTRA_TASK_ID, -1));
+        sm.queue(task.getId());
     }
 }

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="session_guardian_opt_in_title">Check cloud sessions in the background</string>
+    <string name="session_guardian_opt_in_summary">Optional: every eight hours when connected and battery is sufficient, probe remotes with sign-in tokens and notify on possible session failures. Off by default; normal file operations still report their own errors.</string>
+</resources>

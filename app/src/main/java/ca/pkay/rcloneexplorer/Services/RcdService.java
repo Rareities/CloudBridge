@@ -13,6 +13,8 @@ import android.content.res.Configuration;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.SparseArray;
 
 import androidx.annotation.NonNull;
@@ -50,15 +52,20 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
      * level {@link android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL}.
      */
     private static final int ALIVE_SECONDS_CRITICAL = 30;
+    private static final long IDLE_GRACE_MS = TimeUnit.SECONDS.toMillis(30);
 
     private RcloneRcd rcloneRcd;
     private boolean shutdown;
-    private volatile boolean available;
     private final Object onlineLock = new Object();
     private long initNanosTimestamp = 0;
     // Held only while VCP/rcd jobs are actively running, so the device does not enter Doze
     // and stall transfers with the screen off.
     private TransferLocks activeTransferLocks;
+    private final Handler idleHandler = new Handler(Looper.getMainLooper());
+    private final Runnable idleAction = this::shutdownIfPossible;
+    private final RcDemandState demand = new RcDemandState();
+    private final java.util.Set<Runnable> streamCancellations = new java.util.HashSet<>();
+    private boolean stopping;
 
     private final IBinder binder = new RcdBinder();
     private NotificationManagerCompat notificationManager;
@@ -76,18 +83,14 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     }
 
     @Override
-    public void onRcdJobsUpdate(@NonNull SparseArray<RcloneRcd.JobStatusResponse> status) {
+    public synchronized void onRcdJobsUpdate(@NonNull SparseArray<RcloneRcd.JobStatusResponse> status) {
+        if (shutdown) return;
         onNotifyUse();
-        if(shutdown) {
-            FLog.w(TAG, "Unexpected jobs update after service shutdown, reviving service");
-            showNotification();
-            shutdown = false;
-        }
         int flags = 0;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             flags = PendingIntent.FLAG_IMMUTABLE;
         }
-        Intent foregroundIntent = new Intent(this, RcdService.class);
+        Intent foregroundIntent = new Intent(this, ca.pkay.rcloneexplorer.Activities.MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, foregroundIntent, flags);
 
         // build job statistics
@@ -124,7 +127,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
             if (activeTransferLocks == null) {
                 activeTransferLocks = TransferLocks.acquire(this, "rcd");
             }
-        } else if (activeTransferLocks != null) {
+        } else if (demand.streamCount() == 0 && activeTransferLocks != null) {
             activeTransferLocks.release();
             activeTransferLocks = null;
         }
@@ -135,6 +138,66 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     public RcloneRcd.JobStatusHandler manageJob() {
         return jobStatusResponse -> {
             // ignored, we already get updates over main
+        };
+    }
+
+    @Override
+    public void onRcdActivityChanged() {
+        // RC network calls and asynchronous jobs can originate on worker threads.
+        idleHandler.post(() -> {
+            synchronized (RcdService.this) {
+                if (demand.streamCount() == 0 && (rcloneRcd == null ||
+                        (!rcloneRcd.hasActiveWork() && (!stopping || !rcloneRcd.hasLiveProcess()))) && activeTransferLocks != null) {
+                    activeTransferLocks.release();
+                    activeTransferLocks = null;
+                }
+                onNotifyUse();
+            }
+        });
+    }
+
+    /** Holds the daemon and wakelock while a provider cat/rcat pipe is alive. */
+    public interface DocumentLease extends AutoCloseable {
+        void setCancellation(Runnable cancellation);
+        @Override void close();
+    }
+
+    public synchronized DocumentLease acquireDocumentLease() {
+        if (stopping) throw new IllegalStateException("The remote service is stopping");
+        RcDemandState.Lease lease = demand.openStream();
+        try {
+            if (activeTransferLocks == null) activeTransferLocks = TransferLocks.acquire(this, "rcd-stream");
+            onNotifyUse();
+        } catch (RuntimeException error) {
+            lease.close();
+            throw error;
+        }
+        return new DocumentLease() {
+            private Runnable cancellation;
+            private boolean closed;
+            @Override public void setCancellation(Runnable action) {
+                boolean cancelNow;
+                synchronized (RcdService.this) {
+                    if (closed) return;
+                    if (cancellation != null) streamCancellations.remove(cancellation);
+                    cancellation = action;
+                    streamCancellations.add(action);
+                    cancelNow = stopping;
+                }
+                if (cancelNow) action.run();
+            }
+            @Override public void close() { synchronized (RcdService.this) {
+                if (closed) return;
+                closed = true;
+                if (cancellation != null) streamCancellations.remove(cancellation);
+                lease.close();
+                if (demand.streamCount() == 0 && (rcloneRcd == null || !rcloneRcd.hasPendingJobs())
+                        && activeTransferLocks != null) {
+                    activeTransferLocks.release();
+                    activeTransferLocks = null;
+                }
+                onNotifyUse();
+            } }
         };
     }
 
@@ -167,6 +230,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
         shutdown = false;
         notificationManager = NotificationManagerCompat.from(getApplicationContext());
         setNotificationChannel();
+        onNotifyUse();
     }
 
     // Called when service is startService()-ed
@@ -176,18 +240,18 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
         shutdown = false;
         if (intent != null && ACTION_STOP_FOREGROUND.equals(intent.getAction())) {
             FLog.d(TAG, "Removing foreground service");
-            shutdown();
+            stopActiveWork();
             stopForeground(true);
             stopSelf();
         } else {
             showNotification();
+            onNotifyUse();
         }
         return super.onStartCommand(intent, flags, startId);
     }
 
     private void showNotification() {
-        Intent foregroundIntent = new Intent(this, RcdService.class);
-        foregroundIntent.setAction(ACTION_START_FOREGROUND);
+        Intent foregroundIntent = new Intent(this, ca.pkay.rcloneexplorer.Activities.MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, foregroundIntent, FlagsUtil.Companion.getFlagImmutable());
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
@@ -207,6 +271,7 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
 
     @Override
     public void onDestroy() {
+        idleHandler.removeCallbacks(idleAction);
         super.onDestroy();
         shutdown();
     }
@@ -268,32 +333,58 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
      * spans and can use this method to inform the service that when it s in use.
      *
      */
-    public void onNotifyUse() {
+    public synchronized void onNotifyUse() {
         initNanosTimestamp = System.nanoTime();
+        idleHandler.removeCallbacks(idleAction);
+        if (!shutdown) idleHandler.postDelayed(idleAction, IDLE_GRACE_MS);
     }
 
-    private void shutdownIfPossible() {
-        if (null != rcloneRcd) {
-            if (!rcloneRcd.hasPendingJobs()) {
-                FLog.d(TAG, "No running jobs, killing service");
-                shutdown();
-                stopForeground(true);
-                stopSelf();
-            }
+    private synchronized void shutdownIfPossible() {
+        synchronized (onlineLock) {
+            if (shutdown || demand.isBusy(rcloneRcd != null && rcloneRcd.hasActiveWork())) return;
+            // Use the same lifecycle lock as getLocalRcd so an on-demand restart
+            // cannot race the service setting its cached daemon to null.
+            if (rcloneRcd != null && !rcloneRcd.stopRcdIfIdle()) return;
+            rcloneRcd = null;
         }
-    }
-
-    private void shutdown() {
-        FLog.d(TAG, "Service shutting down");
+        FLog.d(TAG, "RC idle grace expired; stopping daemon");
+        idleHandler.removeCallbacks(idleAction);
         if (activeTransferLocks != null) {
             activeTransferLocks.release();
             activeTransferLocks = null;
         }
-        if (null != rcloneRcd) {
-            rcloneRcd.stopRcd();
-            rcloneRcd = null;
-        }
         shutdown = true;
+        stopForeground(true);
+        stopSelf();
+    }
+
+    private synchronized void shutdown() {
+        FLog.d(TAG, "Service shutting down");
+        idleHandler.removeCallbacks(idleAction);
+        stopActiveWork();
+        shutdown = true;
+    }
+
+    private synchronized void stopActiveWork() {
+        stopping = true;
+        shutdown = true;
+        idleHandler.removeCallbacks(idleAction);
+        if (rcloneRcd != null) rcloneRcd.stopRcd();
+        for (Runnable cancel : new java.util.ArrayList<>(streamCancellations)) {
+            Thread signal = new Thread(cancel, "rcd-document-cancel");
+            signal.setDaemon(true);
+            signal.start();
+        }
+        onRcdActivityChanged();
+    }
+
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        // Android 15+ requires prompt exit from a timed-out dataSync foreground service.
+        // Cancellation is non-blocking. Admissions remain until native exit.
+        stopActiveWork();
+        stopForeground(true);
+        stopSelf(startId);
     }
 
     /**
@@ -315,45 +406,40 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     }
 
     public boolean waitOnline(long timeout) {
-        long retries = timeout / 150;
-        while (retries > 0) {
-            synchronized (onlineLock) {
-                boolean online = false;
-                if (null == rcloneRcd) {
-                    FLog.v(TAG, "rcd not yet online");
-                } else {
-                    try {
-                        rcloneRcd.isOnline();
-                        online = true;
-                    } catch (RcloneRcd.RcdIOException e) {
-                        FLog.v(TAG, "rcd not yet online");
-                    }
-                }
-                if (online) {
-                    available = true;
-                    break;
-                }
-                try {
-                    onlineLock.wait(150);
-                } catch (InterruptedException ignored) {
-                }
-                retries--;
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0, timeout));
+        RcloneRcd attempted = null;
+        while (System.nanoTime() < deadline) {
+            synchronized (onlineLock) { attempted = rcloneRcd; }
+            if (attempted != null) {
+                try { attempted.isOnline(); return true; }
+                catch (RcloneRcd.RcdIOException starting) { /* bounded startup retry */ }
+                catch (RcloneRcd.RcdOpException rejected) { break; }
             }
+            try { Thread.sleep(100); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); break; }
         }
-        return available;
+        // A failed startup must not retain its configuration-session lease
+        // indefinitely. Ownership still ends only at actual native exit.
+        if (attempted != null) attempted.stopRcd();
+        return false;
     }
 
-    public RcloneRcd getLocalRcd() {
+    public synchronized RcloneRcd getLocalRcd() {
         synchronized (onlineLock) {
             if (null == rcloneRcd || !rcloneRcd.isAlive()) {
                 FLog.d(TAG, "Creating rcd process");
-                rcloneRcd = new RcloneRcd(getApplicationContext(), this);
-                rcloneRcd.startRcd();
-            } else if (rcloneRcd.hasCrashed()) {
-                FLog.d(TAG, "Reviving rclone");
+                if (rcloneRcd != null) rcloneRcd.stopRcd();
+                if (rcloneRcd != null && rcloneRcd.hasLiveProcess()) {
+                    if (Looper.myLooper() == Looper.getMainLooper() || !rcloneRcd.awaitNativeExit(3000))
+                        throw new IllegalStateException("The previous remote service is still stopping; retry after it exits");
+                }
+                if (RcloneRcd.hasRunningProcess()) throw new IllegalStateException("The previous remote service is still stopping");
                 rcloneRcd = new RcloneRcd(getApplicationContext(), this);
                 rcloneRcd.startRcd();
             }
+            stopping = false;
+            shutdown = false;
+            onNotifyUse();
             return rcloneRcd;
         }
     }

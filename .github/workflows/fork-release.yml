@@ -1,0 +1,125 @@
+name: Verified fork release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Reviewed release candidate tag, with a matching docs/releases changelog'
+        required: true
+        default: 'v1.1.0-rc.1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verified-fork-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: fork-release
+    timeout-minutes: 60
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Validate immutable release inputs
+        id: version
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]
+          test -s "docs/releases/$RELEASE_TAG.md"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "CB_VERSION_NAME=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+          version="$(sed -n 's/^de\.schuelken\.cloudbridge\.goVersion=//p' gradle.properties)"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "GO_VERSION=$version" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@17f84c3641ba7b8f6deff6309fc4c864478f5d62
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;29.0.14206865'
+          log-accepted-android-sdk-licenses: false
+      - name: Build pinned engines and run host checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --console=plain :rclone:buildAll
+          (cd rclone/cache/rclone-src && go build -mod=readonly -tags noselfupdate -o "$RUNNER_TEMP/rclone-host" .)
+          CLOUDBRIDGE_TEST_RCLONE="$RUNNER_TEMP/rclone-host" ./gradlew --console=plain testOssDebugUnitTest lint -x :rclone:buildAll
+      - name: Sign release APKs
+        env:
+          CB_KEYSTORE_BASE64: ${{ secrets.CB_KEYSTORE_BASE64 }}
+          CB_STORE_PASSWORD: ${{ secrets.CB_STORE_PASSWORD }}
+          CB_KEY_PASSWORD: ${{ secrets.CB_KEY_PASSWORD }}
+          CB_KEY_ALIAS: ${{ secrets.CB_KEY_ALIAS }}
+          CB_SIGNING_CERT_SHA256: ${{ vars.CB_SIGNING_CERT_SHA256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$CB_KEYSTORE_BASE64"
+          printf '%s' "$CB_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cloudbridge-fork.p12"
+          export CB_STORE_FILE="$RUNNER_TEMP/cloudbridge-fork.p12"
+          ./gradlew --console=plain assembleOssRelease -x :rclone:buildAll
+      - name: Remove temporary signing key
+        if: always()
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/cloudbridge-fork.p12"
+      - name: Verify release identity and construct distribution
+        shell: pwsh
+        env:
+          CERTIFICATE: ${{ vars.CB_SIGNING_CERT_SHA256 }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          ./scripts/Verify-Apk.ps1 -ApkDirectory app/build/outputs/apk/oss/release -SdkDirectory $env:ANDROID_HOME -ExpectedCertificateSha256 $env:CERTIFICATE -RequireRelease
+          New-Item -ItemType Directory -Path distribution | Out-Null
+          Copy-Item app/build/outputs/apk/oss/release/*.apk distribution/
+          Copy-Item app/build/generated/rcloneAssets/* distribution/
+          Copy-Item app/build/reports/verified-apks.json distribution/
+          Copy-Item "docs/releases/$env:RELEASE_TAG.md" distribution/CHANGELOG.md
+          [pscustomobject]@{appCommit=$env:GITHUB_SHA;tag=$env:RELEASE_TAG;certificateSha256=$env:CERTIFICATE} | ConvertTo-Json | Set-Content distribution/release-provenance.json
+          Get-ChildItem distribution -File | Sort-Object Name | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() )  $($_.Name)" } | Set-Content distribution/SHA256SUMS.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: signed-fork-distribution
+          path: distribution/*
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: signed-fork-distribution
+          path: distribution
+      - name: Publish a new release candidate with verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd distribution
+          sha256sum --check SHA256SUMS.txt
+          jq -n --arg tag "$RELEASE_TAG" --arg sha "$GITHUB_SHA" --rawfile body CHANGELOG.md '{tag_name:$tag,target_commitish:$sha,name:("CloudBridge "+$tag),body:$body,draft:true,prerelease:true,make_latest:"false"}' > "$RUNNER_TEMP/release.json"
+          release_id="$(gh api --method POST "repos/$GH_REPO/releases" --input "$RUNNER_TEMP/release.json" --jq '.id')"
+          gh release upload "$RELEASE_TAG" ./* --repo "$GH_REPO"
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false -F prerelease=true -f make_latest=false >/dev/null

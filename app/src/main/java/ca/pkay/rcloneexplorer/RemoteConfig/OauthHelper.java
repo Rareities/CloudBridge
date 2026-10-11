@@ -8,10 +8,8 @@ import ca.pkay.rcloneexplorer.InteractiveRunner;
 import ca.pkay.rcloneexplorer.R;
 import ca.pkay.rcloneexplorer.Rclone;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.ProcessRunner;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.regex.Matcher;
@@ -94,20 +92,20 @@ public class OauthHelper {
         UrlAuthThread currentAuth = new OauthHelper.UrlAuthThread(process, context);
         oauthProcessToken.acquire(currentAuth);
         currentAuth.start();
-        boolean exitedNormally = false;
         try {
-            process.waitFor();
-            exitedNormally = true;
+            currentAuth.join();
         } catch (InterruptedException e) {
             FLog.d(TAG, "Auth stopped by process interrupt");
             currentAuth.forceStop();
+            Thread.currentThread().interrupt();
+            return false;
         }
-        return exitedNormally && 0 == process.exitValue();
+        return currentAuth.outcome != null && currentAuth.outcome.success();
     }
 
     /**
      * Monitor a rclone process for an authentication url and launch a browser
-     * tab for the user. Note: this consumes the processes InputStream (stdout).
+     * tab for the user while draining both output streams until confirmed exit.
      */
     public static class UrlAuthThread extends Thread {
         private static final Pattern pattern = Pattern.compile(regex, 0);
@@ -116,6 +114,8 @@ public class OauthHelper {
         private final Process process;
         private final Context context;
         private volatile boolean stopped = false;
+        private final ProcessRunner runner = new ProcessRunner();
+        private volatile ProcessRunner.Outcome outcome;
 
         public UrlAuthThread(Process process, Context context) {
             this.process = process;
@@ -123,36 +123,27 @@ public class OauthHelper {
         }
 
         public void run() {
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while (null != (line = br.readLine())) {
-                    Matcher matcher = pattern.matcher(line);
-                    if (matcher.find()) {
-                        String url = matcher.group(1);
-                        if (url != null) {
-                            launchBrowser(context, url);
-                        }
-
-                        // Do NOT break here, or the stream will be closed.
-                        // When rclone then tries to write to the stream, it will receive SIGPIPE
-                        // and rclone will exit confused why it can't just output its log messages.
-                        // Instead, wait for rclone to close the stream.
-                    }
-                }
-            } catch (IOException e) {
-                if (stopped) {
-                    FLog.v(TAG, "Authentication attempt stopped");
-                    return;
-                }
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MINUTES.toNanos(5);
+            try {
+                outcome = runner.run(process, () -> stopped || System.nanoTime() >= deadline,
+                        null, this::handleAuthLine);
+            } finally {
                 stopped = true;
-                FLog.e(TAG, "doInBackground: could not read auth url", e);
-                process.destroy();
             }
         }
 
-        public void forceStop() {
+        private synchronized void handleAuthLine(String line) {
+            if (stopped) return;
+            Matcher matcher = pattern.matcher(line);
+            if (matcher.find()) {
+                String url = matcher.group(1);
+                if (url != null) launchBrowser(context, url);
+            }
+        }
+
+        public synchronized void forceStop() {
             stopped = true;
-            process.destroy();
+            runner.requestStop();
         }
 
         public boolean isStopped() {
@@ -169,7 +160,7 @@ public class OauthHelper {
             // This happens if a buggy third party component is registered for
             // browser intents with a non-exported activity.
             // TODO: Fix this for Android TV
-            FLog.e(TAG, "Could not launch browser", e);
+            FLog.e(TAG, "Could not launch the authentication browser");
         }
     }
 
@@ -191,7 +182,7 @@ public class OauthHelper {
                     launchBrowser(context, url);
                 }
             } else {
-                FLog.w(TAG, "onTrigger: could not extract auth URL from buffer: %s", cliBuffer);
+                FLog.w(TAG, "Could not extract the authentication URL");
             }
         }
 

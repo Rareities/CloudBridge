@@ -3,7 +3,12 @@
 [![Documentation](https://img.shields.io/badge/Documentation-GitHub_Pages-4aad4e)](https://thies2005.github.io/CloudBridge/)
 [![Android Lint](https://github.com/thies2005/CloudBridge/actions/workflows/lint.yml/badge.svg)](https://github.com/thies2005/CloudBridge/actions/workflows/lint.yml)
 A cloud file manager, powered by rclone.
-Visit [https://thies2005.github.io/CloudBridge/](https://thies2005.github.io/CloudBridge/) for more information!
+This fork adds a Proton Drive bisync candidate with preview/approval, durable
+recovery state, advanced flags, scheduling and an expanded task editor.
+Start with the [bisync guide](docs/BISYNC_GUIDE.md) and
+[credential-storage decision](docs/ADR-002-native-rclone-config.md).
+Upstream screenshots below show the existing file manager, not a device-verified
+demonstration of the new bisync controls.
 
 
 ## Screenshots
@@ -35,13 +40,18 @@ Visit [https://thies2005.github.io/CloudBridge/](https://thies2005.github.io/Clo
 - **Material 3 Design** (Dark theme)
 - **All architectures** (runs on ARM, ARM64, x86 and x64 devices, Android 6+)
 - **Storage Access Framework (SAF)** ([see docs](https://thies2005.github.io/CloudBridge/internals.html#storage-access-framework)) for SD card and USB device access.
-- **Intentservice** to start tasks via third party apps!
+- **Scoped shortcuts and external requests** with explicit confirmation for untrusted callers.
 - **Task Management** to allow regular runs of your important tasks!
 
 
 ## Installation
 
-Grab the [latest version](https://github.com/thies2005/CloudBridge/releases/latest) of the signed APK and install it on your phone.
+Use this fork's reviewed release artifacts when available. The **Bisync debug
+APK** workflow provides candidate APKs for testing; they use a separate debug
+application ID and cannot replace a differently signed release installation.
+See the [guide and device validation gates](docs/BISYNC_GUIDE.md) before using
+bisync on important data. Upstream CloudBridge/Google Play downloads do not
+automatically contain this fork's changes.
 | CPU architecture | Where to find | APK identifier |
 |:---|:--|:---:|
 |ARM 32 Bit | older devices | ```armeabi-v7a``` |
@@ -60,16 +70,16 @@ If you don't know which version to pick use ```cloudbridge_v<version>-oss-univer
 
 
 ## Intents
-This app includes the ability to launch an intent! Create a task to sync to a remote, and copy it's id (via the treedot-menu)
-The intent needs the following:
+External task requests open `ShortcutServiceActivity`. A task ID alone does
+not authorise execution: requests without a valid app-issued shortcut capability
+require visible user confirmation. Existing shortcuts may need recreation.
 
 | Intent          |                   Content                   |                 |
 |:----------------|:-------------------------------------------:|----------------:|
 | packageName     |           de.schuelken.cloudbridge            |                 |
-| className       | ca.pkay.rcloneexplorer.Services.SyncService |                 |
+| className       | ca.pkay.rcloneexplorer.Activities.ShortcutServiceActivity |                 |
 | Action          |                 START_TASK                  |                 |
-| Integer Extra   |                    task                     |        idOfTask |
-| Boolean Extra   |                notification                 |   true or false |
+| Long Extra      |                    task                     |        idOfTask |
 
 
 ## Libraries
@@ -99,8 +109,8 @@ Whether you have a question, found a bug, or have an idea for a new feature — 
 
 You should first make sure you have:
 
-- Go 1.25+ installed and in your PATH
-- Java installed and in your PATH
+- Go 1.26+ installed and in your PATH
+- JDK 17 installed and in your PATH
 - Android SDK command-line tools installed OR the NDK version specified in `gradle.properties`
   installed
 

@@ -17,16 +17,14 @@ public class Importer {
 
 
     public static void importJson(String json, Context context) throws JSONException {
-        DatabaseHandler dbHandler = new DatabaseHandler(context);
-        dbHandler.deleteEveryting();
-        for(Trigger trigger : createTriggerlist(json)){
-            dbHandler.createTrigger(trigger, true);
-        }
-        for(Filter filter : createFilterList(json)){
-            dbHandler.createFilter(filter, true);
-        }
-        for(Task task : createTasklist(json)){
-            dbHandler.createTask(task, true);
+        ImportPlan plan = ImportPlan.parse(json);
+        ca.pkay.rcloneexplorer.util.BisyncPolicy.Admission admission =
+                ca.pkay.rcloneexplorer.util.BisyncPolicy.Admission.Companion.acquire(context);
+        if (admission == null) throw new JSONException("A transfer is active. Finish or cancel it before restoring tasks.");
+        try {
+            new DatabaseHandler(context).replaceAll(plan.getTasks(), plan.getFilters(), plan.getTriggers());
+        } finally {
+            admission.close();
         }
     }
 

@@ -1,5 +1,7 @@
 package ca.pkay.rcloneexplorer;
 
+import java.io.FileNotFoundException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -47,6 +49,13 @@ public class VirtualContentProviderTest {
     public void isChildDocumentId() {
         assertTrue(provider.isChildDocument(VirtualContentProvider.ROOT_DOC_PREFIX, VirtualContentProvider.ROOT_DOC_PREFIX + "sub/doc"));
         assertFalse(provider.isChildDocument(VirtualContentProvider.ROOT_DOC_PREFIX + "sub/doc", VirtualContentProvider.ROOT_DOC_PREFIX));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder2/secret"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder"));
+        assertTrue(provider.isChildDocument("remotes/demo:", "remotes/demo:/folder/file"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder/../private"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder/./private"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder//private"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder/..\\private"));
     }
 
     @Test
@@ -112,5 +121,47 @@ public class VirtualContentProviderTest {
         String actualName = VirtualContentProvider.getRemoteName(documentId);
 
         assertEquals(actualName, expectedName);
+        assertEquals("remote", provider.getRemoteName("remotes/remote:/dir/file"));
+        assertEquals("", provider.getRclonePath("remote:"));
+        assertThrows(IllegalArgumentException.class, () -> provider.getRclonePath("remote:/folder/../secret"));
+        assertThrows(IllegalArgumentException.class, () -> provider.getNoRootId("wrongprefix/remote:/file"));
+        assertThrows(IllegalArgumentException.class, () -> provider.getTargetByChild("remote:/folder", "../secret"));
+    }
+
+    @Test
+    public void asynchronousMutationFailureCannotReturnSuccessOrInvalidateCache() {
+        AtomicInteger invalidations = new AtomicInteger();
+        VirtualContentProvider.RcMutation mutation = new VirtualContentProvider.RcMutation(invalidations::incrementAndGet);
+        RcloneRcd.JobStatusResponse running = new RcloneRcd.JobStatusResponse();
+        running.finished = false;
+        running.success = true;
+        mutation.handleJobStatus(running);
+        assertThrows(FileNotFoundException.class, () -> mutation.awaitSuccess(0, "Rename"));
+        RcloneRcd.JobStatusResponse failed = new RcloneRcd.JobStatusResponse();
+        failed.finished = true;
+        failed.success = false;
+        failed.error = "remote refused mutation";
+        mutation.handleJobStatus(failed);
+        FileNotFoundException exception = assertThrows(FileNotFoundException.class,
+                () -> mutation.awaitSuccess(0, "Rename"));
+        assertTrue(exception.getMessage().contains("remote refused mutation"));
+        assertEquals(0, invalidations.get());
+    }
+
+    @Test
+    public void timeoutDoesNotReportSuccessAndLaterConfirmationIsAppliedOnlyOnce() throws Exception {
+        AtomicInteger changes = new AtomicInteger();
+        VirtualContentProvider.RcMutation mutation = new VirtualContentProvider.RcMutation(changes::incrementAndGet);
+        FileNotFoundException unknown = assertThrows(FileNotFoundException.class,
+                () -> mutation.awaitSuccess(0, "Copy"));
+        assertTrue(unknown.getMessage().contains("unconfirmed"));
+        assertEquals(0, changes.get());
+        RcloneRcd.JobStatusResponse succeeded = new RcloneRcd.JobStatusResponse();
+        succeeded.finished = true;
+        succeeded.success = true;
+        mutation.handleJobStatus(succeeded);
+        mutation.handleJobStatus(succeeded);
+        mutation.awaitSuccess(0, "Copy");
+        assertEquals(1, changes.get());
     }
 }

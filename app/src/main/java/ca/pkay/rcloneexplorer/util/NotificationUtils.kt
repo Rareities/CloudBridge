@@ -19,6 +19,14 @@ class NotificationUtils {
         @SuppressLint("MissingPermission") // Checked by PermissionManager(context).grantedNotifications()
         @JvmStatic
         fun createNotification(context: Context, notificationId: Int, notification: Notification) {
+            notification.visibility = Notification.VISIBILITY_PRIVATE
+            val publicBuilder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                android.app.Notification.Builder(context, notification.channelId)
+            else android.app.Notification.Builder(context)
+            notification.publicVersion = publicBuilder
+                .setSmallIcon(ca.pkay.rcloneexplorer.R.drawable.ic_rclone_logo)
+                .setContentTitle(context.getString(ca.pkay.rcloneexplorer.R.string.app_name))
+                .setContentText("Open the app to view transfer details").build()
             if(PermissionManager(context).grantedNotifications()) {
                 val notificationManager = NotificationManagerCompat.from(context)
                 notificationManager.notify(notificationId, notification)

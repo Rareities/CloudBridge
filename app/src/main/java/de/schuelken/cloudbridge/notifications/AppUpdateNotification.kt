@@ -24,7 +24,7 @@ class AppUpdateNotification(private var mContext: Context) {
     companion object {
         var NOTIFICATION_CHANNEL_ID = "NOTIFICATION_CHANNEL_ID"
         var NOTIFICATION_ID = 63598
-        var RELEASES_URL = "https://github.com/thies2005/CloudBridge/releases/latest"
+        var RELEASES_URL = "https://github.com/Rareities/CloudBridge/releases"
     }
 
     @SuppressLint("MissingPermission") // Handled by PermissionManager
@@ -53,7 +53,8 @@ class AppUpdateNotification(private var mContext: Context) {
         val ignoreIntent = Intent(mContext, UpdateUserchoiceReceiver::class.java)
         ignoreIntent.setAction(ACTION_IGNORE)
         ignoreIntent.putExtra(IGNORE_VERSION_EXTRA, version)
-        return PendingIntent.getBroadcast(mContext, 0, ignoreIntent, PendingIntent.FLAG_IMMUTABLE)
+        return PendingIntent.getBroadcast(mContext, 0, ignoreIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 
     private fun getOpenReleasesIntent(): PendingIntent {

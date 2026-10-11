@@ -1,6 +1,9 @@
 package ca.pkay.rcloneexplorer.workmanager
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.preference.PreferenceManager
+import ca.pkay.rcloneexplorer.R
 import androidx.work.*
 import java.util.concurrent.TimeUnit
 
@@ -11,13 +14,43 @@ import java.util.concurrent.TimeUnit
 object SessionGuardianScheduler {
 
     private const val WORK_NAME = "session_guardian_worker"
-    private const val TAG = "SessionGuardianScheduler"
+    private var observedPreferences: SharedPreferences? = null
+    private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+        val context = observedContext
+        if (context != null && key == context.getString(R.string.pref_key_session_guardian)) {
+            reconcile(prefs, context)
+        }
+    }
+    private var observedContext: Context? = null
+
+    @JvmStatic
+    fun isEnabled(context: Context): Boolean =
+        PreferenceManager.getDefaultSharedPreferences(context)
+            .getBoolean(context.getString(R.string.pref_key_session_guardian), false)
 
     /**
      * Schedule the Session Guardian Worker to run every 8 hours.
      */
     @JvmStatic
     fun schedule(context: Context) {
+        val app = context.applicationContext
+        val prefs = PreferenceManager.getDefaultSharedPreferences(app)
+        synchronized(this) {
+            if (observedPreferences !== prefs) {
+                observedPreferences?.unregisterOnSharedPreferenceChangeListener(settingsListener)
+                observedPreferences = prefs
+                observedContext = app
+                prefs.registerOnSharedPreferenceChangeListener(settingsListener)
+            }
+        }
+        reconcile(prefs, app)
+    }
+
+    private fun reconcile(prefs: SharedPreferences, context: Context) {
+        if (!prefs.getBoolean(context.getString(R.string.pref_key_session_guardian), false)) {
+            cancel(context)
+            return
+        }
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
@@ -50,7 +83,7 @@ object SessionGuardianScheduler {
     @JvmStatic
     fun cancel(context: Context) {
         WorkManager.getInstance(context)
-            .cancelAllWorkByTag(WORK_NAME)
+            .cancelUniqueWork(WORK_NAME)
     }
 
     /**
@@ -58,9 +91,10 @@ object SessionGuardianScheduler {
      */
     @JvmStatic
     fun isScheduled(context: Context): Boolean {
+        if (!isEnabled(context)) return false
         val workInfos = WorkManager.getInstance(context)
             .getWorkInfosByTagLiveData(WORK_NAME)
             .getOrAwait()
-        return workInfos.isNotEmpty()
+        return workInfos.any { !it.state.isFinished }
     }
 }

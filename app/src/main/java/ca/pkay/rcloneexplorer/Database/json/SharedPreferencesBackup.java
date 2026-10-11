@@ -19,34 +19,34 @@ public class SharedPreferencesBackup {
     public static String export(Context context) throws JSONException {
 
         //General Settings
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-        boolean showThumbnails = sharedPreferences.getBoolean(context.getString(R.string.pref_key_show_thumbnails), false);
-        boolean isWifiOnly = sharedPreferences.getBoolean(context.getString(R.string.pref_key_wifi_only_transfers), false);
-        boolean allowWhileIdle = sharedPreferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
-        boolean useProxy = sharedPreferences.getBoolean(context.getString(R.string.pref_key_use_proxy), false);
-        String proxyProtocol = sharedPreferences.getString(context.getString(R.string.pref_key_proxy_protocol), "http");
-        String proxyHost = sharedPreferences.getString(context.getString(R.string.pref_key_proxy_host), "localhost");
-        int proxyPort = sharedPreferences.getInt(context.getString(R.string.pref_key_proxy_port), 8080);
-        String proxyUser = sharedPreferences.getString(context.getString(R.string.pref_key_proxy_username), "");
-        String transfers = sharedPreferences.getString(context.getString(R.string.pref_key_transfers), "4");
+        java.util.Map<String, ?> snapshot = PreferenceManager.getDefaultSharedPreferences(context).getAll();
+        boolean showThumbnails = value(snapshot, context.getString(R.string.pref_key_show_thumbnails), false);
+        boolean isWifiOnly = value(snapshot, context.getString(R.string.pref_key_wifi_only_transfers), false);
+        boolean allowWhileIdle = value(snapshot, context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
+        boolean useProxy = value(snapshot, context.getString(R.string.pref_key_use_proxy), false);
+        String proxyProtocol = value(snapshot, context.getString(R.string.pref_key_proxy_protocol), "http");
+        String proxyHost = value(snapshot, context.getString(R.string.pref_key_proxy_host), "localhost");
+        int proxyPort = value(snapshot, context.getString(R.string.pref_key_proxy_port), 8080);
+        String proxyUser = value(snapshot, context.getString(R.string.pref_key_proxy_username), "");
+        String transfers = value(snapshot, context.getString(R.string.pref_key_transfers), "4");
 
         // File Access
-        boolean safEnabled = sharedPreferences.getBoolean(context.getString(R.string.pref_key_enable_saf), false);
-        boolean refreshLaEnabled = sharedPreferences.getBoolean(context.getString(R.string.pref_key_refresh_local_aliases), true);
-        boolean vcpEnabled = sharedPreferences.getBoolean(context.getString(R.string.pref_key_enable_vcp), false);
-        boolean vcpDeclareLocal = sharedPreferences.getBoolean(context.getString(R.string.pref_key_vcp_declare_local), true);
-        boolean vcpGrantAll = sharedPreferences.getBoolean(context.getString(R.string.pref_key_vcp_grant_all), false);
+        boolean safEnabled = value(snapshot, context.getString(R.string.pref_key_enable_saf), false);
+        boolean refreshLaEnabled = value(snapshot, context.getString(R.string.pref_key_refresh_local_aliases), true);
+        boolean vcpEnabled = value(snapshot, context.getString(R.string.pref_key_enable_vcp), false);
+        boolean vcpDeclareLocal = value(snapshot, context.getString(R.string.pref_key_vcp_declare_local), true);
+        boolean vcpGrantAll = false; // Retained only for older archive schema compatibility.
 
         // Look and Feel
-        int oldTheme = sharedPreferences.getInt(context.getString(R.string.pref_key_theme_old), FOLLOW_SYSTEM);
-        String newTheme = sharedPreferences.getString(context.getString(R.string.pref_key_theme), String.valueOf(oldTheme));
-        boolean isWrapFilenames = sharedPreferences.getBoolean(context.getString(R.string.pref_key_wrap_filenames), true);
+        int oldTheme = value(snapshot, context.getString(R.string.pref_key_theme_old), FOLLOW_SYSTEM);
+        String newTheme = value(snapshot, context.getString(R.string.pref_key_theme), String.valueOf(oldTheme));
+        boolean isWrapFilenames = value(snapshot, context.getString(R.string.pref_key_wrap_filenames), true);
 
         // Notifications
-        boolean appUpdates = sharedPreferences.getBoolean(context.getString(R.string.pref_key_app_updates), false);
+        boolean appUpdates = value(snapshot, context.getString(R.string.pref_key_app_updates), false);
 
         // Logging
-        boolean useLogs = sharedPreferences.getBoolean(context.getString(R.string.pref_key_logs), false);
+        boolean useLogs = value(snapshot, context.getString(R.string.pref_key_logs), false);
 
 
         JSONObject main = new JSONObject();
@@ -73,7 +73,24 @@ public class SharedPreferencesBackup {
         return main.toString();
     }
 
+    @SuppressWarnings("unchecked")
+    private static <T> T value(java.util.Map<String, ?> snapshot, String key, T fallback) {
+        Object current = snapshot.get(key);
+        if (current == null) return fallback;
+        if (!fallback.getClass().isInstance(current)) throw new IllegalArgumentException("Invalid preference type");
+        return (T) current;
+    }
+
     public static void importJson(String json, Context context) throws JSONException {
+        if (!prepare(json, context).commit()) throw new JSONException("Could not persist restored preferences");
+    }
+
+    public static void validateJson(String json, Context context) throws JSONException {
+        prepare(json, context);
+    }
+
+    private static SharedPreferences.Editor prepare(String json, Context context) throws JSONException {
+        if (json.length() > 256 * 1024) throw new JSONException("Preferences backup is too large");
         JSONObject jsonObject = new JSONObject(json);
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
@@ -95,7 +112,7 @@ public class SharedPreferencesBackup {
         editor.putBoolean(context.getString(R.string.pref_key_refresh_local_aliases), jsonObject.getBoolean("refreshLaEnabled"));
         editor.putBoolean(context.getString(R.string.pref_key_enable_vcp), jsonObject.getBoolean("vcpEnabled"));
         editor.putBoolean(context.getString(R.string.pref_key_vcp_declare_local), jsonObject.getBoolean("vcpDeclareLocal"));
-        editor.putBoolean(context.getString(R.string.pref_key_vcp_grant_all), jsonObject.getBoolean("vcpGrantAll"));
+        editor.putBoolean(context.getString(R.string.pref_key_vcp_grant_all), false);
 
         // Look and Feel
         // The type changed. So we try to use boolean first, and if it fails we use the proper int
@@ -122,7 +139,7 @@ public class SharedPreferencesBackup {
         // Logging
         editor.putBoolean(context.getString(R.string.pref_key_logs), jsonObject.getBoolean("useLogs"));
 
-        editor.apply();
+        return editor;
     }
 
 }

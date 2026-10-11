@@ -94,17 +94,17 @@ public class RemotesFragment extends Fragment implements RemotesRecyclerViewAdap
         setHasOptionsMenu(true);
 
         rclone = new Rclone(getContext());
-        remotes = filterRemotes();
+        remotes = new ArrayList<>();
     }
 
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
         View view;
-        if (!rclone.isCompatible()) {
+        if (!new java.io.File(requireContext().getApplicationInfo().nativeLibraryDir, "librclone.so").isFile()) {
             return getSpecialView(inflater, container, true);
         }
-        if (!rclone.isConfigFileCreated() || rclone.getRemotes().isEmpty()) {
+        if (!rclone.isConfigFileCreated()) {
             return getSpecialView(inflater, container, false);
         }
 
@@ -117,6 +117,18 @@ public class RemotesFragment extends Fragment implements RemotesRecyclerViewAdap
         recyclerView.setLayoutManager(new LinearLayoutManager(context));
         recyclerViewAdapter = new RemotesRecyclerViewAdapter(remotes, remoteClickListener, this);
         recyclerView.setAdapter(recyclerViewAdapter);
+        // Listing/decrypting remote metadata can invoke native rclone; never do so in onCreateView.
+        final Context loadContext = context;
+        new Thread(() -> {
+            List<RemoteItem> loaded = filteredRemotes(loadContext);
+            android.app.Activity activity = getActivity();
+            if (activity == null) return;
+            activity.runOnUiThread(() -> {
+                if (!isAdded() || recyclerViewAdapter == null) return;
+                remotes = loaded;
+                recyclerViewAdapter.newData(loaded);
+            });
+        }, "cloudbridge-load-remotes").start();
 
         SpeedDialView speedDialView = view.findViewById(R.id.fab_fragment_remote_list);
         speedDialView.setOnChangeListener(new SpeedDialView.OnChangeListener() {
@@ -338,21 +350,26 @@ public class RemotesFragment extends Fragment implements RemotesRecyclerViewAdap
     }
 
     private List<RemoteItem> filterRemotes() {
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-        Set<String> hiddenRemotes = sharedPreferences.getStringSet(getString(R.string.shared_preferences_hidden_remotes), new HashSet<>());
-        remotes = rclone.getRemotes();
+        remotes = filteredRemotes(context);
+        return remotes;
+    }
+
+    private List<RemoteItem> filteredRemotes(Context viewContext) {
+        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(viewContext);
+        Set<String> hiddenRemotes = sharedPreferences.getStringSet(viewContext.getString(R.string.shared_preferences_hidden_remotes), new HashSet<>());
+        List<RemoteItem> loaded = rclone.getRemotes();
         if (hiddenRemotes != null && !hiddenRemotes.isEmpty()) {
             ArrayList<RemoteItem> toBeHidden = new ArrayList<>();
-            for (RemoteItem remoteItem : remotes) {
+            for (RemoteItem remoteItem : loaded) {
                 if (hiddenRemotes.contains(remoteItem.getName())) {
                     toBeHidden.add(remoteItem);
                 }
             }
-            remotes.removeAll(toBeHidden);
+            loaded.removeAll(toBeHidden);
         }
-        RemoteItem.prepareDisplay(context, remotes);
-        Collections.sort(remotes);
-        return remotes;
+        RemoteItem.prepareDisplay(viewContext, loaded);
+        Collections.sort(loaded);
+        return loaded;
     }
 
     private void showRemotePropertiesDialog(RemoteItem remoteItem) {

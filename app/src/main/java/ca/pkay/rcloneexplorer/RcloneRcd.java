@@ -14,6 +14,8 @@ import android.util.SparseArray;
 import androidx.annotation.IntDef;
 import androidx.preference.PreferenceManager;
 import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.NativePipeTransfer;
+import ca.pkay.rcloneexplorer.util.NativeSessionGate;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -52,6 +54,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * The NG version of rclone command runner using rc/rcd. The backbone for
@@ -60,6 +64,47 @@ import java.util.concurrent.TimeUnit;
 public class RcloneRcd {
 
     private static final String TAG = "RcloneRcd";
+    private static final java.util.Set<Process> activeProcesses = java.util.Collections.newSetFromMap(
+            new java.util.concurrent.ConcurrentHashMap<Process, Boolean>());
+    private static final java.util.Set<RcloneRcd> activeDaemons = java.util.Collections.newSetFromMap(
+            new java.util.concurrent.ConcurrentHashMap<RcloneRcd, Boolean>());
+
+    /** Explicit configuration recovery may retire idle browsing, never active user transfers. */
+    public static void quiesceForConfigurationChange() throws IOException {
+        if (Looper.myLooper() == Looper.getMainLooper())
+            throw new IOException("Reconnect must run outside the UI thread");
+        java.util.List<RcloneRcd> retiring;
+        java.util.concurrent.locks.Lock lock = ca.pkay.rcloneexplorer.util.ConfigurationExclusion.LOCK.writeLock();
+        lock.lock();
+        try {
+            if (NativeSessionGate.GLOBAL.isBusy())
+                throw new IOException("Finish active transfers and file streams before reconnecting");
+            retiring = new java.util.ArrayList<>(activeDaemons);
+            for (RcloneRcd daemon : retiring) {
+                if (daemon.hasActiveWork()) throw new IOException("The remote service has active work; retry after it finishes");
+            }
+            for (RcloneRcd daemon : retiring) {
+                if (!daemon.stopped && !daemon.stopRcdIfIdle())
+                    throw new IOException("New remote work started; retry after it finishes");
+            }
+        } finally { lock.unlock(); }
+        for (RcloneRcd daemon : retiring) {
+            if (!daemon.awaitNativeExit(5000)) throw new IOException("The remote service is still stopping; retry after it exits");
+        }
+        if (NativeSessionGate.GLOBAL.isBusy()) throw new IOException("Another native operation started; retry when it finishes");
+    }
+
+    public static boolean hasRunningProcess() {
+        for (Process process : activeProcesses) {
+            try {
+                process.exitValue();
+                activeProcesses.remove(process);
+            } catch (IllegalThreadStateException running) {
+                // Keep the process registered until it confirms termination.
+            }
+        }
+        return !activeProcesses.isEmpty();
+    }
     private static final MediaType JSON = MediaType.parse("application/json");
 
     @Retention(RetentionPolicy.SOURCE)
@@ -81,7 +126,14 @@ public class RcloneRcd {
     private final String configPath;
     private final String rclone;
     private Process rcd;
-    private boolean stopped = false;
+    private volatile boolean stopped = false;
+    private volatile long sessionGeneration;
+    private NativePipeTransfer nativeLifetime;
+    private final Map<Integer, NativeSessionGate.Lease> jobSessions = new ConcurrentHashMap<>();
+    private final Map<Integer, Integer> statusFailures = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicBoolean exitHandled = new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.CountDownLatch nativeExited = new java.util.concurrent.CountDownLatch(1);
+    private final java.util.concurrent.atomic.AtomicReference<NativeSessionGate.Lease> startupSession = new java.util.concurrent.atomic.AtomicReference<>();
     private Object mainThreadLock = new Object();
 
     final BlockingQueue<Integer> pendingJobs;
@@ -90,6 +142,9 @@ public class RcloneRcd {
     private final ScheduledExecutorService jobMonitorService;
     private final ExecutorService jobStatusExecutor;
     final JobsUpdateHandler jobsUpdateHandler;
+    private final AtomicInteger activeRequests = new AtomicInteger();
+    private final java.util.Set<Integer> activeJobs = java.util.Collections.newSetFromMap(new ConcurrentHashMap<Integer, Boolean>());
+    private final Object processUseLock = new Object();
 
     private ScheduledFuture<?> jobsUpdateFuture;
     private int port;
@@ -128,34 +183,84 @@ public class RcloneRcd {
      * Starts the rclone daemon subprocess and a job monitor thread
      */
     public void startRcd() {
+        startRcdWithStartup(this::startRcdUnlocked);
+    }
+
+    /** Package-private seam for testing failures before native process creation. */
+    void startRcdWithStartup(Runnable startup) {
+        ca.pkay.rcloneexplorer.util.ConfigurationExclusion.LOCK.writeLock().lock();
         try {
+            sessionGeneration = NativeSessionGate.GLOBAL.generation();
+            try { startupSession.set(NativeSessionGate.GLOBAL.acquireRc(sessionGeneration)); }
+            catch (IOException busy) { throw new RcdIOException(busy); }
+            activeDaemons.add(this);
+            try { startup.run(); }
+            catch (RuntimeException | Error failure) {
+                // Even an unchecked pre-spawn failure must relinquish the startup
+                // lease. If native launch succeeded, ownership lasts until exit.
+                stopRcd();
+                if (rcd == null) releaseStartupSession();
+                else if (nativeLifetime == null) releaseStartupAfterExit(rcd);
+                throw failure;
+            }
+        } finally {
+            ca.pkay.rcloneexplorer.util.ConfigurationExclusion.LOCK.writeLock().unlock();
+        }
+    }
+
+    private void releaseStartupAfterExit(Process process) {
+        Thread waiter = new Thread(() -> {
+            boolean interrupted = false;
+            for (;;) {
+                try { process.waitFor(); break; }
+                catch (InterruptedException retry) { interrupted = true; }
+            }
+            onNativeExit();
+            if (interrupted) Thread.currentThread().interrupt();
+        }, "rcd-startup-exit");
+        waiter.setDaemon(true);
+        waiter.start();
+        process.destroy();
+    }
+
+    private void startRcdUnlocked() {
+        try {
+            if (hasRunningProcess()) throw new IOException("The previous remote service is still stopping. Retry after it exits.");
             FLog.d(TAG, "startRcd: starting rclone process");
             port = nextAvailablePort();
             String addr = "localhost:" + port;
             String tmpDir = context.getCacheDir().getAbsolutePath();
-            String logFile = context.getExternalFilesDir("logs").getAbsolutePath() + "/rcd.log";
             SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
             String transfers = pref.getString(context.getString(R.string.pref_key_transfers), "4");
             ArrayList<String> parameters = new ArrayList<>(Arrays.asList(
                     rclone,
                     "--config", configPath,
                     "--rc-addr", addr,
-                    "--rc-user", rcUser,
-                    "--rc-pass", rcPass,
                     "--rc-serve",
                     // Transfer throughput tuning for VCP/rcd-driven operations.
                     "--transfers", transfers,
                     "--buffer-size", "16M",
                     "--multi-thread-streams", "4"));
-            if (pref.getBoolean(context.getString(R.string.pref_key_logs), false)) {
-                parameters.addAll(Arrays.asList(
-                        "--log-file", logFile,
-                        "--dump", "headers",
-                        "-vvv"));
-            }
+            parameters.add("--log-level=NOTICE");
             parameters.add("rcd");
-            rcd = Runtime.getRuntime().exec(parameters.toArray(new String[0]), getEnv());
+            rcd = ca.pkay.rcloneexplorer.util.ProtectedRcloneConfig.launch(context, parameters.toArray(new String[0]), getEnv());
+            activeProcesses.add(rcd);
+            // Drain both pipes from startup. A native log file would bypass the
+            // app redactor, and an unread stderr pipe can block a long RC job.
+            final ca.pkay.rcloneexplorer.util.NativePipeTransfer diagnostics =
+                    new ca.pkay.rcloneexplorer.util.NativePipeTransfer(rcd, true);
+            nativeLifetime = diagnostics;
+            final boolean logging = pref.getBoolean(context.getString(R.string.pref_key_logs), false);
+            diagnostics.onExit(() -> {
+                onNativeExit();
+                try { diagnostics.awaitSuccessfulExit(); }
+                catch (IOException error) {
+                    if (logging) FLog.w(TAG, "RC process ended: %s", error.getMessage());
+                }
+            });
+            diagnostics.output().close();
         } catch (IOException e) {
+            stopRcd();
             FLog.e(TAG, "startRcd: error", e);
             throw new RuntimeException(e);
         }
@@ -164,65 +269,7 @@ public class RcloneRcd {
     }
 
     public String[] getEnv() {
-        ArrayList<String> environmentValues = new ArrayList<>();
-        SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
-
-        boolean proxyEnabled = pref.getBoolean(context.getString(R.string.pref_key_use_proxy), false);
-        if(proxyEnabled) {
-            String noProxy = pref.getString(context.getString(R.string.pref_key_no_proxy_hosts), "localhost");
-            String protocol = pref.getString(context.getString(R.string.pref_key_proxy_protocol), "http");
-            String host = pref.getString(context.getString(R.string.pref_key_proxy_host), "localhost");
-            String user = pref.getString(context.getString(R.string.pref_key_proxy_username), "user");
-            String pass = pref.getString(context.getString(R.string.pref_key_proxy_password), "pass");
-            int port = pref.getInt(context.getString(R.string.pref_key_proxy_port), 8080);
-            String auth = "";
-            if(!(user + pass).isEmpty()) {
-                auth = user+":"+pass+"@";
-            }
-            String url = protocol + "://" + auth + host + ":" + port;
-            // per https://golang.org/pkg/net/http/#ProxyFromEnvironment
-            environmentValues.add("http_proxy=" + url);
-            environmentValues.add("https_proxy=" + url);
-            environmentValues.add("no_proxy=" + noProxy);
-        }
-
-        // if TMPDIR is not set, golang uses /data/local/tmp which is only
-        // only accessible for the shell user
-        String tmpDir = context.getCacheDir().getAbsolutePath();
-        environmentValues.add("TMPDIR=" + tmpDir);
-
-        // ignore chtimes errors
-        // ref: https://github.com/rclone/rclone/issues/2446
-        environmentValues.add("RCLONE_LOCAL_NO_SET_MODTIME=true");
-
-        // The pre-built linux rclone binaries do not know how to find the Android certificate store.
-        // We set SSL_CERT_DIR to Android's native certificate store path.
-        environmentValues.add("SSL_CERT_DIR=/system/etc/security/cacerts");
-
-        environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
-
-        return environmentValues.toArray(new String[0]);
-    }
-
-    private String getDnsServers() {
-        String fallback = "8.8.8.8:53,8.8.4.4:53";
-        try {
-            ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (cm == null) return fallback;
-            Network network = cm.getActiveNetwork();
-            if (network == null) return fallback;
-            LinkProperties lp = cm.getLinkProperties(network);
-            if (lp == null) return fallback;
-            StringBuilder sb = new StringBuilder();
-            for (InetAddress dns : lp.getDnsServers()) {
-                if (sb.length() > 0) sb.append(",");
-                sb.append(dns.getHostAddress()).append(":53");
-            }
-            return sb.length() > 0 ? sb.toString() : fallback;
-        } catch (Exception e) {
-            FLog.e(TAG, "Failed to detect DNS servers, using fallback", e);
-            return fallback;
-        }
+        return new Rclone(context).getRcloneEnv("RCLONE_RC_USER=" + rcUser, "RCLONE_RC_PASS=" + rcPass);
     }
 
     /**
@@ -254,15 +301,60 @@ public class RcloneRcd {
      * Stop the rcd server
      */
     public void stopRcd() {
-        if (null != rcd) {
-            FLog.d(TAG, "Stopping Rclone");
-            rcd.destroy();
-        }
+        synchronized (processUseLock) { stopped = true; }
+        if (nativeLifetime != null) nativeLifetime.cancel();
+        else if (rcd == null) onNativeExit();
         if (null != jobsUpdateFuture) {
             jobsUpdateFuture.cancel(true);
         }
         jobStatusExecutor.shutdownNow();
-        stopped = true;
+        jobMonitorService.shutdownNow();
+        activityChanged();
+    }
+
+    private void onNativeExit() {
+        if (!exitHandled.compareAndSet(false, true)) return;
+        synchronized (processUseLock) { stopped = true; }
+        if (jobsUpdateFuture != null) jobsUpdateFuture.cancel(true);
+        jobStatusExecutor.shutdownNow();
+        jobMonitorService.shutdownNow();
+        // A requested stop may precede actual termination. Only OS-confirmed
+        // exit permits unknown RC jobs to release mutation/session ownership.
+        synchronized (jobsHandlers) {
+            for (int i = 0; i < jobsHandlers.size(); i++) {
+                int jobId = jobsHandlers.keyAt(i);
+                JobStatusResponse result;
+                synchronized (lastStatus) { result = lastStatus.get(jobId); }
+                if (result == null || !result.finished) {
+                    result = new JobStatusResponse();
+                    result.id = jobId;
+                    result.finished = true;
+                    result.success = false;
+                    result.error = "RC daemon stopped before job completion";
+                    synchronized (lastStatus) { lastStatus.put(jobId, result); }
+                }
+                mainThread(jobsHandlers.valueAt(i), result);
+            }
+            jobsHandlers.clear();
+        }
+        for (NativeSessionGate.Lease lease : jobSessions.values()) lease.close();
+        jobSessions.clear();
+        statusFailures.clear();
+        activeJobs.clear();
+        releaseStartupSession();
+        activeDaemons.remove(this);
+        nativeExited.countDown();
+        activityChanged();
+    }
+
+    /** Atomically exclude new requests when idle eviction starts. */
+    public boolean stopRcdIfIdle() {
+        synchronized (processUseLock) {
+            if (stopped || activeRequests.get() > 0 || !activeJobs.isEmpty()) return false;
+            stopped = true;
+        }
+        stopRcd();
+        return true;
     }
 
     /**
@@ -270,11 +362,18 @@ public class RcloneRcd {
      * @return
      */
     public boolean isAlive() {
-        return !(null == rcd || stopped || !(getProcessState() == RUNNING));
+        return !(null == rcd || stopped || !(getProcessState() == RUNNING)) &&
+                NativeSessionGate.GLOBAL.isCurrent(sessionGeneration);
     }
 
     public boolean hasCrashed() {
         return rcd != null && getProcessState() == ERROR;
+    }
+
+    public boolean hasLiveProcess() {
+        if (rcd == null) return false;
+        try { rcd.exitValue(); return false; }
+        catch (IllegalThreadStateException running) { return true; }
     }
 
     /**
@@ -331,9 +430,8 @@ public class RcloneRcd {
             synchronized (mainThreadLock) {
                 StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitNetwork().build();
                 StrictMode.setThreadPolicy(policy);
-                T result = performRcCall(method, params, null, responseType);
-                StrictMode.setThreadPolicy(previous);
-                return result;
+                try { return performRcCall(method, params, null, responseType); }
+                finally { StrictMode.setThreadPolicy(previous); }
             }
         } else {
             return performRcCall(method, params, null, responseType);
@@ -359,9 +457,8 @@ public class RcloneRcd {
                 }
                 StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitNetwork().build();
                 StrictMode.setThreadPolicy(policy);
-                T result = performRcCall(method, params, typeReference, null);
-                StrictMode.setThreadPolicy(previous);
-                return result;
+                try { return performRcCall(method, params, typeReference, null); }
+                finally { StrictMode.setThreadPolicy(previous); }
             }
         } else {
             return performRcCall(method, params, typeReference, null);
@@ -373,7 +470,13 @@ public class RcloneRcd {
     private OkHttpClient prepareClient() {
         if (null == okHttpClient) {
             OkHttpClient.Builder builder = new OkHttpClient.Builder()
+                    .retryOnConnectionFailure(false)
+                    .followRedirects(false)
+                    .followSslRedirects(false)
+                    .connectTimeout(3, TimeUnit.SECONDS)
+                    .callTimeout(30, TimeUnit.SECONDS)
                     .authenticator((route, response) -> {
+                        if (response.request().header("Authorization") != null) return null;
                         String credential = Credentials.basic(rcUser, rcPass);
                         return response.request().newBuilder()
                                 .header("Authorization", credential).build();
@@ -393,10 +496,46 @@ public class RcloneRcd {
     // throws RcdOpException when the server returns an error message
     // do _not_ call directly
     private <T> T performRcCall(String method, RcOpParam params, TypeReference<T> typeReference, Class<T> responseType) {
+        NativeSessionGate.Lease session = null;
+        boolean localControl = method.startsWith("job/") || method.startsWith("rc/") ||
+                method.equals("config/dump") || method.equals("config/listremotes");
+        if (!localControl) {
+            try { session = NativeSessionGate.GLOBAL.acquireRc(sessionGeneration); }
+            catch (IOException busy) { throw new RcdIOException(busy); }
+        }
+        synchronized (processUseLock) {
+            if (stopped) {
+                if (session != null) session.close();
+                throw new RcdIOException(new IOException("RC daemon stopped; retry operation"));
+            }
+            activeRequests.incrementAndGet();
+        }
+        activityChanged();
+        try {
+            return performRcCallActive(method, params, typeReference, responseType);
+        } catch (RuntimeException failure) {
+            if (session != null && (failure instanceof RcdIOException || !(failure instanceof RcdOpException))) {
+                // The server may have accepted a mutation before its response
+                // was lost. Never retry it or unlock while its daemon is live.
+                session.closeAfterExit(rcd);
+                session = null;
+                stopRcd();
+            }
+            throw failure;
+        } finally {
+            if (session != null) session.close();
+            activeRequests.decrementAndGet();
+            activityChanged();
+        }
+    }
+
+    private <T> T performRcCallActive(String method, RcOpParam params, TypeReference<T> typeReference, Class<T> responseType) {
         OkHttpClient client = prepareClient();
+        if (method.equals("rc/noopauth")) client = client.newBuilder()
+                .callTimeout(700, TimeUnit.MILLISECONDS).build();
         HttpUrl url = new HttpUrl.Builder()
                 .scheme("http")
-                .host("localhost")
+                .host("127.0.0.1")
                 .port(port)
                 .addPathSegments(method)
                 .build();
@@ -487,33 +626,40 @@ public class RcloneRcd {
                 futures.add(jobStatusExecutor.submit((Callable<Integer>) () -> {
                     try {
                         JobStatusResponse response = getJobStatus(jobId);
-                        synchronized (lastStatus) {
-                            lastStatus.put(jobId, response);
-                        }
+                        JobStatusHandler terminalHandler = claimJobStatus(jobId, response);
                         if (response.finished) {
-                            JobStatusHandler handler;
-                            synchronized (jobsHandlers) {
-                                handler = jobsHandlers.get(jobId);
-                            }
-                            if (null != handler) {
+                            statusFailures.remove(jobId);
+                            if (terminalHandler != null) {
                                 FLog.v(TAG, "job finished: " + jobId);
-                                mainThread(handler, response);
+                                mainThread(terminalHandler, response);
                             }
+                            NativeSessionGate.Lease session = jobSessions.remove(jobId);
+                            if (session != null) session.close();
+                            activeJobs.remove(jobId);
+                            activityChanged();
                             return -1; // terminal: do not re-queue
                         }
                         FLog.v(TAG, "job running: " + jobId);
+                        statusFailures.remove(jobId);
                         return jobId; // still running: re-queue
                     } catch (RcdOpException e) {
                         FLog.e(TAG, "job error: ", e);
                         if ("job not found".equals(e.getError())) {
+                            failJob(jobId, "RC job disappeared before its result could be confirmed");
                             return -1; // drop unknown job
                         }
-                        return jobId; // transient error: retry next tick
+                        if (!isAlive()) {
+                            failJob(jobId, "RC daemon exited while the job was running");
+                            return -1;
+                        }
+                        if (statusFailureLimitReached(jobId)) { stopRcd(); return -1; }
+                        return jobId; // bounded transient error retries
                     }
                 }));
             }
             List<Integer> pending = new ArrayList<>();
-            for (Future<Integer> f : futures) {
+            for (int i = 0; i < futures.size(); i++) {
+                Future<Integer> f = futures.get(i);
                 try {
                     int requeue = f.get();
                     if (requeue != -1) {
@@ -521,6 +667,9 @@ public class RcloneRcd {
                     }
                 } catch (Exception e) {
                     FLog.w(TAG, "job status future failed: %s", e.toString());
+                    int jobId = currentJobIds.get(i);
+                    if (isAlive() && !statusFailureLimitReached(jobId)) pending.add(jobId);
+                    else failJob(jobId, "RC daemon exited before the job result was confirmed");
                 }
             }
             pendingJobs.addAll(pending);
@@ -546,7 +695,67 @@ public class RcloneRcd {
     }
 
     public boolean hasPendingJobs() {
-        return pendingJobs.size() > 0;
+        return !activeJobs.isEmpty();
+    }
+
+    /** Publish a confirmed terminal response and claim its callback atomically with exit fanout. */
+    JobStatusHandler claimJobStatus(int jobId, JobStatusResponse response) {
+        synchronized (jobsHandlers) {
+            if (exitHandled.get()) return null;
+            synchronized (lastStatus) { lastStatus.put(jobId, response); }
+            if (!response.finished) return null;
+            JobStatusHandler handler = jobsHandlers.get(jobId);
+            jobsHandlers.remove(jobId);
+            return handler;
+        }
+    }
+
+    private void failJob(int jobId, String reason) {
+        if (hasLiveProcess()) { stopRcd(); return; }
+        JobStatusResponse failure = new JobStatusResponse();
+        failure.id = jobId;
+        failure.finished = true;
+        failure.success = false;
+        failure.error = reason;
+        JobStatusHandler handler;
+        synchronized (jobsHandlers) {
+            if (exitHandled.get()) {
+                // Exit fanout owns every unclaimed callback once exit is observed.
+                handler = null;
+            } else {
+                handler = jobsHandlers.get(jobId);
+                jobsHandlers.remove(jobId);
+            }
+            if (handler != null) {
+                synchronized (lastStatus) {
+                    JobStatusResponse confirmed = lastStatus.get(jobId);
+                    if (confirmed != null && confirmed.finished) failure = confirmed;
+                    else lastStatus.put(jobId, failure);
+                }
+            }
+        }
+        if (handler != null) mainThread(handler, failure);
+        NativeSessionGate.Lease session = jobSessions.remove(jobId);
+        if (session != null) session.closeAfterExit(rcd);
+        activeJobs.remove(jobId);
+        activityChanged();
+    }
+
+    private boolean statusFailureLimitReached(int jobId) {
+        synchronized (statusFailures) {
+            Integer previous = statusFailures.get(jobId);
+            int count = previous == null ? 1 : previous + 1;
+            statusFailures.put(jobId, count);
+            return count >= 3;
+        }
+    }
+
+    public boolean hasActiveWork() {
+        return activeRequests.get() > 0 || !activeJobs.isEmpty() || startupSession.get() != null;
+    }
+
+    private void activityChanged() {
+        if (jobsUpdateHandler != null) jobsUpdateHandler.onRcdActivityChanged();
     }
 
     /**
@@ -557,10 +766,48 @@ public class RcloneRcd {
         synchronized (jobsHandlers) {
             jobsHandlers.append(jobId, handler);
         }
+        activeJobs.add(jobId);
+        activityChanged();
+    }
+
+    /** Keep the RC request admitted until the job handler is registered and queued. */
+    private void submitJob(String operation, RcOpParam params, JobStatusHandler handler) {
+        NativeSessionGate.Lease session;
+        try { session = NativeSessionGate.GLOBAL.acquireRc(sessionGeneration); }
+        catch (IOException busy) { throw new RcdIOException(busy); }
+        synchronized (processUseLock) {
+            if (stopped) { session.close(); throw new RcdIOException(new IOException("RC daemon stopped; retry operation")); }
+            activeRequests.incrementAndGet();
+        }
+        activityChanged();
+        try {
+            JobIdResponse response = performRcCall(operation, params, JobIdResponse.class);
+            if (response == null || response.jobid <= 0)
+                throw new RcdIOException(new IOException("RC did not confirm a valid job identifier"));
+            synchronized (processUseLock) {
+                if (stopped) throw new RcdIOException(new IOException("RC stopped before job acceptance was confirmed"));
+                jobSessions.put(response.jobid, session);
+                session = null;
+                RcJobRegistration.publish(response.jobid, handler, this::registerJobHandler, pendingJobs);
+            }
+        } catch (RuntimeException failure) {
+            boolean rejected = failure instanceof RcdOpException && !(failure instanceof RcdIOException);
+            if (session != null) {
+                if (rejected) session.close(); else session.closeAfterExit(rcd);
+                session = null;
+            }
+            if (!rejected) stopRcd();
+            throw failure;
+        } finally {
+            if (session != null) session.close();
+            activeRequests.decrementAndGet();
+            activityChanged();
+        }
     }
 
     public interface JobsUpdateHandler {
         void onRcdJobsUpdate(SparseArray<JobStatusResponse> status);
+        void onRcdActivityChanged();
     }
 
     //
@@ -590,18 +837,28 @@ public class RcloneRcd {
 
     public void isOnline() throws RcdIOException {
         performRcCall("rc/noopauth", new NoParamRcOpParam(), EmptyOkResponse.class);
+        releaseStartupSession();
+    }
+
+    private void releaseStartupSession() {
+        NativeSessionGate.Lease lease = startupSession.getAndSet(null);
+        if (lease != null) lease.close();
+    }
+
+    public boolean awaitNativeExit(long timeoutMillis) {
+        // Observing exitValue is earlier than the exit callback releasing job
+        // and startup leases. Wait for that publication before allowing restart.
+        if (rcd == null) return true;
+        try { return nativeExited.await(Math.max(0, timeoutMillis), TimeUnit.MILLISECONDS); }
+        catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); return false; }
     }
 
     public void sync(String srcFs, String dstFs, JobStatusHandler handler) {
-        JobIdResponse response = performRcCall("sync/sync", new SyncRcOpParam(srcFs, dstFs), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        submitJob("sync/sync", new SyncRcOpParam(srcFs, dstFs), handler);
     }
 
     public void copy(String srcFs, String dstFs, JobStatusHandler handler) {
-        JobIdResponse response = performRcCall("sync/copy", new CopyRcOpParam(srcFs, dstFs), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        submitJob("sync/copy", new CopyRcOpParam(srcFs, dstFs), handler);
     }
 
     public void copyFile(String srcRemoteName, String srcPath, String dstRemoteName, String dstPath, JobStatusHandler handler) {
@@ -609,15 +866,11 @@ public class RcloneRcd {
         String dstFs = remoteNameAsFs(dstRemoteName);
         srcPath = pathAsPath(srcRemoteName, srcPath);
         dstPath = pathAsPath(dstRemoteName, dstPath);
-        JobIdResponse response = performRcCall("operations/copyfile", new CopyFileRcOpParam(srcPath, srcFs, dstPath, dstFs), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        submitJob("operations/copyfile", new CopyFileRcOpParam(srcPath, srcFs, dstPath, dstFs), handler);
     }
 
     public void move(String srcFs, String dstFs, JobStatusHandler handler) {
-        JobIdResponse response = performRcCall("sync/move", new MoveRcOpParam(srcFs, dstFs, false), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        submitJob("sync/move", new MoveRcOpParam(srcFs, dstFs, false), handler);
     }
 
     public ListItem[] list(String remoteName, String path) {
@@ -647,17 +900,13 @@ public class RcloneRcd {
     public void deleteFile(String remoteName, String path, JobStatusHandler handler) {
         String fs = remoteNameAsFs(remoteName);
         path = pathAsPath(remoteName, path);
-        JobIdResponse response = performRcCall("operations/deletefile", new DeleteFileRcOpParam(fs, path), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        submitJob("operations/deletefile", new DeleteFileRcOpParam(fs, path), handler);
     }
 
     public void purge(String remoteName, String path, JobStatusHandler handler) {
         String fs = remoteNameAsFs(remoteName);
         path = pathAsPath(remoteName, path);
-        JobIdResponse response = performRcCall("operations/purge", new PurgeRcOpParam(fs, path), JobIdResponse.class);
-        registerJobHandler(response.jobid, handler);
-        pendingJobs.add(response.jobid);
+        submitJob("operations/purge", new PurgeRcOpParam(fs, path), handler);
     }
 
     public FsInfoRcOpResponse getFsInfo(String remoteName) {
@@ -676,9 +925,7 @@ public class RcloneRcd {
         String srcRemote = pathAsPath(srcRemoteName, srcPath);
         String dstFs = remoteNameAsFs(dstRemoteName);
         String dstRemote = pathAsPath(dstRemoteName, dstPath);
-        JobIdResponse response = performRcCall("operations/movefile", new MoveFileRcOpParam(srcFs, srcRemote, dstFs, dstRemote), JobIdResponse.class);
-        pendingJobs.add(response.jobid);
-        registerJobHandler(response.jobid, handler);
+        submitJob("operations/movefile", new MoveFileRcOpParam(srcFs, srcRemote, dstFs, dstRemote), handler);
     }
 
     public String getPublicLink(String remoteName, String path) {
@@ -1043,6 +1290,7 @@ public class RcloneRcd {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class ListRemotesResponse implements RcOpResponse {
         String[] remotes;
     }
@@ -1052,6 +1300,7 @@ public class RcloneRcd {
         String type;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private static class AboutResponse implements RcOpResponse {
         long free;
         long total;
@@ -1086,14 +1335,17 @@ public class RcloneRcd {
         public String progress;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public static class JobListResponse implements RcOpResponse {
         public int[] jobids;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private static class JobIdResponse implements RcOpResponse {
         int jobid;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private static class ListRcOpResponse implements RcOpResponse {
         ListItem[] list;
     }
@@ -1123,6 +1375,7 @@ public class RcloneRcd {
         boolean isDir;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private static class FsInfoRcOpResponse implements RcOpResponse {
 
         @JsonIgnoreProperties(ignoreUnknown = true)
@@ -1165,6 +1418,7 @@ public class RcloneRcd {
         String inLogsAs;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     private static class PublicLinkRcOpResponse implements RcOpResponse {
         String url;
     }

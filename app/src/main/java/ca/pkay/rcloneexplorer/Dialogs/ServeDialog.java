@@ -34,6 +34,8 @@ public class ServeDialog extends DialogFragment {
     private CheckBox allowRemoteAccess;
     private EditText user;
     private EditText password;
+    private EditText certificate;
+    private EditText privateKey;
     private AlertDialog dialog;
 
     public interface Callback {
@@ -56,8 +58,13 @@ public class ServeDialog extends DialogFragment {
         allowRemoteAccess = view.findViewById(R.id.checkbox_allow_remote_access);
         user = view.findViewById(R.id.edit_text_user);
         password = view.findViewById(R.id.edit_text_password);
+        password.setSaveEnabled(false);
+        certificate = view.findViewById(R.id.serve_tls_certificate);
+        privateKey = view.findViewById(R.id.serve_tls_private_key);
 
         SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
+        certificate.setText(pref.getString(ca.pkay.rcloneexplorer.util.ListenerPolicy.CERTIFICATE, ""));
+        privateKey.setText(pref.getString(ca.pkay.rcloneexplorer.util.ListenerPolicy.PRIVATE_KEY, ""));
         if (pref.contains(getString(R.string.pref_choice_serve_dialog_allow_ext))) {
             boolean checked = pref.getBoolean(getString(R.string.pref_choice_serve_dialog_allow_ext), false);
             allowRemoteAccess.setChecked(checked);
@@ -98,6 +105,9 @@ public class ServeDialog extends DialogFragment {
         };
         user.addTextChangedListener(credentialsWatcher);
         password.addTextChangedListener(credentialsWatcher);
+        certificate.addTextChangedListener(credentialsWatcher);
+        privateKey.addTextChangedListener(credentialsWatcher);
+        protocol.setOnCheckedChangeListener((group, id) -> updateOkButtonState());
 
         dialog = builder.show();
         updateOkButtonState();
@@ -110,7 +120,9 @@ public class ServeDialog extends DialogFragment {
         }
         boolean canProceed = !allowRemoteAccess.isChecked()
                 || (!user.getText().toString().trim().isEmpty()
-                && !password.getText().toString().trim().isEmpty());
+                && !password.getText().toString().trim().isEmpty()
+                && (protocol.getCheckedRadioButtonId() == R.id.radio_http || protocol.getCheckedRadioButtonId() == R.id.radio_webdav)
+                && !certificate.getText().toString().trim().isEmpty() && !privateKey.getText().toString().trim().isEmpty());
         dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(canProceed);
     }
 
@@ -122,9 +134,7 @@ public class ServeDialog extends DialogFragment {
         if (!user.getText().toString().trim().isEmpty()) {
             outState.putString("user", user.getText().toString());
         }
-        if (!password.getText().toString().trim().isEmpty()) {
-            outState.putString("password", password.getText().toString());
-        }
+        // Do not persist listener passwords in activity saved state.
     }
 
     @Override
@@ -140,10 +150,6 @@ public class ServeDialog extends DialogFragment {
             user.setText(savedUser);
         }
 
-        String savedPassword = savedInstanceState.getString("password");
-        if (savedPassword != null) {
-            password.setText(savedPassword);
-        }
 
         int savedProtocol = savedInstanceState.getInt("protocol", -1);
         if (savedProtocol == R.id.radio_http || savedProtocol == R.id.radio_dlna
@@ -184,6 +190,8 @@ public class ServeDialog extends DialogFragment {
         PreferenceManager.getDefaultSharedPreferences(context)
                 .edit()
                 .putBoolean(getString(R.string.pref_choice_serve_dialog_allow_ext), allowRemoteAccess.isChecked())
+                .putString(ca.pkay.rcloneexplorer.util.ListenerPolicy.CERTIFICATE, certificate.getText().toString().trim())
+                .putString(ca.pkay.rcloneexplorer.util.ListenerPolicy.PRIVATE_KEY, privateKey.getText().toString().trim())
                 .apply();
 
         callback.onServeOptionsSelected(selectedProtocol, allowRemoteAccess.isChecked(), user.getText().toString(), password.getText().toString());

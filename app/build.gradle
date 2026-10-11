@@ -4,8 +4,7 @@ apply plugin: 'kotlinx-serialization'
 
 android {
     // Release signing: credentials come from a git-ignored keystore.properties
-    // (local builds) or CB_* env vars (CI). Falls back to the debug key when
-    // neither is present so fresh checkouts still build an installable APK.
+    // (local builds) or CB_* env vars (CI). Release builds never use the debug key.
     def keystoreProperties = new Properties()
     def keystorePropertiesFile = rootProject.file("keystore.properties")
     if (keystorePropertiesFile.exists()) {
@@ -33,11 +32,12 @@ android {
         targetSdkVersion 36
         // CI bumps these per beta via CB_VERSION_CODE / CB_VERSION_NAME env vars.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
-        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 20
-        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.1'
+        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 100
+        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.1.0-rc.1'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";
+        buildConfigField "java.lang.String", "RCLONE_SOURCE_SHA", "\"" + project.properties['de.schuelken.cloudbridge.rCloneRef'] + "\""
         setProperty("archivesBaseName",  "cloudbridge_v"+versionName)
 
         externalNativeBuild {
@@ -48,6 +48,7 @@ android {
     }
 
     buildFeatures {
+        buildConfig true
         viewBinding true
     }
 
@@ -73,11 +74,12 @@ android {
                     appIcon: "@mipmap/ic_launcher",
                     appIconRound: "@mipmap/ic_launcher_round"
             ]
-            signingConfig releaseKeyConfigured ? signingConfigs.release : signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 
     sourceSets {
+        main.assets.srcDir "$buildDir/generated/rcloneAssets"
         configureEach {
             jniLibs.srcDirs = ["lib"]
         }
@@ -156,9 +158,49 @@ android {
 
     gradle.projectsEvaluated {
         preBuild.dependsOn(':rclone:buildAll')
+        tasks.matching { it.name.startsWith('merge') &&
+                (it.name.endsWith('NativeLibs') || it.name.endsWith('JniLibFolders')) }.configureEach {
+            dependsOn(':rclone:buildAll')
+            inputs.property('approvedNativeCommit', project.properties['de.schuelken.cloudbridge.rCloneRef'])
+            inputs.files(fileTree('lib').matching { include '**/librclone.so' })
+                    .withPropertyName('generatedRcloneBinaries')
+        }
+        def releaseSigningCheck = tasks.register('verifyReleaseSigning') {
+            doLast {
+                def signing = android.signingConfigs.release
+                if (signing.storeFile == null || !signing.storeFile.isFile() ||
+                        !signing.storePassword || !signing.keyAlias || !signing.keyPassword) {
+                    throw new GradleException('Release signing is incomplete. Configure the release keystore, or build assembleOssDebug.')
+                }
+                def expected = (System.getenv('CB_SIGNING_CERT_SHA256') ?: keystoreProperties['certificateSha256'] ?: '')
+                        .replace(':', '').toLowerCase(java.util.Locale.ROOT)
+                if (!(expected ==~ /[0-9a-f]{64}/))
+                    throw new GradleException('Set the expected release certificate SHA-256 in CB_SIGNING_CERT_SHA256 or certificateSha256.')
+                def store = java.security.KeyStore.getInstance(signing.storeType ?: java.security.KeyStore.getDefaultType())
+                signing.storeFile.withInputStream { store.load(it, signing.storePassword.toCharArray()) }
+                def certificate = store.getCertificate(signing.keyAlias)
+                if (certificate == null) throw new GradleException('The configured release signing alias has no certificate.')
+                def digest = java.security.MessageDigest.getInstance('SHA-256').digest(certificate.encoded)
+                        .collect { String.format('%02x', it & 0xff) }.join('')
+                if (digest != expected || certificate.toString().contains('CN=Android Debug'))
+                    throw new GradleException('The release signing certificate does not match the approved identity.')
+            }
+        }
+        // AGP omits validateSigning when no signing inputs are configured.
+        // The independent guard must also precede every release pre-build.
+        tasks.matching {
+            (it.name.startsWith('pre') && it.name.endsWith('ReleaseBuild')) ||
+                (it.name.startsWith('validateSigning') && it.name.endsWith('Release'))
+        }.configureEach { dependsOn(releaseSigningCheck) }
     }
 
     namespace 'ca.pkay.rcloneexplorer'
+    testOptions {
+        unitTests.includeAndroidResources = true
+    }
+    // Opt-in signed release instrumentation, restricted by the fixture to a
+    // disposable emulator. The shipped application remains non-debuggable.
+    testBuildType project.hasProperty('acceptanceRelease') ? 'release' : 'debug'
 
     // https://android.izzysoft.de/articles/named/iod-scan-apkchecks#blobs
     dependenciesInfo {
@@ -169,12 +211,49 @@ android {
     }
 }
 
+// Verify packaged bytes, not just BuildConfig or a provenance label. This also
+// detects interrupted builds which left an old merged-native-libraries output.
+tasks.register('verifyDebugApkEngines') {
+    dependsOn 'packageOssDebug'
+    doLast {
+        def apks = fileTree("$buildDir/outputs/apk/oss/debug").matching { include '*.apk' }.files
+        if (apks.isEmpty()) throw new GradleException('No debug APKs were produced')
+        apks.each { apk ->
+            new java.util.zip.ZipFile(apk).withCloseable { zip ->
+                def record = zip.getEntry('assets/engine-provenance.json')
+                if (record == null || record.size > 65536) throw new GradleException('Missing packaged provenance')
+                def provenance = zip.getInputStream(record).withCloseable {
+                    new groovy.json.JsonSlurper().parse(it)
+                }
+                if (provenance.commit != project.properties['de.schuelken.cloudbridge.rCloneRef'])
+                    throw new GradleException('Packaged engine source differs from the approved pin')
+                def libraries = java.util.Collections.list(zip.entries()).findAll { it.name ==~ /lib\/[^\/]+\/librclone\.so/ }
+                if (!(libraries.size() in [1,4])) throw new GradleException('Incomplete native APK contents')
+                libraries.each { lib ->
+                    def abi = lib.name.split('/')[1]
+                    def expected = provenance.artifacts.find { it.abi == abi }
+                    def digest = java.security.MessageDigest.getInstance('SHA-256')
+                    zip.getInputStream(lib).withCloseable { input ->
+                        byte[] buffer = new byte[65536]; int count
+                        while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+                    }
+                    def actual = digest.digest().collect { String.format('%02x', it & 0xff) }.join('')
+                    if (expected == null || expected.bytes != lib.size || expected.sha256 != actual)
+                        throw new GradleException("Packaged engine hash mismatch: ${apk.name} / ${abi}")
+                }
+            }
+        }
+    }
+}
+tasks.matching { it.name == 'assembleOssDebug' }.configureEach { dependsOn 'verifyDebugApkEngines' }
+
 repositories {
     mavenCentral()
     google()
 }
 
 dependencies {
+    implementation 'net.lingala.zip4j:zip4j:2.11.6'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.vectordrawable:vectordrawable:1.1.0'
     implementation 'androidx.cardview:cardview:1.0.0'
@@ -200,7 +279,7 @@ dependencies {
 
     // Thumbnails
     implementation 'com.github.bumptech.glide:glide:4.16.0'
-    implementation 'androidx.work:work-runtime-ktx:2.9.0'
+    implementation 'androidx.work:work-runtime-ktx:2.10.5'
     implementation 'androidx.preference:preference:1.2.1'
     // REST Client
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
@@ -223,8 +302,13 @@ dependencies {
     implementation 'com.github.AppIntro:AppIntro:6.3.1'
     // TEST
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.16.1'
+    testImplementation 'androidx.test:core:1.6.1'
+    testImplementation 'androidx.work:work-testing:2.10.5'
     androidTestImplementation 'androidx.test:runner:1.5.2'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    androidTestImplementation 'androidx.work:work-testing:2.10.5'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 
     // Splash screen
     implementation("androidx.core:core-splashscreen:1.0.1")

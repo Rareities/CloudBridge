@@ -26,6 +26,19 @@ data class Task(var id: Long) {
     var onFailFollowup: Long? = null
     var onSuccessFollowup: Long? = null
     var transfers: Int? = null
+    // Stable identity prevents reuse of another job's bisync listings if an ID is recycled.
+    var bisyncUUID = ""
+    var bisyncAdvancedOptions = ""
+    var bisyncMaxDelete = 10
+    var bisyncResyncMode = "path1"
+    var bisyncCheckAccess = false
+    var bisyncBackupDir1 = ""
+    var bisyncBackupDir2 = ""
+    var chargingOnly = false
+    var batteryNotLow = false
+    var quietHoursStart = -1
+    var quietHoursEnd = -1
+    @kotlinx.serialization.Transient var validationError: String? = null
 
     override fun toString(): String {
         return "$title: $remoteId: $remoteType: $remotePath: $localPath: $remoteId2: $remoteType2: $remotePath2: $direction"
@@ -50,6 +63,10 @@ data class Task(var id: Long) {
         var COLUMN_NAME_ONFAIL_FOLLOWUP = "task_onFailFollowupTask"
         var COLUMN_NAME_ONSUCCESS_FOLLOWUP = "task_onSuccessFollowupTask"
         var COLUMN_NAME_TRANSFERS = "task_transfers"
+        const val COLUMN_NAME_BISYNC_UUID = "task_bisync_uuid"
+        const val COLUMN_NAME_BISYNC_ADVANCED = "task_bisync_advanced"
+        const val COLUMN_NAME_BISYNC_MAX_DELETE = "task_bisync_max_delete"
+        const val COLUMN_NAME_POLICY = "task_policy"
 
         const val TASK_MD5SUM_DEFAULT = false
         const val TASK_WIFIONLY_DEFAULT = false
@@ -61,5 +78,35 @@ data class Task(var id: Long) {
 
     fun asJSON(): JSONObject {
         return JSONObject(Json.encodeToString(this))
+    }
+
+    fun policyJSON(): String = JSONObject().apply {
+        put("version", 1)
+        put("resyncMode", bisyncResyncMode)
+        put("checkAccess", bisyncCheckAccess)
+        put("backup1", bisyncBackupDir1)
+        put("backup2", bisyncBackupDir2)
+        put("chargingOnly", chargingOnly)
+        put("batteryNotLow", batteryNotLow)
+        put("quietStart", quietHoursStart)
+        put("quietEnd", quietHoursEnd)
+    }.toString()
+
+    fun readPolicyJSON(value: String?) {
+        if (value.isNullOrBlank()) return
+        try {
+            val json = JSONObject(value)
+            require(json.getInt("version") == 1) { "Unsupported task policy version" }
+            bisyncResyncMode = json.getString("resyncMode")
+            bisyncCheckAccess = json.getBoolean("checkAccess")
+            bisyncBackupDir1 = json.getString("backup1")
+            bisyncBackupDir2 = json.getString("backup2")
+            chargingOnly = json.getBoolean("chargingOnly")
+            batteryNotLow = json.getBoolean("batteryNotLow")
+            quietHoursStart = json.getInt("quietStart")
+            quietHoursEnd = json.getInt("quietEnd")
+        } catch (_: Exception) {
+            validationError = "Task settings are invalid or from an unsupported version. Review this task before running it."
+        }
     }
 }
