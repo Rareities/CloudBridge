@@ -29,6 +29,7 @@
     <string name="author_name" translatable="false">Patryk Kaczmarkiewicz &lt;github.com/patrykcoding&gt;</string>
     <string name="follow_on_github">Follow on GitHub</string>
     <string name="maintainer">Maintainer</string>
+    <string name="upstream_cloudbridge_maintainer" translatable="false">Upstream CloudBridge maintainer</string>
     <string name="maintainer_name" translatable="false">Thies &lt;github.com/thies2005&gt;</string>
     <string name="previous_maintainer">Previous Maintainer</string>
     <string name="previous_maintainer_name" translatable="false">Felix Nüsse &lt;github.com/newhinton&gt;</string>
@@ -125,7 +126,7 @@
     <string name="from">from</string>
     <string name="flaticon" translatable="false">Flaticon</string>
     <string name="intro_welcome_title">Welcome to ProtonBridge</string>
-    <string name="intro_welcome_description">An unofficial personal project for automatic two-way folder sync with Proton Drive.\n\nProtonBridge combines a reviewed rclone engine, Proton Drive patches from OSS Singularity, and bisync inside this Android app. It is independent of Proton and the upstream app authors.</string>
+    <string name="intro_welcome_description">An unofficial personal project by Rareities for automatic two-way folder sync with Proton Drive.\n\nProtonBridge combines a reviewed rclone engine, Proton Drive patches from OSS Singularity, and bisync inside this Android app. It is independent of Proton and the upstream app authors.</string>
     <string name="intro_storage_title">Storage access</string>
     <string name="intro_storage_description">ProtonBridge relies on rclone and needs your permission to access all files. Please grant storage access when prompted, otherwise the application will not work properly.</string>
     <string name="intro_community_title">Community</string>
