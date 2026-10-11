@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      publish_test:
+        description: 'Publish debug APKs as a test prerelease (isolated test branch only)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,6 +43,15 @@ jobs:
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;29.0.14206865'
           log-accepted-android-sdk-licenses: false
+      - name: Run host checks for the test prerelease
+        if: inputs.publish_test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s scripts/tests
+          ./gradlew --console=plain :rclone:buildAll
+          (cd rclone/cache/rclone-src && go build -mod=readonly -tags noselfupdate -o "$RUNNER_TEMP/rclone-host" .)
+          CLOUDBRIDGE_TEST_RCLONE="$RUNNER_TEMP/rclone-host" ./gradlew --console=plain testOssDebugUnitTest lint -x :rclone:buildAll
       - name: Build four architectures and universal APK
         run: ./gradlew --console=plain assembleOssDebug
       - name: Verify APK signatures and native provenance
@@ -49,5 +63,51 @@ jobs:
           path: |
             app/build/outputs/apk/oss/debug/*.apk
             app/build/generated/rcloneAssets/*
+            app/build/reports/verified-apks.json
           if-no-files-found: error
           retention-days: 14
+
+  publish-test:
+    if: inputs.publish_test && github.ref == 'refs/heads/test/bisync-startup-1.1.1-rc.1'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: bisync-debug-apks
+          path: distribution
+      - name: Publish verified debug test APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd distribution
+          mkdir "$RUNNER_TEMP/debug-apk-payload"
+          mapfile -d '' files < <(find . -type f -print0)
+          cp "${files[@]}" "$RUNNER_TEMP/debug-apk-payload/"
+          cd "$RUNNER_TEMP/debug-apk-payload"
+          tag="test-bisync-startup-${GITHUB_SHA:0:8}"
+          apks=(./*.apk)
+          test "${#apks[@]}" -eq 5
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
+          cat > "$RUNNER_TEMP/debug-test-notes.md" <<'NOTES'
+          These are **debug test APKs**, not the normal release APK. They install alongside the release app with separate settings and storage.
+
+          This branch includes the personal-fork README, full changelog, earlier safety fixes, UUID guidance, simplified bisync editor and execution feedback fixes. Host tests, lint, APK verification and native-provenance checks passed in this workflow. Device and live-account testing remain outstanding.
+
+          A previous debug installation signed by a different build key may need to be uninstalled first; uninstalling clears its separate debug data. The normal release installation is separate.
+
+          Use arm64-v8a on an ARM64 Android phone, or universal if unsure. Configure a disposable folder, then Save and preview → Review and initialise → Run.
+
+          Full changelog: https://github.com/Rareities/CloudBridge/blob/test/bisync-startup-1.1.1-rc.1/docs/FORK_CHANGELOG.md
+
+          The normal release APK still requires adding this test branch to the existing fork-release environment allowlist. No release signing protections were removed. This prerelease is not marked as the latest stable release.
+          NOTES
+          gh release create "$tag" --target "$GITHUB_SHA" --title 'CloudBridge bisync debug test APKs' --notes-file "$RUNNER_TEMP/debug-test-notes.md" --draft --prerelease --latest=false
+          gh release upload "$tag" "${apks[@]}" ./engine-* SHA256SUMS.txt verified-apks.json
+          gh release edit "$tag" --draft=false --prerelease --latest=false
