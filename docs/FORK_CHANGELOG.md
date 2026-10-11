@@ -4,9 +4,9 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
-## 1.1.1-rc.1 — unpublished safety follow-up
+## 1.1.1-rc.1 — safety and bisync follow-up
 
-Unpublished candidate following 1.1.0-rc.1. Retains the pinned rclone engine
+Release candidate following 1.1.0-rc.1. Retains the pinned rclone engine
 `47048daf3c80e1de633ec9a1f09981f4c30f9a30`; no engine source patch is needed for
 these managed-app fixes.
 
@@ -30,8 +30,8 @@ these managed-app fixes.
   commit-linked changelog at the top of README without removing original content.
 
 Validation results and remaining device/live-account limits are recorded in
-this changelog. No signed release is published by
-these source changes.
+this changelog and the signed release
+[notes](releases/v1.1.1-rc.1.md).
 
 ### Simpler bisync editor follow-up
 
@@ -109,13 +109,24 @@ Independent source review passed. Device execution remains unrun.
   engine documentation clarifying credential locking and standalone account
   changes. The Android engine pin stays at the previously reviewed source.
 - The README and this changelog are maintained in the accompanying documentation
-  commit. The full follow-up source history is published on
-  [`test/bisync-startup-1.1.1-rc.1`](https://github.com/Rareities/CloudBridge/tree/test/bisync-startup-1.1.1-rc.1),
-  leaving master unchanged. The rclone documentation follow-up is on
-  [`test/cloudbridge-1.1.1-rc.1`](https://github.com/Rareities/rclone/tree/test/cloudbridge-1.1.1-rc.1).
-  Debug test APKs use separate `test-bisync-startup-*` prerelease tags and a
-  separate application ID. They are not normal release upgrades. Normal release
-  signing still requires the branch to be admitted by the `fork-release` environment.
+  commits. The reviewed app changes are promoted together to `master`, preserving
+  the full commit history. The rclone documentation follow-up is merged into its
+  `master`; the Android engine remains pinned to the previously reviewed source.
+  Temporary debug-test publication was used to obtain user acceptance and then
+  removed. Normal release APKs retain the existing package and release certificate.
+
+### Promotion audit and cleanup
+
+- Re-review of all app changes since 1.1.0-rc.1 found no new concrete blocker.
+  The user reported the debug build works correctly on their device; broader
+  live-account and physical-device compatibility gates remain as documented.
+- Remove the temporary debug-prerelease publisher and exact test-ref allowance
+  in release signing. Keep release signing restricted to `master` and its existing
+  protected environment. Debug builds become manual to prevent duplicate builds.
+- Retire superseded temporary branches and Actions build artifacts after signed
+  release success. Preserve prior signed releases for rollback; archive unmerged
+  obsolete branch history before removing the branch. Automation review branches
+  remain available for future upstream intake.
 
 ### Validation status
 
@@ -384,5 +395,3 @@ Authors below are git metadata. Merge rows represent integration, not an extra i
 | [76f218c559](https://github.com/Rareities/rclone/commit/76f218c559a5be7c423eba7a381e71df260c7b89) | ChatGPT | Merge reviewed official rclone master release tooling |
 | [6a9f0fc48c](https://github.com/Rareities/rclone/commit/6a9f0fc48ca23660022fe24615bf5e988710d418) | ChatGPT | build: check known vulnerabilities and preserve executable archive modes |
 | [47048daf3c](https://github.com/Rareities/rclone/commit/47048daf3c80e1de633ec9a1f09981f4c30f9a30) | Rareities | Merge reviewed Proton bisync and verified fork release |
-
-
