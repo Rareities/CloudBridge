@@ -33,7 +33,22 @@ Validation results and remaining device/live-account limits are recorded in
 this changelog. No signed release is published by
 these source changes.
 
+### First-run UUID error follow-up
+
+Run now checks baseline readiness before resolving its UUID/path. A new task
+shows Preview → review → Initialise guidance instead of “Invalid UUID string”.
+Malformed baselines cannot enable Run or advisory preview; explicitly saving a
+task repairs a malformed task UUID without reusing the old baseline.
+
+Validation: **172 host tests passed**, lint and all five OSS debug APK builds
+passed (using the same verified pinned native engines). Three new regressions
+cover first Run, malformed baseline identifiers and explicit task-save repair.
+Independent source review passed. Device execution remains unrun.
+
 ### Follow-up commits
+
+- [e8f2a5ad5a](https://github.com/Rareities/CloudBridge/commit/e8f2a5ad5aae553eca7a5fd5d014d413120d9316) —
+  first-run initialization guidance and safe task/baseline UUID validation.
 
 - [f5b8f5fc3e](https://github.com/Rareities/CloudBridge/commit/f5b8f5fc3e282116ad1ecfd7eabc1e6c6ce247db) —
   configuration/account approval, process admission, durable restore, resolved
