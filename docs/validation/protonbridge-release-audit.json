@@ -1,0 +1,131 @@
+{
+  "release": "v1.1.2-rc.1",
+  "repository": "Rareities/ProtonBridge",
+  "applicationSource": "8c002e3de84e37f5edc07f56dcc22b2f4decdb40",
+  "engineSource": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+  "verifiedAt": "2026-10-11T21:45:53.708963+00:00",
+  "applicationId": "io.github.rareities.protonbridge",
+  "installation": "Separate app from CloudBridge; export/import configuration, grant permissions and establish fresh bisync approval; stop old schedules.",
+  "verification": {
+    "localAppTests": 176,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "releaseVersionTests": 7,
+    "lint": "passed with existing baseline",
+    "instrumentationCompilation": "passed",
+    "independentSourceReview": "passed",
+    "signedBuildRun": "https://github.com/Rareities/ProtonBridge/actions/runs/38176577287",
+    "signedBuildConclusion": "success",
+    "masterLintRun": 38176562869,
+    "masterDependencyAuditRun": 38176133086,
+    "masterDependencyAuditSource": "7227ad5d12416e1efda1581704e811b36d7cd474",
+    "pinnedEngineRegressionRun": 38174357895,
+    "pinnedEngineIntegrationRun": 38174357903,
+    "engineCiFollowupRegressionRun": 38174548164,
+    "engineCiFollowupIntegrationRun": 38174548107,
+    "engineChecks": "success",
+    "publicationAssetCount": 11,
+    "assetDigests": "GitHub asset digests match all ten checksum-ledger entries; downloaded ledger/metadata/ARM64 digests also match API digests.",
+    "downloadedArm64Signature": "verified with apksigner",
+    "arm64VersionCode": 127,
+    "debuggable": false,
+    "certificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+    "certificateMatchesPreviousSignedRelease": true,
+    "downloadedArm64NativeHashAndPin": "verified against embedded provenance",
+    "downloadedArm64NativeVersionBrand": "protonbridge.de1b01ca4ca0",
+    "allFiveApks": [
+      {
+        "file": "protonbridge_v1.1.2-rc.1-oss-arm64-v8a-release.apk",
+        "bytes": 33477010,
+        "sha256": "472e96741179512846fc521cf333a06ca9e15801a19a4e53136627187ce4a478",
+        "abis": [
+          "arm64-v8a"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.2-rc.1-oss-armeabi-v7a-release.apk",
+        "bytes": 34873750,
+        "sha256": "dee5f79f5dab374195c1c712aa70bf6d4b5bbfe7f5bffa4fc225540c84e7583d",
+        "abis": [
+          "armeabi-v7a"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.2-rc.1-oss-universal-release.apk",
+        "bytes": 139400531,
+        "sha256": "112111086ce2c4220828f75c684d453b5df1dfb7883ad4abf0771a2749349844",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "x86",
+          "x86_64"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.2-rc.1-oss-x86_64-release.apk",
+        "bytes": 43148126,
+        "sha256": "ebfe60ff7983eec54c837fc0236d28b7f731ffe0e5117767a146b15c545153a1",
+        "abis": [
+          "x86_64"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.2-rc.1-oss-x86-release.apk",
+        "bytes": 44499837,
+        "sha256": "fa2fbfd9ff75538e44ae9e95fee596d7bb3892a015d407df3d5c7c312a62c835",
+        "abis": [
+          "x86"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      }
+    ]
+  },
+  "performance": {
+    "fixtureFiles": 20,
+    "ancestorRequestsBefore": 42,
+    "ancestorRequestsAfter": 2,
+    "secondsBefore": 2.047206441,
+    "secondsAfter": 0.71201301,
+    "scope": "Localhost signed/encrypted fixture without injected network latency; not Android or live-Proton throughput."
+  },
+  "limits": [
+    "No independent device or live-account test of this release.",
+    "Small-file API/crypto and name-search overhead remain profiling targets.",
+    "Historical upstream README, releases and audit records retain their original attribution/identities."
+  ]
+}

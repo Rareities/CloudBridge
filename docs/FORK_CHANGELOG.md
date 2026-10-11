@@ -27,7 +27,25 @@ installation from CloudBridge; permissions and task approval must be established
 in the new app. The release validator recognizes historical CloudBridge version
 properties when checking prior APK version codes.
 
-See [release notes](releases/v1.1.2-rc.1.md) for scope and validation limits.
+Application changes are committed at
+[`7227ad5d`](https://github.com/Rareities/ProtonBridge/commit/7227ad5d12416e1efda1581704e811b36d7cd474)
+(rebrand, icons, docs, engine pin and version) and
+[`8c002e3d`](https://github.com/Rareities/ProtonBridge/commit/8c002e3de84e37f5edc07f56dcc22b2f4decdb40)
+(explicit fork/upstream maintainer attribution). Engine
+[`18a0cc7d`](https://github.com/Rareities/rclone/commit/18a0cc7dd5449cbfa797f2023faf82dc5df5ffe8)
+adds CI coverage after the pinned performance source commit without changing its
+runtime code.
+
+[Signed v1.1.2-rc.1](https://github.com/Rareities/ProtonBridge/releases/tag/v1.1.2-rc.1)
+was published from `8c002e3d`. Local validation passed 176/176 app tests, seven
+release-version tests, lint and instrumentation compilation. Signed CI passed
+engine/app checks and verified all five APKs. Public asset digests match the
+checksum ledger; the downloaded ARM64 APK independently passed package/label,
+version, signature, certificate and embedded engine hash/pin/branding checks.
+
+See [release notes](releases/v1.1.2-rc.1.md) for scope and validation limits and
+[the verification record](validation/protonbridge-release-audit.json) for run IDs
+and APK digests.
 
 ## 1.1.1-rc.1 — safety and bisync follow-up
 
