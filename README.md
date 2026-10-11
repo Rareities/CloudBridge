@@ -1,3 +1,34 @@
+# About this personal fork
+
+This is a fork of [CloudBridge](https://github.com/thies2005/CloudBridge), which
+is a fork of [Round Sync](https://github.com/newhinton/Round-Sync), which comes
+from [RCX](https://github.com/x0b/rcx), originally a fork of
+[rcloneExplorer](https://github.com/patrykcoding/rcloneExplorer).
+
+The main goal is to build CloudBridge with a reviewed, pinned version of the
+latest rclone beta/development code, bring in selected Proton Drive patches from
+[OSS-Singularity's rclone fork](https://oss-oo.io/OSS-Singularity/rclone) used by
+its Proton Drive Linux work, and implement bisync inside CloudBridge. My
+[rclone fork](https://github.com/Rareities/rclone) contains the engine changes;
+this app pins an exact reviewed commit rather than following a moving branch.
+I have also made other improvements and fixes to both rclone and the app.
+The [full changelog and commit history](docs/FORK_CHANGELOG.md) explains what changed.
+
+**DISCLAIMER: THIS IS HEAVILY VIBE CODED.** I know very little about Android app
+development, but I know how to work with AI and have spent weeks on this project.
+I think it works great for my needs, and I have taken enough steps personally to
+feel comfortable using it. That is my own experience, not a guarantee that it
+will work safely in every setup: **use it at your own risk**, and keep independent
+backups of important files.
+
+The reason I started this was to have a Proton Drive bisync service that could
+automatically sync my folders. That use case guides the project. This is simply
+a personal project; if it benefits someone else, I will be happy. Issues, pull
+requests, comments and concerns are welcome. Published candidates and their
+validation limits are described in the changelog and release notes.
+
+---
+
 # CloudBridge - Rclone for Android
 [![license: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/thies2005/CloudBridge/blob/master/LICENSE) [![Latest Downloads](https://img.shields.io/github/downloads/thies2005/CloudBridge/latest/total)](https://github.com/thies2005/CloudBridge/releases) [![GitHub release](https://img.shields.io/github/v/release/thies2005/CloudBridge?include_prereleases)](https://github.com/thies2005/CloudBridge/releases/latest)
 [![Documentation](https://img.shields.io/badge/Documentation-GitHub_Pages-4aad4e)](https://thies2005.github.io/CloudBridge/)
