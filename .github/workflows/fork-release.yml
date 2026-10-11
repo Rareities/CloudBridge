@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/test/bisync-startup-1.1.1-rc.1'
     runs-on: ubuntu-latest
     environment: fork-release
     timeout-minutes: 60
