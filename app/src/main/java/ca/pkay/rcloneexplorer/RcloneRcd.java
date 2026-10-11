@@ -66,6 +66,33 @@ public class RcloneRcd {
     private static final String TAG = "RcloneRcd";
     private static final java.util.Set<Process> activeProcesses = java.util.Collections.newSetFromMap(
             new java.util.concurrent.ConcurrentHashMap<Process, Boolean>());
+    private static final java.util.Set<RcloneRcd> activeDaemons = java.util.Collections.newSetFromMap(
+            new java.util.concurrent.ConcurrentHashMap<RcloneRcd, Boolean>());
+
+    /** Explicit configuration recovery may retire idle browsing, never active user transfers. */
+    public static void quiesceForConfigurationChange() throws IOException {
+        if (Looper.myLooper() == Looper.getMainLooper())
+            throw new IOException("Reconnect must run outside the UI thread");
+        java.util.List<RcloneRcd> retiring;
+        java.util.concurrent.locks.Lock lock = ca.pkay.rcloneexplorer.util.ConfigurationExclusion.LOCK.writeLock();
+        lock.lock();
+        try {
+            if (NativeSessionGate.GLOBAL.isBusy())
+                throw new IOException("Finish active transfers and file streams before reconnecting");
+            retiring = new java.util.ArrayList<>(activeDaemons);
+            for (RcloneRcd daemon : retiring) {
+                if (daemon.hasActiveWork()) throw new IOException("The remote service has active work; retry after it finishes");
+            }
+            for (RcloneRcd daemon : retiring) {
+                if (!daemon.stopped && !daemon.stopRcdIfIdle())
+                    throw new IOException("New remote work started; retry after it finishes");
+            }
+        } finally { lock.unlock(); }
+        for (RcloneRcd daemon : retiring) {
+            if (!daemon.awaitNativeExit(5000)) throw new IOException("The remote service is still stopping; retry after it exits");
+        }
+        if (NativeSessionGate.GLOBAL.isBusy()) throw new IOException("Another native operation started; retry when it finishes");
+    }
 
     public static boolean hasRunningProcess() {
         for (Process process : activeProcesses) {
@@ -166,6 +193,7 @@ public class RcloneRcd {
             sessionGeneration = NativeSessionGate.GLOBAL.generation();
             try { startupSession.set(NativeSessionGate.GLOBAL.acquireRc(sessionGeneration)); }
             catch (IOException busy) { throw new RcdIOException(busy); }
+            activeDaemons.add(this);
             try { startup.run(); }
             catch (RuntimeException | Error failure) {
                 // Even an unchecked pre-spawn failure must relinquish the startup
@@ -314,6 +342,7 @@ public class RcloneRcd {
         statusFailures.clear();
         activeJobs.clear();
         releaseStartupSession();
+        activeDaemons.remove(this);
         nativeExited.countDown();
         activityChanged();
     }

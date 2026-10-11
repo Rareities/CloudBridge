@@ -107,8 +107,11 @@ run against newly selected locations.
 
 Native configuration encryption, explicit encrypted credential backup and
 journalled recovery are described in [ADR-002](ADR-002-native-rclone-config.md).
-Backup task/path metadata is readable because the ZIP container is not itself
-encrypted. Keep the export password separately and validate recovery.
+New backups encrypt all component contents using standard AES-256 ZIP entries,
+including task/path metadata and proxy credentials. Fixed component names and
+sizes remain visible. Keep the export password separately and validate recovery.
+Proxy passwords are Keystore-wrapped at rest. Legacy proxy-enabled archives
+without a protected password require explicit proxy reconfiguration.
 
 Task IDs alone cannot authorise exported shortcuts. Diagnostics are redacted
 and bounded, and private history is retained by task identity. Release signing
@@ -130,8 +133,8 @@ readable certificate/key files; FTP and DLNA remain limited to this device.
 
 ## Engine and validation boundaries
 
-The packaged engine is pinned to Rareities/rclone commit
-`719ed66b9e7e6a76b9bfe3fe1ae194f89ea5ccc9`, source label `v1.76.0` (development),
+The packaged engine is pinned to the reviewed Rareities/rclone master commit
+recorded in `gradle.properties`, source label `v1.76.0` (development),
 with the reviewed API and bridge dependencies. The APK includes an engine
 provenance manifest, per-ABI SHA-256 values and module versions. Engine fixes
 and upstream relationships are recorded in that repository's
@@ -165,7 +168,8 @@ compatibility or safe deployment against irreplaceable production data.
 
 ## Build
 
-Use JDK 17, the Android SDK and Go at least 1.26. The executable is CGO-disabled.
+Use JDK 17, Android SDK 36, NDK 29.0.14206865 and Go at least 1.27.2. Android
+executables use bionic system DNS, CGO, PIE and 16 KiB load alignment at API 23.
 
 ```sh
 ./gradlew testOssDebugUnitTest lintOssDebug assembleOssDebug

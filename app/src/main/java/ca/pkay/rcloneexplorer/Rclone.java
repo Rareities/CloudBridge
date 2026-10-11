@@ -86,6 +86,7 @@ public class Rclone {
     private volatile JSONObject cachedRemotesConfig;
     private volatile long cachedConfMtime;
     private volatile long cachedConfLength;
+    private volatile long cachedConfGeneration;
 
     public Rclone(Context context) {
         this.context = context;
@@ -181,13 +182,17 @@ public class Rclone {
         ArrayList<String> environmentValues = new ArrayList<>();
         SharedPreferences pref = PreferenceManager.getDefaultSharedPreferences(context);
 
+        try { ca.pkay.rcloneexplorer.util.SecretSettings.migrateLegacy(context, context.getString(R.string.pref_key_proxy_password)); }
+        catch (IOException locked) { throw new IllegalStateException("Proxy password migration needs attention in settings.", locked); }
         boolean proxyEnabled = pref.getBoolean(context.getString(R.string.pref_key_use_proxy), false);
         if(proxyEnabled) {
             String noProxy = pref.getString(context.getString(R.string.pref_key_no_proxy_hosts), "localhost");
             String protocol = pref.getString(context.getString(R.string.pref_key_proxy_protocol), "http");
             String host = pref.getString(context.getString(R.string.pref_key_proxy_host), "localhost");
             String user = pref.getString(context.getString(R.string.pref_key_proxy_username), "");
-            String pass = pref.getString(context.getString(R.string.pref_key_proxy_password), "");
+            String pass;
+            try { pass = ca.pkay.rcloneexplorer.util.SecretSettings.password(context, context.getString(R.string.pref_key_proxy_password)); }
+            catch (IOException locked) { throw new IllegalStateException("Proxy password is unavailable. Re-enter it in settings.", locked); }
             int port = pref.getInt(context.getString(R.string.pref_key_proxy_port), 8080);
             String url = ca.pkay.rcloneexplorer.util.NetworkValues.proxy(protocol, host, port, user, pass);
             // per https://golang.org/pkg/net/http/#ProxyFromEnvironment
@@ -209,7 +214,9 @@ public class Rclone {
         // We set SSL_CERT_DIR to Android's native certificate store path.
         environmentValues.add("SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts");
 
-        environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
+        // Android/bionic resolves on the app's active network and respects Private DNS.
+        // Passing raw nameserver IPs to the pure-Go resolver bypasses that policy.
+        environmentValues.add("GODEBUG=netdns=cgo");
 
         java.util.LinkedHashMap<String, String> merged = new java.util.LinkedHashMap<>();
         for (String value : environmentValues) merged.put(value.substring(0, value.indexOf('=')), value);
@@ -219,27 +226,6 @@ public class Rclone {
             merged.put(value.substring(0, separator), value);
         }
         return merged.values().toArray(new String[0]);
-    }
-
-    private String getDnsServers() {
-        String fallback = ""; // Do not silently send queries to a public third-party resolver.
-        try {
-            ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (cm == null) return fallback;
-            Network network = cm.getActiveNetwork();
-            if (network == null) return fallback;
-            LinkProperties lp = cm.getLinkProperties(network);
-            if (lp == null) return fallback;
-            StringBuilder sb = new StringBuilder();
-            for (InetAddress dns : lp.getDnsServers()) {
-                if (sb.length() > 0) sb.append(",");
-                sb.append(ca.pkay.rcloneexplorer.util.NetworkValues.dnsEndpoint(dns));
-            }
-            return sb.length() > 0 ? sb.toString() : fallback;
-        } catch (Exception e) {
-            FLog.e(TAG, "Failed to detect DNS servers, using fallback", e);
-            return fallback;
-        }
     }
 
     public void logErrorOutput(Process process) {
@@ -435,8 +421,9 @@ public class Rclone {
         File confFile = new File(rcloneConf);
         long mtime = confFile.lastModified();
         long length = confFile.length();
+        long generation = ca.pkay.rcloneexplorer.util.NativeSessionGate.GLOBAL.generation();
         synchronized (this) {
-            if (cachedRemotesConfig != null && cachedConfMtime == mtime && cachedConfLength == length) {
+            if (cachedRemotesConfig != null && cachedConfMtime == mtime && cachedConfLength == length && cachedConfGeneration == generation) {
                 return cachedRemotesConfig;
             }
         }
@@ -463,6 +450,7 @@ public class Rclone {
                 cachedRemotesConfig = parsed;
                 cachedConfMtime = mtime;
                 cachedConfLength = length;
+                cachedConfGeneration = generation;
             }
             return parsed;
         } catch (IOException | JSONException e) {
@@ -475,6 +463,93 @@ public class Rclone {
     /** Drop the cached config dump so the next getRemotes() re-reads it from rclone. */
     public void invalidateRemotesCache() {
         cachedRemotesConfig = null;
+    }
+
+    public static final class ProtonAccount {
+        public final String identity;
+        public final String remoteName;
+        private ProtonAccount(String identity, String remoteName) { this.identity = identity; this.remoteName = remoteName; }
+    }
+
+    /** Resolve configured wrappers only; never guess that distinct declared logins are aliases. */
+    public ProtonAccount protonAccount(String remoteName) throws IOException {
+        JSONObject configs = getCachedRemotesConfig();
+        if (configs == null) throw new IOException("Could not read the remote configuration safely");
+        java.util.Set<String> visited = new java.util.HashSet<>();
+        String name = remoteName;
+        for (int depth = 0; depth < 9; depth++) {
+            if (!visited.add(name)) throw new IOException("The remote wrapper configuration contains a cycle");
+            JSONObject selected = configs.optJSONObject(name);
+            if (selected == null) throw new IOException("The configured task remote is unavailable");
+            String type = selected.optString("type");
+            if (type.equals("protondrive")) {
+                String username = selected.optString("username");
+                if (username.trim().isEmpty()) throw new IOException("The Proton username is missing; edit the remote login");
+                return new ProtonAccount(ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.identity(username), name);
+            }
+            if (!type.equals("alias") && !type.equals("crypt") && !type.equals("cache")) return null;
+            String target = selected.optString("remote");
+            int colon = target.indexOf(':');
+            if (colon <= 0 || target.startsWith("/")) return null; // Native paths and on-the-fly backends are not attributed.
+            name = target.substring(0, colon);
+        }
+        throw new IOException("The remote wrapper chain is too deep");
+    }
+
+    /** Explicit account recovery. This never changes a bisync baseline or starts synchronisation. */
+    public void reconnectProtonAccount(String remoteName, String oneTimeCode,
+            ca.pkay.rcloneexplorer.util.ProcessRunner.StopCheck stop) throws IOException {
+        if (oneTimeCode == null) oneTimeCode = "";
+        if (!oneTimeCode.isEmpty() && !oneTimeCode.matches("[0-9]{6}")) throw new IOException("Enter a six-digit one-time code");
+        ca.pkay.rcloneexplorer.util.BisyncPolicy.Admission admission =
+                ca.pkay.rcloneexplorer.util.BisyncPolicy.Admission.Companion.acquire(context);
+        if (admission == null) throw new IOException("Finish the active transfer before reconnecting");
+        Process child = null;
+        try {
+            RcloneRcd.quiesceForConfigurationChange();
+            invalidateRemotesCache();
+            ProtonAccount account = protonAccount(remoteName);
+            if (account == null) throw new IOException("This task does not resolve to a configured Proton Drive account");
+            String identityBefore = configurationIdentity(stop);
+            ca.pkay.rcloneexplorer.proton.ProtonAccountState.pause(context, account.identity,
+                    ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action.RECONNECT);
+            if (stop.stopped()) throw new IOException("Reconnect cancelled; jobs remain paused");
+            child = getRuntimeProcess(createCommand("config", "update", account.remoteName,
+                    "client_uid", "", "client_access_token", "", "client_refresh_token", "",
+                    "client_salted_key_pass", "", "client_token_generation", "", "--non-interactive"));
+            requireCaptured(child, stop, 30000, 65536);
+            invalidateRemotesCache();
+            String[] env = oneTimeCode.isEmpty() ? getRcloneEnv() : getRcloneEnv("RCLONE_PROTONDRIVE_2FA=" + oneTimeCode);
+            child = getRuntimeProcess(createCommand("lsjson", account.remoteName + ":", "--max-depth=1",
+                    "--protondrive-enable-caching=false"), env);
+            String listing = requireCaptured(child, stop, 120000, 4 * 1024 * 1024);
+            try { new JSONArray(listing); } catch (JSONException invalid) { throw new IOException("Proton returned an invalid verification listing"); }
+            invalidateRemotesCache();
+            ProtonAccount after = protonAccount(remoteName);
+            if (after == null || !after.identity.equals(account.identity) || !configurationIdentity(stop).equals(identityBefore))
+                throw new IOException("Remote settings changed while reconnecting; verify the saved account again");
+            if (stop.stopped()) throw new IOException("Reconnect cancelled; jobs remain paused");
+            ca.pkay.rcloneexplorer.proton.ProtonAccountState.verified(context, account.identity);
+        } finally {
+            invalidateRemotesCache();
+            admission.closeAfterExit(child);
+        }
+    }
+
+    private String requireCaptured(Process child, ca.pkay.rcloneexplorer.util.ProcessRunner.StopCheck stop,
+                                   long timeout, int maxChars) throws IOException {
+        StringBuilder text = new StringBuilder();
+        ca.pkay.rcloneexplorer.util.ProcessRunner runner = new ca.pkay.rcloneexplorer.util.ProcessRunner();
+        java.util.concurrent.atomic.AtomicBoolean overflow = new java.util.concurrent.atomic.AtomicBoolean();
+        long started = android.os.SystemClock.elapsedRealtime();
+        ca.pkay.rcloneexplorer.util.ProcessRunner.Outcome result = runner.run(child,
+                () -> stop.stopped() || android.os.SystemClock.elapsedRealtime() - started > timeout,
+                line -> {
+                    if (line.length() > maxChars - text.length()) { overflow.set(true); runner.requestStop(); }
+                    else text.append(line);
+                }, line -> { });
+        if (!result.success() || overflow.get()) throw new IOException("Proton verification did not complete. Check login, 2FA or any official-client challenge; jobs remain paused.");
+        return text.toString();
     }
 
     public RemoteItem getRemoteItemFromName(String remoteName) {
@@ -603,33 +678,8 @@ public class Rclone {
 
     @Nullable
     public HashMap<String, String> getConfig(String name) {
-        String[] command = createCommand("config", "dump");
-        StringBuilder output = new StringBuilder();
-        Process process;
-        JSONObject configs = new JSONObject();
-
+        JSONObject configs = getCachedRemotesConfig();
         HashMap<String, String> options = new HashMap<>();
-
-        try {
-            process = getRuntimeProcess(command);
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                Toasty.error(context, context.getString(R.string.error_getting_config), Toast.LENGTH_SHORT, true).show();
-                logErrorOutput(process);
-            }
-
-            configs = new JSONObject(output.toString());
-        } catch (IOException | InterruptedException | JSONException e) {
-            FLog.e(TAG, "getRemotes: error retrieving remotes", e);
-        }
-
         if (configs == null) {
             return options;
         }
@@ -841,7 +891,22 @@ public class Rclone {
     /** Native bisync uses app-owned arguments and state; no shell is involved. */
     public Process bisync(ca.pkay.rcloneexplorer.Items.Task task, File privateWorkdir,
                           String operation, ArrayList<FilterEntry> filters, boolean validateOnly) throws IOException {
+        return getRuntimeProcess(bisyncArguments(task, privateWorkdir, operation, filters, validateOnly), getRcloneEnv());
+    }
+
+    public int taskTransfers(ca.pkay.rcloneexplorer.Items.Task task) {
+        try {
+            int count = Integer.parseInt(getTransfers(task.getTransfers() == null ? null : task.getTransfers().toString()));
+            if (count < 1) throw new NumberFormatException();
+            return count;
+        } catch (NumberFormatException invalid) { throw new IllegalArgumentException("Choose a positive transfer count in task or app settings"); }
+    }
+
+    /** One argument builder supplies native execution and the explicit expert preview. */
+    public String[] bisyncArguments(ca.pkay.rcloneexplorer.Items.Task task, File privateWorkdir,
+                                   String operation, ArrayList<FilterEntry> filters, boolean validateOnly) throws IOException {
         java.util.List<String> advanced = ca.pkay.rcloneexplorer.util.AdvancedOptions.parse(task.getBisyncAdvancedOptions());
+        ca.pkay.rcloneexplorer.util.AdvancedOptions.validateConnectionBudget(task.getBisyncAdvancedOptions(), taskTransfers(task));
         // The persisted legacy integer is the underlying backend type, not the
         // alias/crypt/cache wrapper identity. Resolve the configured endpoint.
         RemoteItem endpoint = getRemoteItemFromName(task.getRemoteId());
@@ -870,7 +935,7 @@ public class Rclone {
         args.addAll(advanced);
         // Cobra parses flag names and values before its help path, without opening a remote.
         if (validateOnly) args.add("--help");
-        return getRuntimeProcess(args.toArray(new String[0]), getRcloneEnv());
+        return args.toArray(new String[0]);
     }
 
     /** Local config identity excludes rotating sessions, but includes remote identity and policy. */
@@ -898,7 +963,7 @@ public class Rclone {
             Collections.sort(names);
             java.util.Set<String> transientFields = new java.util.HashSet<>(Arrays.asList(
                     "client_uid", "client_access_token", "client_refresh_token", "client_salted_key_pass",
-                    "token", "access_token", "refresh_token", "token_expiry", "config_refresh_token"));
+                    "token", "access_token", "refresh_token", "token_expiry", "config_refresh_token", "client_token_generation"));
             for (String name : names) {
                 JSONObject remote = configs.getJSONObject(name);
                 updateIdentityDigest(digest, name);
@@ -1632,63 +1697,6 @@ public class Rclone {
         return null;
     }
 
-    public File getFileFromZip(Uri uri, String target, File targetfile) throws IOException {
-
-        // The exact cause of the NPE is unknown, but the effect is the same
-        // - the copy process has failed, therefore bubble an IOException
-        // for handling at the appropriate layers.
-        InputStream inputStream;
-        try {
-            inputStream = context.getContentResolver().openInputStream(uri);
-        } catch(NullPointerException e) {
-            throw new IOException(e);
-        }
-        ZipInputStream zipInputStream = new ZipInputStream(new BufferedInputStream(inputStream));
-
-        ZipEntry zipEntry;
-        int count = 0;
-        byte[] buffer = new byte[1024];
-
-        while ((zipEntry = zipInputStream.getNextEntry()) != null) {
-            if(zipEntry.getName().equals(target)){
-                FileOutputStream fileOutputStream = new FileOutputStream(targetfile);
-                while ((count = zipInputStream.read(buffer)) != -1) {
-                    fileOutputStream.write(buffer, 0, count);
-                }
-                fileOutputStream.flush();
-                fileOutputStream.close();
-                zipInputStream.closeEntry();
-                zipInputStream.close();
-                return targetfile;
-            }
-            zipInputStream.closeEntry();
-        }
-        zipInputStream.close();
-        return null;
-    }
-
-    public String readDatabaseJson(Uri uri) throws Exception {
-        return readTextfileFromZip(uri, "rcx.json-tmp", "rcx.json");
-    }
-
-    public String readSharedPrefs(Uri uri) throws Exception {
-        return readTextfileFromZip(uri, "rcx.prefs-tmp", "rcx.prefs");
-    }
-
-    public String readTextfileFromZip(Uri uri, String tempfile, String targetfile) throws Exception {
-        File temp = new File(context.getFilesDir().getPath(), tempfile);
-        temp = getFileFromZip(uri, targetfile, temp);
-
-        char[] buffer = new char[4096];
-        StringBuilder json = new StringBuilder();
-        InputStream inputStream = new FileInputStream(temp);
-        Reader in = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-        for (int numRead; (numRead = in.read(buffer, 0, buffer.length)) > 0; ) {
-            json.append(buffer, 0, numRead);
-        }
-        return json.toString();
-    }
-
     public boolean copyConfigFileFromZip(Uri uri) throws Exception {
         ca.pkay.rcloneexplorer.Database.json.BackupRestore.restore(context, this, uri);
         return true;
@@ -1740,6 +1748,9 @@ public class Rclone {
 
     public void exportConfigFile(Uri uri, String password) throws IOException {
         File staged = null;
+        File archive = null;
+        char[] secret = password == null ? null : password.toCharArray();
+        java.util.Map<String, byte[]> parts = new java.util.HashMap<>();
         try {
             final byte[] tasks;
             final byte[] preferences;
@@ -1750,25 +1761,34 @@ public class Rclone {
                 // No config child can start during this snapshot. SQLite captures all
                 // task, filter and trigger references in one transaction.
                 tasks = Exporter.create(context).getBytes(StandardCharsets.UTF_8);
-                preferences = SharedPreferencesBackup.export(context).getBytes(StandardCharsets.UTF_8);
+                preferences = new JSONObject(SharedPreferencesBackup.export(context))
+                        .put("proxyPassword", ca.pkay.rcloneexplorer.util.SecretSettings.password(context,
+                                context.getString(R.string.pref_key_proxy_password))).toString().getBytes(StandardCharsets.UTF_8);
             } finally { snapshotLock.unlock(); }
             if (tasks.length > 4 * 1024 * 1024 || preferences.length > 256 * 1024)
                 throw new IOException("Configuration backup exceeds supported size limits");
-            OutputStream destination = context.getContentResolver().openOutputStream(uri);
-            if (destination == null) throw new IOException("Could not open the backup destination");
-            try (ZipOutputStream zip = new ZipOutputStream(destination); InputStream config = new FileInputStream(staged)) {
-                zip.putNextEntry(new ZipEntry("rcx.json"));
-                zip.write(tasks);
-                zip.closeEntry();
-                zip.putNextEntry(new ZipEntry("rcx.prefs"));
-                zip.write(preferences);
-                zip.closeEntry();
-                zip.putNextEntry(new ZipEntry("rclone.conf"));
-                ca.pkay.rcloneexplorer.util.ProtectedRcloneConfig.transfer(config, zip);
-                zip.closeEntry();
+            parts.put("rcx.json", tasks);
+            parts.put("rcx.prefs", preferences);
+            try (InputStream config = new FileInputStream(staged); java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream()) {
+                ca.pkay.rcloneexplorer.util.ProtectedRcloneConfig.transfer(config, bytes);
+                parts.put("rclone.conf", bytes.toByteArray());
+            }
+            archive = ca.pkay.rcloneexplorer.util.ConfigStaging.create(context, "backup-export-", true);
+            ca.pkay.rcloneexplorer.util.ProtectedBackup.write(archive, secret, parts);
+            // The complete authenticated archive exists before the selected destination is opened.
+            try (OutputStream destination = context.getContentResolver().openOutputStream(uri);
+                 InputStream input = new FileInputStream(archive)) {
+                if (destination == null) throw new IOException("Could not open the backup destination");
+                byte[] buffer = new byte[8192]; int count;
+                while ((count = input.read(buffer)) != -1) destination.write(buffer, 0, count);
             }
         } catch (JSONException error) { throw new IOException("Could not serialise configuration backup", error); }
-        finally { ca.pkay.rcloneexplorer.util.ConfigStaging.discard(staged); }
+        finally {
+            ca.pkay.rcloneexplorer.util.ConfigStaging.discard(staged);
+            ca.pkay.rcloneexplorer.util.ConfigStaging.discard(archive);
+            ca.pkay.rcloneexplorer.util.ProtectedBackup.clear(parts);
+            if (secret != null) java.util.Arrays.fill(secret, '\0');
+        }
     }
 
     public boolean isCompatible() {

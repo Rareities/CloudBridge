@@ -1,5 +1,4 @@
-// A pinned, CGO-disabled rclone executable is packaged as librclone.so for each ABI.
-// No C compiler or generated source patching is needed for this build.
+// A pinned Android PIE executable uses bionic DNS, preserving Android Private DNS/VPN policy.
 import groovy.json.JsonOutput
 import java.security.MessageDigest
 
@@ -30,11 +29,30 @@ def hashFile(File file) {
 }
 
 def targets = [
-    'armeabi-v7a': [arch: 'arm', arm: '7', machine: 40, elfClass: 1],
-    'arm64-v8a': [arch: 'arm64', machine: 183, elfClass: 2],
-    'x86': [arch: '386', machine: 3, elfClass: 1],
-    'x86_64': [arch: 'amd64', machine: 62, elfClass: 2],
+    'armeabi-v7a': [arch: 'arm', arm: '7', machine: 40, elfClass: 1, triple: 'armv7a-linux-androideabi'],
+    'arm64-v8a': [arch: 'arm64', machine: 183, elfClass: 2, triple: 'aarch64-linux-android'],
+    'x86': [arch: '386', machine: 3, elfClass: 1, triple: 'i686-linux-android'],
+    'x86_64': [arch: 'amd64', machine: 62, elfClass: 2, triple: 'x86_64-linux-android'],
 ]
+
+def androidCompiler(String triple) {
+    def sdk = System.getenv('ANDROID_HOME') ?: System.getenv('ANDROID_SDK_ROOT')
+    if (!sdk) {
+        def local = rootProject.file('local.properties')
+        def settings = new Properties()
+        if (local.isFile()) local.withInputStream { settings.load(it) }
+        sdk = settings.getProperty('sdk.dir')
+    }
+    if (!sdk) throw new GradleException('Set ANDROID_HOME or sdk.dir before building the Android engine')
+    def windows = System.getProperty('os.name').startsWith('Windows')
+    def host = windows ? 'windows-x86_64' : System.getProperty('os.name').startsWith('Mac') ? 'darwin-x86_64' : 'linux-x86_64'
+    def ndk = project.properties['de.schuelken.cloudbridge.ndkVersion']
+    def api = project.properties['de.schuelken.cloudbridge.ndkToolchainVersion']
+    if (api != '23') throw new GradleException('The engine minimum API must match the application minimum API 23')
+    def compiler = new File(sdk, "ndk/${ndk}/toolchains/llvm/prebuilt/${host}/bin/clang${windows ? '.exe' : ''}")
+    if (!compiler.isFile()) throw new GradleException("Install the pinned Android NDK: sdkmanager 'ndk;${ndk}'")
+    return '"' + compiler.absolutePath + '" --target=' + triple + api
+}
 
 tasks.register('checkoutRclone') {
     doLast {
@@ -46,7 +64,9 @@ tasks.register('checkoutRclone') {
         def wanted = GO_REQ_VERSION.tokenize('.').collect { it as int }
         def major = matcher.group(1) as int
         def minor = matcher.group(2) as int
-        if (major < wanted[0] || (major == wanted[0] && minor < wanted[1]))
+        def patch = matcher.group(3) as int
+        if (major < wanted[0] || (major == wanted[0] && (minor < wanted[1] ||
+                (minor == wanted[1] && patch < wanted[2]))))
             throw new GradleException("Go ${GO_REQ_VERSION} or newer is required; found ${go}")
         CACHE_PATH.mkdirs()
         if (!new File(SOURCE_PATH, '.git').isDirectory()) {
@@ -76,6 +96,8 @@ targets.each { abi, target ->
         inputs.property('engineCommit', RCLONE_REF)
         inputs.property('engineRepository', RCLONE_REPO_URL)
         inputs.property('goRequirement', GO_REQ_VERSION)
+        inputs.property('ndkVersion', project.properties['de.schuelken.cloudbridge.ndkVersion'])
+        inputs.property('nativePolicy', 'android-cgo-pie-api23-16k')
         outputs.file(new File(OUTPUT_PATH, "${abi}/librclone.so"))
         // Record outputs so Gradle invalidates its virtual filesystem snapshots
         // after Go writes the native executables outside Gradle's file APIs.
@@ -86,19 +108,20 @@ targets.each { abi, target ->
             def sourceVersion = new File(SOURCE_PATH, 'VERSION').text.trim()
             exec {
                 workingDir SOURCE_PATH
-                environment 'GOOS', 'linux'
+                environment 'GOOS', 'android'
                 environment 'GOARCH', target.arch
-                environment 'CGO_ENABLED', '0'
+                environment 'CGO_ENABLED', '1'
+                environment 'CC', androidCompiler(target.triple)
                 if (target.arm) environment 'GOARM', target.arm
-                commandLine 'go', 'build', '-mod=readonly', '-buildvcs=true', '-tags', 'noselfupdate',
-                        '-trimpath', '-ldflags', "-s -w -X github.com/rclone/rclone/fs.Version=${sourceVersion}-cloudbridge.${RCLONE_REF.take(12)}",
+                commandLine 'go', 'build', '-mod=readonly', '-buildvcs=true', '-buildmode=pie', '-tags', 'noselfupdate',
+                        '-trimpath', '-ldflags', "-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384 -X github.com/rclone/rclone/fs.Version=${sourceVersion}-cloudbridge.${RCLONE_REF.take(12)}",
                         '-o', destination.absolutePath, '.'
             }
             byte[] header = new byte[20]
             destination.withInputStream { if (it.read(header) != 20) throw new GradleException('Engine binary is truncated') }
             def machine = (header[18] & 0xff) | ((header[19] & 0xff) << 8)
             if (header[0] != 0x7f || header[1] != 0x45 || header[2] != 0x4c || header[3] != 0x46 ||
-                    header[4] != target.elfClass || machine != target.machine)
+                    header[4] != target.elfClass || header[16] != 3 || header[17] != 0 || machine != target.machine)
                 throw new GradleException("The generated binary is not the expected ${abi} ELF executable")
         }
     })
@@ -116,7 +139,9 @@ tasks.register('buildAll') {
         }
         def provenance = [schemaVersion: 1, repository: RCLONE_REPO_URL, commit: RCLONE_REF,
             sourceVersion: new File(SOURCE_PATH, 'VERSION').text.trim(), goToolchain: capture(['go', 'version']),
-            goos: 'linux', cgoEnabled: false, buildTags: ['noselfupdate'], artifacts: outputs]
+            goos: 'android', cgoEnabled: true, buildMode: 'pie', androidApi: 23, maxPageSize: 16384,
+            ndkVersion: project.properties['de.schuelken.cloudbridge.ndkVersion'],
+            buildTags: ['noselfupdate'], artifacts: outputs]
         new File(PROVENANCE_PATH, 'engine-provenance.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(provenance))
         new File(PROVENANCE_PATH, 'engine-modules.txt').text = capture(['go', 'list', '-m', '-mod=readonly',
             '-f', '{{.Path}} {{.Version}}{{if .Replace}} => {{.Replace.Path}} {{.Replace.Version}}{{end}}', 'all'], SOURCE_PATH) + '\n'

@@ -1,6 +1,8 @@
 name: Bisync debug APK
 
 on:
+  push:
+    branches: [master]
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -34,7 +36,7 @@ jobs:
           cache: false
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
         with:
-          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;29.0.14206865'
           log-accepted-android-sdk-licenses: false
       - name: Build four architectures and universal APK
         run: ./gradlew --console=plain assembleOssDebug

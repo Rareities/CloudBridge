@@ -99,6 +99,7 @@ try {
     Run-Case 'schedule-restart' 'ca.pkay.rcloneexplorer.ScheduledRestartIntegrationTest#verifyRestartRunsOneRealScheduledBisync' 1
     Run-Case 'rc-lifecycle' 'ca.pkay.rcloneexplorer.RcDeviceIntegrationTest' 1
     Run-Case 'provider-workflow' 'ca.pkay.rcloneexplorer.ProviderDeviceIntegrationTest' 1
+    Run-Case 'ordinary-copy-sync' 'ca.pkay.rcloneexplorer.OrdinaryTaskDeviceIntegrationTest' 1
     Run-Case 'constraints-cancellation' 'ca.pkay.rcloneexplorer.SystemJobIntegrationTest' 1
     Run-Case 'editor-native-workflow' 'ca.pkay.rcloneexplorer.TaskEditorDeviceIntegrationTest' 1
     foreach ($name in @('bisync-ready', 'advanced-options', 'schedule-and-actions')) { Export-EditorImage $name }

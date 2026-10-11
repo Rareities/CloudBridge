@@ -14,10 +14,42 @@ public final class BackupArchive {
     public final byte[] config;
     public final String tasks;
     public final String preferences;
+    public final boolean encrypted;
     private BackupArchive(Map<String, byte[]> parts) {
+        this(parts, false);
+    }
+    private BackupArchive(Map<String, byte[]> parts, boolean encrypted) {
         config = parts.get("rclone.conf");
         tasks = new String(parts.get("rcx.json"), StandardCharsets.UTF_8);
         preferences = new String(parts.get("rcx.prefs"), StandardCharsets.UTF_8);
+        this.encrypted = encrypted;
+        java.util.Arrays.fill(parts.get("rcx.json"), (byte)0);
+        java.util.Arrays.fill(parts.get("rcx.prefs"), (byte)0);
+    }
+
+    public static BackupArchive read(android.content.Context context, android.net.Uri uri, String password) throws IOException {
+        java.io.File staged = ca.pkay.rcloneexplorer.util.ConfigStaging.create(context, "backup-input-", true);
+        char[] secret = password == null ? null : password.toCharArray();
+        try {
+            try (InputStream input = context.getContentResolver().openInputStream(uri);
+                 java.io.FileOutputStream output = new java.io.FileOutputStream(staged)) {
+                if (input == null) throw new IOException("Could not open the selected backup");
+                int total = 0, count;
+                byte[] buffer = new byte[8192];
+                while ((count = input.read(buffer)) != -1) {
+                    if (count > ca.pkay.rcloneexplorer.util.ProtectedBackup.MAX_ARCHIVE - total)
+                        throw new IOException("Backup archive exceeds size limits");
+                    output.write(buffer, 0, count);
+                    total += count;
+                }
+            }
+            if (ca.pkay.rcloneexplorer.util.ProtectedBackup.isEncrypted(staged))
+                return new BackupArchive(ca.pkay.rcloneexplorer.util.ProtectedBackup.read(staged, secret), true);
+            return read(new java.io.FileInputStream(staged));
+        } finally {
+            if (secret != null) java.util.Arrays.fill(secret, '\0');
+            ca.pkay.rcloneexplorer.util.ConfigStaging.discard(staged);
+        }
     }
 
     public static BackupArchive read(InputStream input) throws IOException {

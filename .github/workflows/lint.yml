@@ -2,8 +2,7 @@ name: Android Lint
 
 on:
   push:
-    branches-ignore:
-      - 'master'
+    branches: ['master', 'feat/**']
   pull_request:
 
 permissions:

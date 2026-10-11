@@ -16,8 +16,9 @@ public final class AdvancedOptions {
     private static final Set<String> REQUIRES_VALUE = new HashSet<>(Arrays.asList(
             "bwlimit", "tpslimit", "tpslimit-burst", "retries", "low-level-retries",
             "timeout", "contimeout", "max-transfer", "max-duration", "min-size",
-            "max-size", "filter", "include", "exclude", "suffix", "modify-window"));
-    private static final Set<String> BOOLEAN = new HashSet<>(Arrays.asList("fast-list", "ignore-case"));
+            "max-size", "filter", "include", "exclude", "suffix", "modify-window",
+            "checkers", "max-connections", "buffer-size"));
+    private static final Set<String> BOOLEAN = new HashSet<>(Arrays.asList("fast-list", "ignore-case", "check-first"));
     private static final Set<String> OWNED = new HashSet<>(Arrays.asList(
             "resync", "resync-mode", "workdir", "config", "force", "max-delete", "max-delete-size",
             "compare", "checksum", "require-checksum", "ignore-checksum", "ignore-listing-checksum",
@@ -38,6 +39,11 @@ public final class AdvancedOptions {
     ));
 
     public static String restriction(String name) {
+        if (name.endsWith("-endpoint") || name.endsWith("-url") || name.endsWith("-host") ||
+                name.endsWith("-port") || name.endsWith("-remote") || name.endsWith("-upstreams") ||
+                name.contains("header") || name.equals("ca-cert") || name.equals("client-cert")) {
+            return "Configure connection destinations and trust in the remote editor, not task flags: --" + name;
+        }
         if (OWNED.contains(name) || (name.startsWith("no-") && OWNED.contains(name.substring(3))) ||
                 name.startsWith("rc-") || name.startsWith("dump") ||
                 name.startsWith("log-") || name.startsWith("stats-") || name.startsWith("header") ||
@@ -106,5 +112,32 @@ public final class AdvancedOptions {
         }
         if (result.size() > 64) throw new IllegalArgumentException("Maximum 64 advanced options per task");
         return result;
+    }
+
+    /** Rclone warns that an undersized connection cap can deadlock a transfer. */
+    public static void validateConnectionBudget(String input, int transfers) {
+        if (transfers < 1) throw new IllegalArgumentException("Transfer count must be positive");
+        long checkers = 8, connections = 0;
+        boolean checkFirst = false;
+        for (String flag : parse(input)) {
+            String value = flag.contains("=") ? flag.substring(flag.indexOf('=') + 1) : "true";
+            try {
+                if (flag.startsWith("--checkers=")) {
+                    checkers = Long.parseLong(value);
+                    if (checkers < 1 || checkers > Integer.MAX_VALUE) throw new NumberFormatException();
+                } else if (flag.startsWith("--max-connections=")) {
+                    connections = Long.parseLong(value);
+                    if (connections < 0 || connections > Integer.MAX_VALUE) throw new NumberFormatException();
+                } else if (flag.equals("--check-first") || flag.startsWith("--check-first=")) {
+                    checkFirst = Boolean.parseBoolean(value);
+                }
+            } catch (NumberFormatException invalid) {
+                throw new IllegalArgumentException("Use a positive checker count and a non-negative connection limit");
+            }
+        }
+        long required = (checkFirst ? Math.max(transfers, checkers) : transfers + checkers) + 1;
+        if (connections > 0 && connections < required)
+            throw new IllegalArgumentException("The selected transfer/checker settings require --max-connections=" + required +
+                    " or greater. Use 0 for no connection cap.");
     }
 }

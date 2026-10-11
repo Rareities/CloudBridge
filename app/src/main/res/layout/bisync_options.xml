@@ -36,6 +36,8 @@
         android:inputType="textMultiLine|textNoSuggestions" android:hint="@string/bisync_flags_hint"
         android:minHeight="96dp" android:gravity="top|start" android:autofillHints="" />
     <Button android:id="@+id/bisync_add_option" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_add_flag" />
+    <Button android:id="@+id/bisync_preset_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_tuning_title" />
+    <Button android:id="@+id/bisync_command_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_command_title" />
     <Button android:id="@+id/bisync_help_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_engine_help" />
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview_help" />
     <Button android:id="@+id/bisync_preview_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview" />

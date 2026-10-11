@@ -25,16 +25,26 @@ object BackupRestore {
 
     @JvmStatic @JvmOverloads @Throws(Exception::class)
     fun restore(context: Context, rclone: Rclone, uri: Uri, password: String? = null): Unit = synchronized(mutex) {
-        val archive = BackupArchive.read(context.contentResolver.openInputStream(uri))
-        val plan = ImportPlan.parse(archive.tasks)
-        SharedPreferencesBackup.validateJson(archive.preferences, context)
-        val staging = ca.pkay.rcloneexplorer.util.ConfigStaging.create(context, "restore-config-", true)
-        val prepared = try {
-            staging.writeBytes(archive.config)
-            val preparedConfig = rclone.protectImportedConfig(staging, password)
-            Pair(staging.readBytes(), preparedConfig)
-        } finally { ca.pkay.rcloneexplorer.util.ConfigStaging.discard(staging) }
-        commit(context, rclone, prepared.first, prepared.second, plan, archive.preferences)
+        val archive = BackupArchive.read(context, uri, password)
+        try {
+            val plan = ImportPlan.parse(archive.tasks)
+            val preferences = JSONObject(archive.preferences)
+            val proxyPassword = if (archive.encrypted) preferences.optString("proxyPassword", "") else ""
+            require(proxyPassword.toByteArray(Charsets.UTF_8).size <= 8192) { "Proxy password exceeds size limit" }
+            preferences.remove("proxyPassword")
+            // Old backups did not contain the proxy credential. Never send an old device
+            // password to a newly restored host, or silently bypass its required proxy.
+            if (!archive.encrypted && preferences.optBoolean("useProxy"))
+                throw IOException("This legacy backup has no protected proxy credential. Import its configuration separately, then configure the proxy explicitly.")
+            SharedPreferencesBackup.validateJson(preferences.toString(), context)
+            val staging = ca.pkay.rcloneexplorer.util.ConfigStaging.create(context, "restore-config-", true)
+            val prepared = try {
+                staging.writeBytes(archive.config)
+                val preparedConfig = rclone.protectImportedConfig(staging, password)
+                Pair(staging.readBytes(), preparedConfig)
+            } finally { ca.pkay.rcloneexplorer.util.ConfigStaging.discard(staging) }
+            commit(context, rclone, prepared.first, prepared.second, plan, preferences.toString(), proxyPassword)
+        } finally { archive.config.fill(0) }
     }
 
     /** Raw .conf import uses the same crash journal as the three-part ZIP restore. */
@@ -49,7 +59,7 @@ object BackupRestore {
 
     private fun commit(context: Context, rclone: Rclone, protectedConfig: ByteArray,
                        prepared: ca.pkay.rcloneexplorer.util.ProtectedRcloneConfig.PreparedImport,
-                       plan: ImportPlan?, restoredPreferences: String?) {
+                       plan: ImportPlan?, restoredPreferences: String?, proxyPassword: String? = null) {
         val lock = ConfigurationExclusion.LOCK.writeLock()
         lock.lock()
         var schedulesNeedReconcile = false
@@ -72,6 +82,7 @@ object BackupRestore {
                     .put("hadPassword", hadPassword)
                     .put("database", JSONObject(Exporter.create(context)))
                     .put("preferences", JSONObject(SharedPreferencesBackup.export(context)))
+                    .put("secretSettings", ca.pkay.rcloneexplorer.util.SecretSettings.snapshot(context))
                 if (hadConfig) {
                     val oldConfig = AtomicFile(config).openRead().use { it.readBytes() }
                     require(oldConfig.size <= 4 * 1024 * 1024) { "Existing configuration is too large to back up safely" }
@@ -100,6 +111,8 @@ object BackupRestore {
                     if (prepared.passwordRecord != null) write(wrapped, prepared.passwordRecord)
                     if (plan != null) db.replaceAll(plan.tasks, plan.filters, plan.triggers)
                     if (restoredPreferences != null) SharedPreferencesBackup.importJson(restoredPreferences, context)
+                    if (proxyPassword != null) ca.pkay.rcloneexplorer.util.SecretSettings.store(context,
+                        context.getString(ca.pkay.rcloneexplorer.R.string.pref_key_proxy_password), proxyPassword)
                     AtomicFile(File(journal, "pending")).delete()
                     require(!File(journal, "pending").exists() && !File(journal, "pending.bak").exists()) { "Cannot finish restore journal" }
                     cleanup(journal)
@@ -161,6 +174,9 @@ object BackupRestore {
         }
         DatabaseHandler(context).replaceAll(tasks, filters, triggers)
         SharedPreferencesBackup.importJson(backup.getJSONObject("preferences").toString(), context)
+        backup.optJSONObject("secretSettings")?.let {
+            ca.pkay.rcloneexplorer.util.SecretSettings.restoreSnapshot(context, it)
+        }
         AtomicFile(marker).delete()
         require(!marker.exists() && !File(journal, "pending.bak").exists()) { "Cannot finish rollback journal" }
         cleanup(journal)

@@ -668,16 +668,20 @@ public class MainActivity extends AppCompatActivity
         android.widget.EditText password = new android.widget.EditText(this);
         password.setHint("Configuration backup password");
         password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        password.setSaveEnabled(false);
+        if (Build.VERSION.SDK_INT >= 26) password.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         fields.addView(password);
         android.widget.EditText confirmation = new android.widget.EditText(this);
         if (exporting) {
             confirmation.setHint("Confirm backup password");
             confirmation.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            confirmation.setSaveEnabled(false);
+            if (Build.VERSION.SDK_INT >= 26) confirmation.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
             fields.addView(confirmation);
         }
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle(exporting ? "Protect backup credentials" : "Unlock configuration backup")
-                .setMessage(exporting ? "Use at least 12 characters and keep the password separately. Remote credentials are encrypted in rclone.conf. Task names, paths and preferences remain visible in the ZIP."
+                .setTitle(exporting ? "Encrypt configuration backup" : "Unlock configuration backup")
+                .setMessage(exporting ? "Use at least 12 characters and keep the password separately. Credentials, task names, paths and settings are encrypted using an AES-256 ZIP. Only the fixed component names and sizes remain visible."
                         : "Enter the backup or rclone configuration password. Leave blank for a legacy unencrypted backup. Your current configuration is kept until all parts pass validation.")
                 .setView(fields).setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(exporting ? "Export" : "Import", null).create();
@@ -715,7 +719,7 @@ public class MainActivity extends AppCompatActivity
         }
         @Override protected void onPostExecute(String error) {
             Dialogs.dismissSilently(loading);
-            if (error == null) Toasty.success(context, "Backup saved with encrypted credentials", Toast.LENGTH_LONG, true).show();
+            if (error == null) Toasty.success(context, "Backup saved with encrypted credentials and settings", Toast.LENGTH_LONG, true).show();
             else Toasty.error(context, "Backup failed: " + error, Toast.LENGTH_LONG, true).show();
         }
     }

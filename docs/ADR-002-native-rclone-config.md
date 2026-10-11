@@ -49,12 +49,18 @@ This is deletion, not a promise of secure erasure from flash storage.
 
 ## Import, export and rollback
 
-A full ZIP backup contains encrypted `rclone.conf`, task/filter/schedule JSON,
-and selected non-secret preferences. **The ZIP itself is not encrypted**: task
-names, paths and the selected preferences remain readable. Export requires an
-explicit backup password and re-encrypts a staged config under that password.
-Proxy passwords and the Keystore record are not included. Store the backup
-password independently of the Android installation.
+New full backups use standard AES-256 ZIP entries for `rclone.conf`, task/filter/
+schedule JSON and selected preferences including the proxy password. The config
+is independently re-encrypted under the export password; no device Keystore
+record is exported. Fixed component names and sizes remain visible, while task
+names, paths and setting contents are encrypted. Store the password separately.
+
+Zip4j validates authenticated entry contents before the restore transaction.
+Entry names, counts, compressed/expanded sizes and component schemas are bounded.
+The completed archive is staged privately before opening an export destination.
+Legacy non-encrypted ZIPs remain readable, except that an old proxy-enabled
+archive without its password requires explicit proxy reconfiguration instead of
+reusing a previous device credential or silently bypassing the proxy.
 
 Configuration, database and preference inputs are captured while configuration
 changes are excluded; the database collections come from one transaction and
@@ -62,8 +68,9 @@ preferences from one snapshot. Large or malformed imports are rejected before
 replacing live state. Import verifies the supplied password using rclone and
 stages any replacement wrapping record without modifying the active one.
 
-The restore journal covers the configuration, wrapped password, task database
-and selected preferences. Generation checks reject a concurrent configuration
+The restore journal covers configuration, wrapped password, task database,
+preferences and device-bound encrypted secret settings. It never journals the
+proxy password in plaintext. Generation checks reject a concurrent configuration
 replacement. Recovery restores the previous generation after an interrupted
 swap. Restored bisync tasks receive fresh identities and disabled schedules;
 their previous engine baselines are not imported or assumed safe.

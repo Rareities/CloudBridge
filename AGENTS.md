@@ -38,7 +38,7 @@ Keep this repository easy to upgrade from upstream rclone.
 
 ## Build
 
-Prerequisites: Go 1.26+, JDK 17, Android SDK. The rclone executable is CGO-disabled and does not need a C compiler. Release symbol tasks may require the configured NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
+Prerequisites: Go 1.27.2+, JDK 17, Android SDK 36 and the pinned NDK 29. The native Android executable uses CGO/bionic system DNS, PIE and 16 KiB ELF load alignment at API 23. Versions are pinned in `gradle.properties`; check there first if builds break.
 
 ```sh
 ./gradlew assembleOssDebug
@@ -60,8 +60,8 @@ Run the checks that match the change. Before any commit or push, required checks
 ./gradlew assembleOssDebug
 ```
 
-- Unit test coverage is minimal and lives in `app/src/test/`.
-- No instrumented/androidTest runner is wired in CI.
+- Host unit and integration tests live in `app/src/test/`.
+- Disposable-device workflows live in `app/src/androidTest/` and are run with `scripts/Verify-Emulator.ps1`; they must not use production accounts.
 - Lint baselines exist in `app/` and `safdav/`; `abortOnError` is enabled and `MissingTranslation` is a warning.
 - Skip `assembleOssDebug` only for docs-only changes that cannot affect the build.
 
@@ -83,9 +83,9 @@ Run the checks that match the change. Before any commit or push, required checks
 
 ## CI Workflows
 
-- `android.yml`: Builds **release** APKs on push to `master`; uploads per-ABI beta-release artifacts.
-- `lint.yml`: Runs unit tests + lint on every PR, not on `master`.
-- `dependencies.yml`: Rebuilds on `build.gradle` changes and runs FOSS library scan.
+- `fork-release.yml`: Explicit master-only signed release-candidate build and isolated publication.
+- `lint.yml`: Runs unit tests and lint on PRs and master/feature updates.
+- `dependencies.yml`: Resolves and archives runtime dependency provenance with a basic unexpected-tracker check; it is not a comprehensive licence certification.
 - `translations.yml`: Profanity-checks translated `strings.xml` on PRs.
 
 ## Gotchas

@@ -94,6 +94,9 @@ class TaskEditorControls(
         activity.findViewById<Button>(R.id.task_history_button).setOnClickListener { history() }
         activity.findViewById<Button>(R.id.bisync_add_option).setOnClickListener { addOption() }
         activity.findViewById<Button>(R.id.bisync_help_button).setOnClickListener { help() }
+        activity.findViewById<Button>(R.id.bisync_preset_button).setOnClickListener { tuningPreset() }
+        activity.findViewById<Button>(R.id.bisync_command_button).setOnClickListener { effectiveCommand() }
+        activity.findViewById<Button>(R.id.task_proton_connection_button).setOnClickListener { protonConnection() }
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { onDraftChanged() }
@@ -139,6 +142,7 @@ class TaskEditorControls(
         task.bisyncBackupDir2 = backupRemote.text.toString().trim()
         task.bisyncAdvancedOptions = flags.text.toString()
         AdvancedOptions.parse(task.bisyncAdvancedOptions)
+        AdvancedOptions.validateConnectionBudget(task.bisyncAdvancedOptions, rclone.taskTransfers(task))
     }
 
     fun mode(direction: Int) {
@@ -375,6 +379,92 @@ class TaskEditorControls(
             if (!activity.isFinishing) AlertDialog.Builder(activity).setTitle(R.string.bisync_engine_help)
                 .setView(selectableText(output)).setPositiveButton(android.R.string.ok, null).show()
         }
+    }
+
+    private fun tuningPreset() {
+        val templates = ca.pkay.rcloneexplorer.util.BisyncTuning.templates
+        AlertDialog.Builder(activity).setTitle(R.string.bisync_tuning_title)
+            .setItems(templates.map { it.title }.toTypedArray()) { _, position ->
+                val chosen = templates[position]
+                AlertDialog.Builder(activity).setTitle(chosen.title).setMessage(R.string.bisync_tuning_explanation)
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(android.R.string.ok) { _, _ ->
+                        try {
+                            val updated = ca.pkay.rcloneexplorer.util.BisyncTuning.apply(chosen, flags.text.toString())
+                            val values = activity.resources.getStringArray(R.array.task_transfers_values)
+                            val index = values.indexOfFirst { it.toIntOrNull() == chosen.transfers }
+                            require(index >= 0) { "The selected transfer count is unavailable" }
+                            activity.findViewById<Spinner>(R.id.task_transfers_spinner).setSelection(index)
+                            flags.setText(updated)
+                        } catch (invalid: IllegalArgumentException) { error(invalid.message) }
+                    }.show()
+            }.setNegativeButton(android.R.string.cancel, null).show()
+    }
+
+    private fun effectiveCommand() {
+        val task = persist() ?: return
+        activity.lifecycleScope.launch {
+            val description = withContext(Dispatchers.IO) {
+                runCatching {
+                    val filters = task.filterId?.takeIf { it >= 0 }?.let {
+                        requireNotNull(DatabaseHandler(activity).getFilter(it)).getFilters()
+                    } ?: arrayListOf()
+                    val working = java.io.File(BisyncPolicy.workdir(activity, task), "baselines/<current-baseline>")
+                    val args = rclone.bisyncArguments(task, working, BisyncStateStore.RUN, filters, false)
+                    args.joinToString("\n") { JSONObject.quote(ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(it)) }
+                }
+            }
+            if (!isActive || activity.isFinishing) return@launch
+            description.fold({
+                AlertDialog.Builder(activity).setTitle(R.string.bisync_command_title)
+                    .setView(selectableText(activity.getString(R.string.bisync_command_explanation) + "\n\n" + it))
+                    .setPositiveButton(android.R.string.ok, null).show()
+            }, { error(it.message) })
+        }
+    }
+
+    private fun protonConnection() {
+        val task = persist() ?: return
+        val code = EditText(activity).apply {
+            setHint(R.string.proton_one_time_code)
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+            isSaveEnabled = false
+            filters = arrayOf(android.text.InputFilter.LengthFilter(6))
+            if (android.os.Build.VERSION.SDK_INT >= 26) importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+        }
+        AlertDialog.Builder(activity).setTitle(R.string.proton_connection_title)
+            .setMessage(R.string.proton_connection_explanation).setView(code)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setNeutralButton(R.string.edit) { _, _ ->
+                code.text.clear()
+                activity.startActivity(Intent(activity, ca.pkay.rcloneexplorer.RemoteConfig.RemoteConfig::class.java)
+                    .putExtra(ca.pkay.rcloneexplorer.RemoteConfig.RemoteConfig.CONFIG_EDIT_TARGET, task.remoteId))
+            }
+            .setPositiveButton(R.string.proton_verify_connection) { _, _ ->
+                val otp = code.text.toString()
+                code.text.clear()
+                val cancel = java.util.concurrent.atomic.AtomicBoolean()
+                val progress = AlertDialog.Builder(activity).setMessage(R.string.proton_verifying)
+                    .setNegativeButton(android.R.string.cancel) { _, _ -> cancel.set(true) }
+                    .setOnCancelListener { cancel.set(true) }.create()
+                progress.show()
+                activity.lifecycleScope.launch {
+                    val coroutine = currentCoroutineContext()
+                    try {
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching { rclone.reconnectProtonAccount(task.remoteId, otp) { cancel.get() || !coroutine.isActive } }
+                        }
+                        if (!activity.isFinishing && !activity.isDestroyed) {
+                            result.fold({ Toast.makeText(activity, R.string.proton_verified, Toast.LENGTH_LONG).show() },
+                                { error(it.message) })
+                            refreshAfterResume()
+                        }
+                    } finally {
+                        cancel.set(true)
+                        progress.dismiss()
+                    }
+                }
+            }.setOnDismissListener { code.text.clear() }.show()
     }
 
     private fun selectableText(text: String): ScrollView = ScrollView(activity).apply {

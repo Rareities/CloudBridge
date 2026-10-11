@@ -1,69 +1,24 @@
 package ca.pkay.rcloneexplorer;
 
-import android.annotation.SuppressLint;
 import android.content.Context;
-import android.os.AsyncTask;
-import ca.pkay.rcloneexplorer.util.FLog;
+import ca.pkay.rcloneexplorer.util.BoundedLogWriter;
 
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Locale;
 
 public class Log2File {
 
-    private static final String TAG = "Log2File";
-    private Context context;
+    private static final BoundedLogWriter WRITER = new BoundedLogWriter();
+    private final File logFile;
 
     public Log2File(Context context) {
-        this.context = context;
+        logFile = new File(context.getFilesDir(), "logs/log.txt");
     }
 
     public void log(String message) {
-        File path = new File(context.getFilesDir(), "logs");
-        if (!path.isDirectory() && !path.mkdirs()) {
-            return;
-        }
-        File logFile = new File(path, "log.txt");
-
-        clearLogsIfTooBif(logFile);
-
-        @SuppressLint("SimpleDateFormat")
-        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-        String currentDateTime = dateFormat.format(new Date());
-
-        String logMessage = currentDateTime + " - " + ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(message) + "\n";
-
-        new WriteToFile(logFile, logMessage).execute();
-    }
-
-    private void clearLogsIfTooBif(File logFile) {
-        int fileSize = Integer.parseInt(String.valueOf(logFile.length() / 1024));
-        if (fileSize > 10000) { // 10 MB
-            logFile.delete();
-        }
-    }
-
-    private static class WriteToFile extends AsyncTask<Void, Void, Void> {
-
-        private File logFile;
-        private String logMessage;
-
-        WriteToFile(File logFile, String logMessage) {
-            this.logFile = logFile;
-            this.logMessage = logMessage;
-        }
-        @Override
-        protected Void doInBackground(Void... voids) {
-            try {
-                FileOutputStream stream = new FileOutputStream(logFile, true);
-                stream.write(logMessage.getBytes());
-                stream.close();
-            } catch (IOException e) {
-                FLog.e(TAG, "Could not write log file", e);
-            }
-            return null;
-        }
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(new Date());
+        WRITER.append(logFile, timestamp + " - " + message);
     }
 }

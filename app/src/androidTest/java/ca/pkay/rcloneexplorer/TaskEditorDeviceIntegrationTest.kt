@@ -218,6 +218,24 @@ class TaskEditorDeviceIntegrationTest {
             assertEquals("L", File(right, "left-change.txt").readText())
             assertEquals("R", File(left, "right-change.txt").readText())
 
+            press(screen, R.id.bisync_command_button)
+            onView(withText(containsString("--require-checksum"))).inRoot(isDialog()).check(matches(isDisplayed()))
+            onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
+            press(screen, R.id.bisync_preset_button)
+            onView(withText("Low memory")).inRoot(isDialog()).perform(click())
+            onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
+            screen.onActivity { activity ->
+                val custom = activity.findViewById<EditText>(R.id.bisync_advanced_flags)
+                assertTrue(custom.text.contains("--buffer-size=0M"))
+                assertTrue(custom.text.contains("--max-connections=4"))
+                assertFalse(activity.findViewById<Button>(R.id.task_run_button).isEnabled)
+                // Return the uncommitted draft to the saved settings before the next case.
+                custom.setText("--bwlimit=8M")
+                val values = activity.resources.getStringArray(R.array.task_transfers_values)
+                val position = values.indexOfFirst { it.toIntOrNull() == (task.transfers ?: -1) }
+                activity.findViewById<Spinner>(R.id.task_transfers_spinner).setSelection(position.coerceAtLeast(0))
+            }
+
             // Unsaved destructive options revoke the GUI's run permission immediately.
             awaitEnabled(screen, R.id.task_run_button)
             screen.onActivity { activity ->

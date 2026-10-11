@@ -24,5 +24,6 @@
     <Button android:id="@+id/task_run_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_run" />
     <Button android:id="@+id/task_schedule_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_schedule" />
     <Button android:id="@+id/task_history_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_history" />
+    <Button android:id="@+id/task_proton_connection_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/proton_connection_title" />
     <Button android:id="@+id/task_cancel_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_cancel" />
 </LinearLayout>

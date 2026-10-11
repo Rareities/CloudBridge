@@ -11,7 +11,7 @@ import java.util.Set;
 public final class ConfigStaging {
     private ConfigStaging() {}
     private static final Set<String> PREFIXES = new HashSet<>(Arrays.asList(
-            "config-protect-", "config-import-", "config-export-", "restore-config-"));
+            "config-protect-", "config-import-", "config-export-", "restore-config-", "backup-input-", "backup-export-"));
     private static final Set<File> ACTIVE = new HashSet<>();
 
     public static synchronized File create(Context context, String prefix, boolean cache) throws IOException {

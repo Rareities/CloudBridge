@@ -223,7 +223,7 @@ class RcDeviceIntegrationTest {
 
             // Stop is a request, not a confirmed exit. Wait for the native child to die
             // before calling getLocalRcd(), which refuses parallel daemon processes.
-            daemon.stopRcd()
+            RcloneRcd.quiesceForConfigurationChange()
             waitUntil("stale daemon native process to terminate", 15_000) {
                 !daemon.hasLiveProcess() && !RcloneRcd.hasRunningProcess()
             }

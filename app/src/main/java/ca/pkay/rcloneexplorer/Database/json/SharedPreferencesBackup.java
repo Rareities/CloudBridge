@@ -35,7 +35,7 @@ public class SharedPreferencesBackup {
         boolean refreshLaEnabled = value(snapshot, context.getString(R.string.pref_key_refresh_local_aliases), true);
         boolean vcpEnabled = value(snapshot, context.getString(R.string.pref_key_enable_vcp), false);
         boolean vcpDeclareLocal = value(snapshot, context.getString(R.string.pref_key_vcp_declare_local), true);
-        boolean vcpGrantAll = value(snapshot, context.getString(R.string.pref_key_vcp_grant_all), false);
+        boolean vcpGrantAll = false; // Retained only for older archive schema compatibility.
 
         // Look and Feel
         int oldTheme = value(snapshot, context.getString(R.string.pref_key_theme_old), FOLLOW_SYSTEM);
@@ -112,7 +112,7 @@ public class SharedPreferencesBackup {
         editor.putBoolean(context.getString(R.string.pref_key_refresh_local_aliases), jsonObject.getBoolean("refreshLaEnabled"));
         editor.putBoolean(context.getString(R.string.pref_key_enable_vcp), jsonObject.getBoolean("vcpEnabled"));
         editor.putBoolean(context.getString(R.string.pref_key_vcp_declare_local), jsonObject.getBoolean("vcpDeclareLocal"));
-        editor.putBoolean(context.getString(R.string.pref_key_vcp_grant_all), jsonObject.getBoolean("vcpGrantAll"));
+        editor.putBoolean(context.getString(R.string.pref_key_vcp_grant_all), false);
 
         // Look and Feel
         // The type changed. So we try to use boolean first, and if it fails we use the proper int

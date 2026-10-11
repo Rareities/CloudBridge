@@ -5,6 +5,13 @@ import java.util.Arrays;
 import static org.junit.Assert.*;
 
 public class AdvancedOptionsTest {
+    @Test public void taskFlagsCannotRedirectStoredCredentialsOrReplaceTransportTrust() {
+        for (String flag : new String[]{"--s3-endpoint=https://other.invalid", "--webdav-url=https://other.invalid",
+                "--sftp-host=other.invalid", "--alias-remote=other:", "--crypt-remote=other:",
+                "--ca-cert=/tmp/unreviewed.pem", "--webdav-headers=Authorization,Bearer-secret"}) {
+            assertThrows(flag, IllegalArgumentException.class, () -> AdvancedOptions.parse(flag));
+        }
+    }
     @Test public void preservesSpacesUnicodeAndEqualsInsideOneArgument() {
         assertEquals(Arrays.asList("--bwlimit=8M", "--include=folder with spaces/**", "--exclude=\u4f60\u597d=old/**"),
                 AdvancedOptions.parse("--bwlimit=8M\n--include=folder with spaces/**\n--exclude=\u4f60\u597d=old/**"));

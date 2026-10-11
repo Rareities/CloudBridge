@@ -52,6 +52,10 @@ public class VirtualContentProviderTest {
         assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder2/secret"));
         assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder"));
         assertTrue(provider.isChildDocument("remotes/demo:", "remotes/demo:/folder/file"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder/../private"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder/./private"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder//private"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder/..\\private"));
     }
 
     @Test
@@ -117,6 +121,11 @@ public class VirtualContentProviderTest {
         String actualName = VirtualContentProvider.getRemoteName(documentId);
 
         assertEquals(actualName, expectedName);
+        assertEquals("remote", provider.getRemoteName("remotes/remote:/dir/file"));
+        assertEquals("", provider.getRclonePath("remote:"));
+        assertThrows(IllegalArgumentException.class, () -> provider.getRclonePath("remote:/folder/../secret"));
+        assertThrows(IllegalArgumentException.class, () -> provider.getNoRootId("wrongprefix/remote:/file"));
+        assertThrows(IllegalArgumentException.class, () -> provider.getTargetByChild("remote:/folder", "../secret"));
     }
 
     @Test

@@ -32,8 +32,8 @@ android {
         targetSdkVersion 36
         // CI bumps these per beta via CB_VERSION_CODE / CB_VERSION_NAME env vars.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
-        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 40
-        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.3'
+        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 100
+        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.1.0-rc.1'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";
@@ -198,6 +198,9 @@ android {
     testOptions {
         unitTests.includeAndroidResources = true
     }
+    // Opt-in signed release instrumentation, restricted by the fixture to a
+    // disposable emulator. The shipped application remains non-debuggable.
+    testBuildType project.hasProperty('acceptanceRelease') ? 'release' : 'debug'
 
     // https://android.izzysoft.de/articles/named/iod-scan-apkchecks#blobs
     dependenciesInfo {
@@ -250,6 +253,7 @@ repositories {
 }
 
 dependencies {
+    implementation 'net.lingala.zip4j:zip4j:2.11.6'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.vectordrawable:vectordrawable:1.1.0'
     implementation 'androidx.cardview:cardview:1.0.0'

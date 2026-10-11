@@ -32,6 +32,8 @@ import ca.pkay.rcloneexplorer.util.ScheduleCalculator
 import ca.pkay.rcloneexplorer.util.SyncLog
 import ca.pkay.rcloneexplorer.util.TransferLocks
 import ca.pkay.rcloneexplorer.util.WifiConnectivitiyUtil
+import ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy
+import ca.pkay.rcloneexplorer.proton.ProtonAccountState
 import kotlinx.serialization.json.Json
 import org.json.JSONObject
 import java.io.File
@@ -70,6 +72,10 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
     private var advisoryPreview = false
     private var detail = ""
     private var startedAt = 0L
+    private var accountIdentity: String? = null
+    private var accountFailure: ProtonAccountPolicy.Action? = null
+    private var needsUserAction = false
+    private var notifyResult = true
 
     override fun doWork(): Result {
         val initialTask = try {
@@ -113,6 +119,13 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             require(task.validationError == null) { task.validationError ?: "Invalid task" }
             require(task.direction in 1..8) { "Unsupported task mode; edit this task before running it" }
             require(BisyncPolicy.isBisync(task) || operation == BisyncStateStore.RUN) { "This task does not support bisync initialisation" }
+            val primaryAccount = mRclone.protonAccount(task.remoteId)
+            primaryAccount?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+            if (task.direction == 7 || task.direction == 8) {
+                mRclone.protonAccount(task.remoteId2)?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+                // A multi-backend failure cannot safely be attributed to one account from text alone.
+                accountIdentity = null
+            } else accountIdentity = primaryAccount?.identity
             RunHistory.record(mContext, task, id.toString(), operation, "IN_PROGRESS", startedAt, null,
                 "Task started; a terminal result has not yet been confirmed.")
             prepareNotifications()
@@ -126,6 +139,12 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                 requireNotNull(mDatabase.getFilter(filterId)) { "The selected filter no longer exists" }.getFilters()
             } ?: arrayListOf()
             if (BisyncPolicy.isBisync(task)) handleBisync(task, operation, filters) else handleOneWay(task, filters)
+        } catch (e: ProtonAccountState.NeedsUserAction) {
+            needsUserAction = true
+            allowFollowup = false
+            notifyResult = ProtonAccountState.consumeNotification(mContext, e.identity)
+            detail = e.message ?: "The Proton account needs user action"
+            completed = false
         } catch (e: InterruptedException) {
             cancelled = true
             currentRunner.requestStop()
@@ -246,6 +265,10 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                 val json = try { JSONObject(safe) } catch (_: Exception) { null }
                 val message = json?.optString("msg", safe) ?: safe
                 val objectName = json?.optString("object").orEmpty()
+                if (accountIdentity != null && objectName.isBlank() &&
+                    (json == null || json.optString("level").equals("error", ignoreCase = true))) {
+                    ProtonAccountPolicy.classify(message)?.let { accountFailure = it }
+                }
                 appendDiagnostic(if (objectName.isBlank()) message else "$objectName: $message")
                 if (json != null && progress) {
                     try {
@@ -269,6 +292,15 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             outcome.exitCode == null -> "The rclone process could not be started."
             outcome.exitCode != 0 -> "rclone exited with status ${outcome.exitCode}.\n${diagnosticText().takeLast(1400)}"
             else -> "Completed successfully"
+        }
+        val account = accountIdentity
+        val action = accountFailure
+        if (!outcome.success() && !cancelled && outcome.exited && account != null && action != null) {
+            ProtonAccountState.pause(mContext, account, action)
+            needsUserAction = true
+            allowFollowup = false
+            notifyResult = ProtonAccountState.consumeNotification(mContext, account)
+            detail = ProtonAccountPolicy.message(action)
         }
         return outcome
     }
@@ -303,10 +335,10 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
 
     private fun deliverResult(task: Task, operation: String) {
         if (!terminal.compareAndSet(false, true)) return
-        val status = if (cancelled) "CANCELLED" else if (completed) "SUCCESS" else "FAILED"
+        val status = if (cancelled) "CANCELLED" else if (completed) "SUCCESS" else if (needsUserAction) "NEEDS_USER_ACTION" else "FAILED"
         RunHistory.record(mContext, task, id.toString(), operation, status, startedAt, exitCode, detail)
         val notificationId = System.currentTimeMillis().toInt()
-        when {
+        if (notifyResult) when {
             cancelled -> mNotificationManager.showCancelledNotificationOrReport(mTitle, notificationId, task.id)
             completed -> mNotificationManager.showSuccessNotificationOrReport(mTitle,
                 if (advisoryPreview) "Preview complete. The existing baseline is unchanged."

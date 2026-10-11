@@ -256,9 +256,7 @@ public class VirtualContentProvider extends SingleRootProvider {
     // Required for OPEN_DOCUMENT_TREE
     @Override
     public boolean isChildDocument(String parentDocumentId, @NonNull String documentId) {
-        if (parentDocumentId == null || parentDocumentId.isEmpty()) return false;
-        String parent = parentDocumentId.endsWith("/") ? parentDocumentId.substring(0, parentDocumentId.length() - 1) : parentDocumentId;
-        return documentId.startsWith(parent + "/");
+        return ca.pkay.rcloneexplorer.util.DocumentIdPolicy.isChild(parentDocumentId, documentId);
     }
 
     @Override
@@ -359,7 +357,7 @@ public class VirtualContentProvider extends SingleRootProvider {
         if (rcdAvailable && rcdService != null) {
             rcdService.onNotifyUse();
         }
-        grantPermission(documentId);
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireSafe(documentId);
         FLog.v(TAG, "queryDocument(): %s", documentId);
         if (null == projection) {
             projection = DEFAULT_DOCUMENT_PROJECTION;
@@ -455,7 +453,7 @@ public class VirtualContentProvider extends SingleRootProvider {
                 projection = DEFAULT_DOCUMENT_PROJECTION;
             }
             String originalParentDocId = parentDocumentId;
-            parentDocumentId = parentDocumentId.substring(ROOT_DOC_ID.length() + 1);
+            parentDocumentId = getNoRootId(parentDocumentId);
             String remoteName = getRemoteName(getShortId(originalParentDocId));
             // TODO: missing guard if remote name is garbage => IllegalArgumentException
             RemoteItem remoteItem = getRemoteItem(remoteName);
@@ -744,6 +742,8 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public String renameDocument(final String documentId, final String displayName) throws FileNotFoundException {
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireSafe(documentId);
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireName(displayName);
         FLog.v(TAG, "renameDocument: %s -> %s", documentId, displayName);
         if (isRemoteDocument(documentId)) {
             // todo: evaluate if this should be supported from the DocumentsProvider
@@ -1073,12 +1073,10 @@ public class VirtualContentProvider extends SingleRootProvider {
     @NonNull
     @VisibleForTesting
     static String getRemoteName(@NonNull String documentId) {
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireSafe(documentId);
         int nameEnd = documentId.indexOf(':');
-        // 0 if there is no path separator, or the index of the first path name character
-        int nameStart = documentId.lastIndexOf('/') + 1;
-        if (nameStart > nameEnd) {
-            nameStart = 0;
-        }
+        int nameStart = documentId.lastIndexOf('/', nameEnd - 1) + 1;
+        if (nameEnd <= nameStart) throw new IllegalArgumentException("Invalid document remote");
         return documentId.substring(nameStart, nameEnd);
     }
 
@@ -1089,16 +1087,7 @@ public class VirtualContentProvider extends SingleRootProvider {
      * @return a rclone style remote path identifier
      */
     private static String getRcloneFullPath(String documentId) {
-        String remoteName = getRemoteName(documentId);
-        String path = "";
-        int pathStart = documentId.indexOf(':') + 1;
-        if (pathStart < documentId.length()) {
-            if ('/' == documentId.charAt(pathStart)) {
-                pathStart++;
-            }
-            path = documentId.substring(pathStart);
-        }
-        return remoteName + ':' + path;
+        return getRemoteName(documentId) + ':' + getRclonePath(documentId);
     }
 
     // should handle
@@ -1181,6 +1170,8 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @VisibleForTesting()
     static String getTargetByChild(String parentDocId, String childName) {
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireSafe(parentDocId);
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireName(childName);
         if ('/' == parentDocId.charAt(parentDocId.length() - 1)) {
             return parentDocId + childName;
         } else {
@@ -1192,8 +1183,10 @@ public class VirtualContentProvider extends SingleRootProvider {
     // remotes/remote:bucket/item => bucket/item
     @VisibleForTesting()
     static String getRclonePath(String documentId) {
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireSafe(documentId);
         int idx = documentId.indexOf(':');
-        if ('/' == documentId.charAt(idx + 1)) {
+        if (idx <= 0) throw new IllegalArgumentException("Invalid document remote");
+        if (idx + 1 < documentId.length() && '/' == documentId.charAt(idx + 1)) {
             idx++;
         }
         return documentId.substring(idx + 1);
@@ -1207,7 +1200,8 @@ public class VirtualContentProvider extends SingleRootProvider {
      */
     @VisibleForTesting()
     static String getNoRootId(String rootedDocumentId) {
-        if (rootedDocumentId.length() < ROOT_DOC_ID.length() + 1) {
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireSafe(rootedDocumentId);
+        if (!rootedDocumentId.startsWith(ROOT_DOC_PREFIX) || rootedDocumentId.length() <= ROOT_DOC_PREFIX.length()) {
             throw new IllegalArgumentException("Invalid document id");
         }
         return rootedDocumentId.substring(ROOT_DOC_ID.length() + 1);
@@ -1292,7 +1286,9 @@ public class VirtualContentProvider extends SingleRootProvider {
     @Nullable
     @VisibleForTesting
     ListItem getFileItem(String documentId) {
-        if (documentId == null || documentId.indexOf(':') <= 0 || !acquireRcd()) return null;
+        if (documentId == null || documentId.indexOf(':') <= 0) return null;
+        ca.pkay.rcloneexplorer.util.DocumentIdPolicy.requireSafe(documentId);
+        if (!acquireRcd()) return null;
         int sep = documentId.indexOf(':') + 1;
         if (documentId.length() == sep) {
             FLog.w(TAG, "getFileItem: naked root! Your SAF client may be buggy.");
@@ -1528,32 +1524,6 @@ public class VirtualContentProvider extends SingleRootProvider {
         @Override public void close() {
             lifetime.close();
         }
-    }
-
-    private void grantPermission(String documentId) {
-        Context context = getContext();
-        boolean isEnabled = preferences.getBoolean(context.getString(R.string.pref_key_vcp_grant_all), false);
-        if (!isEnabled) {
-            return;
-        }
-        Uri uri = DocumentsContract.buildDocumentUri(BuildConfig.VCP_AUTHORITY, documentId);
-
-        int flags = Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION;
-        if (PackageManager.PERMISSION_GRANTED == context.checkCallingUriPermission(uri, flags)) {
-            return;
-        }
-
-        ContentResolver contentResolver = context.getContentResolver();
-        List<UriPermission> permissions = contentResolver.getOutgoingPersistedUriPermissions();
-        for(UriPermission permission : permissions) {
-            if (permission.getUri().equals(uri)) {
-                FLog.v(TAG, "Client already has persisted permission, not granting additional permissions");
-                return;
-            }
-        }
-        String callingPackage = getCallingPackage();
-        FLog.d(TAG, "granting permisssions to client %s", callingPackage);
-        context.grantUriPermission(callingPackage, uri, flags);
     }
 
     @RequiresApi(api = Build.VERSION_CODES.O)

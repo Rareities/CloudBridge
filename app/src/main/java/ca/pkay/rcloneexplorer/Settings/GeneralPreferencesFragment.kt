@@ -35,6 +35,29 @@ class GeneralPreferencesFragment : PreferenceFragmentCompat() {
         sharedPreferences = PreferenceManager.getDefaultSharedPreferences(requireContext())
         requireActivity().title = getString(R.string.pref_header_general)
 
+        val proxyPassword = findPreference<androidx.preference.EditTextPreference>(getString(R.string.pref_key_proxy_password))
+        proxyPassword?.let { preference ->
+            preference.isPersistent = false
+            preference.text = ""
+            preference.summaryProvider = Preference.SummaryProvider<androidx.preference.EditTextPreference> {
+                getString(R.string.proxy_secret_summary)
+            }
+            preference.setOnBindEditTextListener { field ->
+                field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                field.isSaveEnabled = false
+                if (Build.VERSION.SDK_INT >= 26) field.importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            }
+            preference.setOnPreferenceChangeListener { _, value ->
+                try {
+                    ca.pkay.rcloneexplorer.util.SecretSettings.store(requireContext(), getString(R.string.pref_key_proxy_password), value.toString())
+                    Toasty.success(requireContext(), getString(R.string.proxy_secret_saved)).show()
+                } catch (_: java.io.IOException) { Toasty.error(requireContext(), getString(R.string.proxy_secret_failed)).show() }
+                false
+            }
+            try { ca.pkay.rcloneexplorer.util.SecretSettings.migrateLegacy(requireContext(), getString(R.string.pref_key_proxy_password)) }
+            catch (_: java.io.IOException) { Toasty.error(requireContext(), getString(R.string.proxy_secret_failed)).show() }
+        }
+
 
         val thumbnailKey = getString(R.string.pref_key_thumbnail_size_limit)
         val thumbnailSizePreference = findPreference(thumbnailKey) as FilesizePreference?
