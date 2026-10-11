@@ -81,3 +81,6 @@ package-lock.json
 
 # Local ZCode IDE state
 .zcode/
+
+# Python release-validation cache
+__pycache__/

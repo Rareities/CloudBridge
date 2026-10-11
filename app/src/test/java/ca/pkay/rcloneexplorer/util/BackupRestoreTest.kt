@@ -11,6 +11,8 @@ import ca.pkay.rcloneexplorer.Items.Task
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
+import org.junit.Before
+import org.junit.After
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -24,6 +26,13 @@ import java.util.zip.ZipOutputStream
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
 class BackupRestoreTest {
+    private val originalSync = DurableFiles.directorySync
+    @Before fun configureHostDurability() {
+        // Robolectric cannot fsync a directory FD. Native barriers are device-tested;
+        // separate RestoreDurabilityTest injects failures into the transaction.
+        DurableFiles.directorySync = DurableFiles.DirectorySync { }
+    }
+    @After fun restoreDurability() { DurableFiles.directorySync = originalSync }
     private val context: Application get() = ApplicationProvider.getApplicationContext()
     private fun zip(entries: Map<String, String>): ByteArray {
         val bytes = ByteArrayOutputStream()

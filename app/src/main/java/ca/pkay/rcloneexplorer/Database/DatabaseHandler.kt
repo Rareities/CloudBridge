@@ -36,6 +36,12 @@ import java.util.ArrayList
 class DatabaseHandler(context: Context?) :
     SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        // Restore retires its rollback marker only after a power-loss durable commit.
+        db.execSQL("PRAGMA synchronous=FULL")
+    }
+
     override fun onCreate(sqLiteDatabase: SQLiteDatabase) {
         sqLiteDatabase.execSQL(SQL_CREATE_TABLES_TASKS)
         sqLiteDatabase.execSQL(SQL_CREATE_TABLE_TRIGGER)

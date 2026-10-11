@@ -81,9 +81,15 @@ object BisyncPolicy {
             b.startsWith("$a\\") || a.startsWith("$b\\")
     }
 
+    /** Preserve every serialized option; data-class copy only copies the constructor ID. */
+    @JvmStatic fun effectiveTask(task: Task, transfers: Int): Task {
+        require(transfers > 0) { "Choose a positive transfer count" }
+        return Task.fromString(task.asJSON().toString()).apply { this.transfers = transfers }
+    }
+
     @JvmStatic fun fingerprint(task: Task, filters: List<FilterEntry>, configIdentity: String): String {
         val values = listOf(
-            "bisync-policy-v3", normalisedMode(task.direction), task.bisyncUUID,
+            "bisync-policy-v4", normalisedMode(task.direction), task.bisyncUUID,
             File(task.localPath).canonicalPath,
             task.remoteId, task.remotePath, task.remoteType.toString(), task.bisyncMaxDelete.toString(),
             task.bisyncResyncMode, task.bisyncCheckAccess.toString(), task.bisyncBackupDir1,

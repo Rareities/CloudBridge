@@ -182,7 +182,8 @@ class TaskEditorControls(
         val filters = task.filterId?.takeIf { it >= 0 }?.let { id ->
             requireNotNull(DatabaseHandler(activity).getFilter(id)) { "The selected filter no longer exists" }.getFilters()
         } ?: arrayListOf()
-        return BisyncPolicy.fingerprint(task, filters, rclone.configurationIdentity { stopped() })
+        val effective = BisyncPolicy.effectiveTask(task, rclone.taskTransfers(task))
+        return BisyncPolicy.fingerprint(effective, filters, rclone.configurationIdentity { stopped() })
     }
 
     private fun verifyInBackground(task: Task, state: JSONObject, key: String) {

@@ -19,12 +19,11 @@ import java.util.concurrent.TimeUnit
 
 /** Private rollback journal makes the three-component archive restore recoverable after a crash. */
 object BackupRestore {
-    private val mutex = Any()
     private fun root(context: Context) = File(context.filesDir, "restore-journal")
     private fun passwordFile(context: Context) = File(context.filesDir, "config-password.json")
 
     @JvmStatic @JvmOverloads @Throws(Exception::class)
-    fun restore(context: Context, rclone: Rclone, uri: Uri, password: String? = null): Unit = synchronized(mutex) {
+    fun restore(context: Context, rclone: Rclone, uri: Uri, password: String? = null): Unit = run {
         val archive = BackupArchive.read(context, uri, password)
         try {
             val plan = ImportPlan.parse(archive.tasks)
@@ -50,7 +49,7 @@ object BackupRestore {
     /** Raw .conf import uses the same crash journal as the three-part ZIP restore. */
     @JvmStatic @Throws(IOException::class)
     fun installConfig(context: Context, rclone: Rclone, staged: File,
-                      prepared: ca.pkay.rcloneexplorer.util.ProtectedRcloneConfig.PreparedImport) = synchronized(mutex) {
+                      prepared: ca.pkay.rcloneexplorer.util.ProtectedRcloneConfig.PreparedImport) = run {
         try {
             commit(context, rclone, staged.readBytes(), prepared, null, null)
         } catch (error: IOException) { throw error }
@@ -74,6 +73,7 @@ object BackupRestore {
                 val db = DatabaseHandler(context)
                 val journal = root(context)
                 require(journal.isDirectory || journal.mkdirs()) { "Cannot create restore journal" }
+                ca.pkay.rcloneexplorer.util.DurableFiles.syncDirectory(context.filesDir)
                 val config = File(context.filesDir, "rclone.conf")
                 val wrapped = passwordFile(context)
                 val hadConfig = config.exists() || File(config.path + ".bak").exists()
@@ -95,7 +95,9 @@ object BackupRestore {
                 }
                 write(File(journal, "previous.json"), backup.toString().toByteArray(Charsets.UTF_8))
                 write(File(journal, "pending"), byteArrayOf(1))
+                // Snapshots and pending must be durable before any live component changes.
                 try {
+                    ca.pkay.rcloneexplorer.util.ConfigurationGeneration.advance(context)
                     // Restored task IDs can refer to different jobs. Old queued requests must not carry across.
                     val work = WorkManager.getInstance(context)
                     work.cancelAllWorkByTag(ca.pkay.rcloneexplorer.workmanager.SyncManager.SYNC_WORK_TAG)
@@ -113,8 +115,10 @@ object BackupRestore {
                     if (restoredPreferences != null) SharedPreferencesBackup.importJson(restoredPreferences, context)
                     if (proxyPassword != null) ca.pkay.rcloneexplorer.util.SecretSettings.store(context,
                         context.getString(ca.pkay.rcloneexplorer.R.string.pref_key_proxy_password), proxyPassword)
+                    syncInstalled(context)
                     AtomicFile(File(journal, "pending")).delete()
                     require(!File(journal, "pending").exists() && !File(journal, "pending.bak").exists()) { "Cannot finish restore journal" }
+                    ca.pkay.rcloneexplorer.util.DurableFiles.syncDirectory(journal)
                     cleanup(journal)
                     rclone.invalidateRemotesCache()
                 } catch (failure: Exception) {
@@ -132,8 +136,8 @@ object BackupRestore {
     }
 
     @JvmStatic @Throws(IOException::class)
-    fun recoverIfNeeded(context: Context) = synchronized(mutex) {
-        if (!File(root(context), "pending").exists() && !File(root(context), "pending.bak").exists()) return@synchronized
+    fun recoverIfNeeded(context: Context) = run {
+        if (!File(root(context), "pending").exists() && !File(root(context), "pending.bak").exists()) return@run
         val lock = ConfigurationExclusion.LOCK.writeLock()
         lock.lock()
         try {
@@ -177,9 +181,26 @@ object BackupRestore {
         backup.optJSONObject("secretSettings")?.let {
             ca.pkay.rcloneexplorer.util.SecretSettings.restoreSnapshot(context, it)
         }
+        syncInstalled(context)
         AtomicFile(marker).delete()
         require(!marker.exists() && !File(journal, "pending.bak").exists()) { "Cannot finish rollback journal" }
+        ca.pkay.rcloneexplorer.util.DurableFiles.syncDirectory(journal)
         cleanup(journal)
+    }
+
+    private fun syncInstalled(context: Context) {
+        // SQLite FULL commits sync the journal/WAL. Also commit parent entries and
+        // the synchronously committed preference files before retiring rollback state.
+        val directories = listOf(context.filesDir, context.getDatabasePath(
+            ca.pkay.rcloneexplorer.Database.DatabaseInfo.DATABASE_NAME).parentFile!!,
+            File(context.applicationInfo.dataDir, "shared_prefs"))
+        for (directory in directories) if (directory.isDirectory) {
+            if (directory.name == "shared_prefs") directory.listFiles()?.filter { it.isFile }?.forEach {
+                ca.pkay.rcloneexplorer.util.DurableFiles.syncFileIfPresent(it)
+            }
+            ca.pkay.rcloneexplorer.util.DurableFiles.syncDirectory(directory)
+            directory.parentFile?.let { ca.pkay.rcloneexplorer.util.DurableFiles.syncDirectory(it) }
+        }
     }
 
     private fun cleanup(directory: File) {
@@ -187,12 +208,14 @@ object BackupRestore {
         AtomicFile(File(directory, "previous.json")).delete()
         AtomicFile(File(directory, "previous.conf")).delete()
         AtomicFile(File(directory, "previous.password")).delete()
+        ca.pkay.rcloneexplorer.util.DurableFiles.syncDirectory(directory)
     }
 
     private fun write(file: File, content: ByteArray) {
         val target = AtomicFile(file)
         val stream = target.startWrite()
-        try { stream.write(content); target.finishWrite(stream) }
+        try { stream.write(content); stream.fd.sync(); target.finishWrite(stream) }
         catch (e: Exception) { target.failWrite(stream); throw e }
+        ca.pkay.rcloneexplorer.util.DurableFiles.syncDirectory(file.parentFile!!)
     }
 }

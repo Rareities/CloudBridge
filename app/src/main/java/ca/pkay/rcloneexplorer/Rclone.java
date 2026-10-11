@@ -510,7 +510,7 @@ public class Rclone {
             invalidateRemotesCache();
             ProtonAccount account = protonAccount(remoteName);
             if (account == null) throw new IOException("This task does not resolve to a configured Proton Drive account");
-            String identityBefore = configurationIdentity(stop);
+            String identityBefore = configurationIdentity(stop, false);
             ca.pkay.rcloneexplorer.proton.ProtonAccountState.pause(context, account.identity,
                     ca.pkay.rcloneexplorer.proton.ProtonAccountPolicy.Action.RECONNECT);
             if (stop.stopped()) throw new IOException("Reconnect cancelled; jobs remain paused");
@@ -526,7 +526,7 @@ public class Rclone {
             try { new JSONArray(listing); } catch (JSONException invalid) { throw new IOException("Proton returned an invalid verification listing"); }
             invalidateRemotesCache();
             ProtonAccount after = protonAccount(remoteName);
-            if (after == null || !after.identity.equals(account.identity) || !configurationIdentity(stop).equals(identityBefore))
+            if (after == null || !after.identity.equals(account.identity) || !configurationIdentity(stop, false).equals(identityBefore))
                 throw new IOException("Remote settings changed while reconnecting; verify the saved account again");
             if (stop.stopped()) throw new IOException("Reconnect cancelled; jobs remain paused");
             ca.pkay.rcloneexplorer.proton.ProtonAccountState.verified(context, account.identity);
@@ -940,51 +940,64 @@ public class Rclone {
 
     /** Local config identity excludes rotating sessions, but includes remote identity and policy. */
     public String configurationIdentity(ca.pkay.rcloneexplorer.util.ProcessRunner.StopCheck stop) throws IOException {
-        ArrayList<String> args = new ArrayList<>();
-        Collections.addAll(args, rclone, "--config", rcloneConf, "config", "dump");
-        StringBuilder json = new StringBuilder();
-        java.util.concurrent.atomic.AtomicBoolean overflow = new java.util.concurrent.atomic.AtomicBoolean();
-        ca.pkay.rcloneexplorer.util.ProcessRunner runner = new ca.pkay.rcloneexplorer.util.ProcessRunner();
-        long started = android.os.SystemClock.elapsedRealtime();
-        ca.pkay.rcloneexplorer.util.ProcessRunner.Outcome result = runner.run(
-                getRuntimeProcess(args.toArray(new String[0]), getRcloneEnv()),
-                () -> stop.stopped() || android.os.SystemClock.elapsedRealtime() - started > 30000L,
-                line -> {
-                    if (json.length() + line.length() > 4 * 1024 * 1024) { overflow.set(true); runner.requestStop(); }
-                    else json.append(line);
-                }, line -> { });
-        if (!result.success() || overflow.get()) throw new IOException("Could not read the local remote configuration safely");
+        return configurationIdentity(stop, true);
+    }
+
+    private String configurationIdentity(ca.pkay.rcloneexplorer.util.ProcessRunner.StopCheck stop,
+                                         boolean includeGeneration) throws IOException {
+        java.util.concurrent.locks.Lock lock = ca.pkay.rcloneexplorer.util.ConfigurationExclusion.LOCK.writeLock();
+        if (!lock.tryLock()) throw new IOException("Configuration is being prepared; retry after it finishes");
         try {
-            JSONObject configs = new JSONObject(json.toString());
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            ArrayList<String> names = new ArrayList<>();
-            java.util.Iterator<String> remoteNames = configs.keys();
-            while (remoteNames.hasNext()) names.add(remoteNames.next());
-            Collections.sort(names);
-            java.util.Set<String> transientFields = new java.util.HashSet<>(Arrays.asList(
-                    "client_uid", "client_access_token", "client_refresh_token", "client_salted_key_pass",
-                    "token", "access_token", "refresh_token", "token_expiry", "config_refresh_token", "client_token_generation"));
-            for (String name : names) {
-                JSONObject remote = configs.getJSONObject(name);
-                updateIdentityDigest(digest, name);
-                ArrayList<String> keys = new ArrayList<>();
-                java.util.Iterator<String> optionNames = remote.keys();
-                while (optionNames.hasNext()) keys.add(optionNames.next());
-                Collections.sort(keys);
-                for (String key : keys) {
-                    if (transientFields.contains(key)) continue;
-                    updateIdentityDigest(digest, key);
-                    updateIdentityDigest(digest, remote.get(key).toString());
+            ArrayList<String> args = new ArrayList<>();
+            Collections.addAll(args, rclone, "--config", rcloneConf, "config", "dump");
+            StringBuilder json = new StringBuilder();
+            java.util.concurrent.atomic.AtomicBoolean overflow = new java.util.concurrent.atomic.AtomicBoolean();
+            ca.pkay.rcloneexplorer.util.ProcessRunner runner = new ca.pkay.rcloneexplorer.util.ProcessRunner();
+            long started = android.os.SystemClock.elapsedRealtime();
+            ca.pkay.rcloneexplorer.util.ProcessRunner.Outcome result = runner.run(
+                    getRuntimeProcess(args.toArray(new String[0]), getRcloneEnv()),
+                    () -> stop.stopped() || android.os.SystemClock.elapsedRealtime() - started > 30000L,
+                    line -> {
+                        if (json.length() + line.length() > 4 * 1024 * 1024) { overflow.set(true); runner.requestStop(); }
+                        else json.append(line);
+                    }, line -> { });
+            if (!result.success() || overflow.get()) throw new IOException("Could not read the local remote configuration safely");
+            try {
+                JSONObject configs = new JSONObject(json.toString());
+                java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+                // Manual edits/reconnects can replace an OAuth account without changing options.
+                // Automatic refresh is excluded below, but cannot reset this private generation.
+                if (includeGeneration)
+                    updateIdentityDigest(digest, ca.pkay.rcloneexplorer.util.ConfigurationGeneration.read(context));
+                ArrayList<String> names = new ArrayList<>();
+                java.util.Iterator<String> remoteNames = configs.keys();
+                while (remoteNames.hasNext()) names.add(remoteNames.next());
+                Collections.sort(names);
+                java.util.Set<String> transientFields = new java.util.HashSet<>(Arrays.asList(
+                        "client_uid", "client_access_token", "client_refresh_token", "client_salted_key_pass",
+                        "token", "access_token", "refresh_token", "token_expiry", "config_refresh_token", "client_token_generation"));
+                for (String name : names) {
+                    JSONObject remote = configs.getJSONObject(name);
+                    updateIdentityDigest(digest, name);
+                    ArrayList<String> keys = new ArrayList<>();
+                    java.util.Iterator<String> optionNames = remote.keys();
+                    while (optionNames.hasNext()) keys.add(optionNames.next());
+                    Collections.sort(keys);
+                    for (String key : keys) {
+                        if (transientFields.contains(key)) continue;
+                        updateIdentityDigest(digest, key);
+                        updateIdentityDigest(digest, remote.get(key).toString());
+                    }
                 }
+                StringBuilder hex = new StringBuilder();
+                for (byte b : digest.digest()) hex.append(String.format(java.util.Locale.ROOT, "%02x", b));
+                return hex.toString();
+            } catch (JSONException | java.security.NoSuchAlgorithmException e) {
+                throw new IOException("Unable to validate remote configuration identity", e);
+            } finally {
+                json.setLength(0);
             }
-            StringBuilder hex = new StringBuilder();
-            for (byte b : digest.digest()) hex.append(String.format(java.util.Locale.ROOT, "%02x", b));
-            return hex.toString();
-        } catch (JSONException | java.security.NoSuchAlgorithmException e) {
-            throw new IOException("Unable to validate remote configuration identity", e);
-        } finally {
-            json.setLength(0);
-        }
+        } finally { lock.unlock(); }
     }
 
     private static void updateIdentityDigest(java.security.MessageDigest digest, String value) {

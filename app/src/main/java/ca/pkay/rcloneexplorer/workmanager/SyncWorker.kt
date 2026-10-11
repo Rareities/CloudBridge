@@ -119,13 +119,6 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             require(task.validationError == null) { task.validationError ?: "Invalid task" }
             require(task.direction in 1..8) { "Unsupported task mode; edit this task before running it" }
             require(BisyncPolicy.isBisync(task) || operation == BisyncStateStore.RUN) { "This task does not support bisync initialisation" }
-            val primaryAccount = mRclone.protonAccount(task.remoteId)
-            primaryAccount?.let { ProtonAccountState.requireReady(mContext, it.identity) }
-            if (task.direction == 7 || task.direction == 8) {
-                mRclone.protonAccount(task.remoteId2)?.let { ProtonAccountState.requireReady(mContext, it.identity) }
-                // A multi-backend failure cannot safely be attributed to one account from text alone.
-                accountIdentity = null
-            } else accountIdentity = primaryAccount?.identity
             RunHistory.record(mContext, task, id.toString(), operation, "IN_PROGRESS", startedAt, null,
                 "Task started; a terminal result has not yet been confirmed.")
             prepareNotifications()
@@ -180,79 +173,103 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
     }
 
     private fun handleOneWay(task: Task, filters: ArrayList<FilterEntry>) {
-        val remote = requireNotNull(mRclone.getRemoteItemFromName(task.remoteId)) {
-            "The configured task remote is unavailable; reconnect or edit the task"
-        }
-        val cloudToCloud = task.direction == 7 || task.direction == 8
-        val child = if (cloudToCloud) mRclone.sync(remote, task.remotePath,
-            requireNotNull(mRclone.getRemoteItemFromName(task.remoteId2)) {
-                "The configured destination remote is unavailable; reconnect or edit the task"
-            }, task.remotePath2, task.direction,
-            task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
-        else mRclone.sync(remote, task.localPath, task.remotePath, task.direction,
-            task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
-        val outcome = execute(child, true)
-        completed = outcome.success()
-        if (completed) sendUploadFinishedBroadcast(if (cloudToCloud) task.remoteId2 else task.remoteId,
-            if (cloudToCloud) task.remotePath2 else task.remotePath)
+        val preparation = ca.pkay.rcloneexplorer.util.ConfigurationExclusion.prepare()
+        try {
+            mRclone.invalidateRemotesCache()
+            val primary = mRclone.protonAccount(task.remoteId)
+            primary?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+            if (task.direction == 7 || task.direction == 8) {
+                mRclone.protonAccount(task.remoteId2)?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+                accountIdentity = null
+            } else accountIdentity = primary?.identity
+            val remote = requireNotNull(mRclone.getRemoteItemFromName(task.remoteId)) {
+                "The configured task remote is unavailable; reconnect or edit the task"
+            }
+            val cloudToCloud = task.direction == 7 || task.direction == 8
+            val child = if (cloudToCloud) mRclone.sync(remote, task.remotePath,
+                requireNotNull(mRclone.getRemoteItemFromName(task.remoteId2)) {
+                    "The configured destination remote is unavailable; reconnect or edit the task"
+                }, task.remotePath2, task.direction,
+                task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
+            else mRclone.sync(remote, task.localPath, task.remotePath, task.direction,
+                task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
+            preparation.close()
+            val outcome = execute(child, true)
+            completed = outcome.success()
+            if (completed) sendUploadFinishedBroadcast(if (cloudToCloud) task.remoteId2 else task.remoteId,
+                if (cloudToCloud) task.remotePath2 else task.remotePath)
+        } finally { preparation.close() }
     }
 
-    private fun handleBisync(task: Task, operation: String, filters: ArrayList<FilterEntry>) {
-        BisyncPolicy.validate(mContext, task)
-        val directory = BisyncPolicy.workdir(mContext, task)
-        val state = BisyncStateStore(directory)
-        val fingerprint = BisyncPolicy.fingerprint(task, filters, mRclone.configurationIdentity { isStopped || cancelled })
-        val advisory = operation == BisyncStateStore.PREVIEW && BisyncStateStore.isAdvisoryPreview(state.read(), fingerprint)
-        advisoryPreview = advisory
-        val engineOperation = if (advisory) "preview-existing" else operation
-        val childDirectory = when (operation) {
-            BisyncStateStore.PREVIEW -> File(directory, "previews/$id")
-            BisyncStateStore.INITIALISE -> File(directory, "baselines/$id")
-            BisyncStateStore.RUN -> {
-                val baseline = state.read().optString("baselineId")
-                require(java.util.UUID.fromString(baseline).toString() == baseline) { "The bisync baseline identity is invalid. Review initialisation again." }
-                File(directory, "baselines/$baseline").also {
-                    require(it.isDirectory) { "The saved bisync baseline is missing. Review recovery before continuing." }
+    private fun handleBisync(savedTask: Task, operation: String, filters: ArrayList<FilterEntry>) {
+        val preparation = ca.pkay.rcloneexplorer.util.ConfigurationExclusion.prepare()
+        try {
+            // Task.copy() only copies its constructor ID; serialize every option instead.
+            val task = BisyncPolicy.effectiveTask(savedTask, mRclone.taskTransfers(savedTask))
+            mRclone.invalidateRemotesCache()
+            val account = mRclone.protonAccount(task.remoteId)
+            accountIdentity = account?.identity
+            account?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+            BisyncPolicy.validate(mContext, task)
+            val directory = BisyncPolicy.workdir(mContext, task)
+            val state = BisyncStateStore(directory)
+            val fingerprint = BisyncPolicy.fingerprint(task, filters, mRclone.configurationIdentity { isStopped || cancelled })
+            val advisory = operation == BisyncStateStore.PREVIEW && BisyncStateStore.isAdvisoryPreview(state.read(), fingerprint)
+            advisoryPreview = advisory
+            val engineOperation = if (advisory) "preview-existing" else operation
+            val childDirectory = when (operation) {
+                BisyncStateStore.PREVIEW -> File(directory, "previews/$id")
+                BisyncStateStore.INITIALISE -> File(directory, "baselines/$id")
+                BisyncStateStore.RUN -> {
+                    val baseline = state.read().optString("baselineId")
+                    require(java.util.UUID.fromString(baseline).toString() == baseline) { "The bisync baseline identity is invalid. Review initialisation again." }
+                    File(directory, "baselines/$baseline").also {
+                        require(it.isDirectory) { "The saved bisync baseline is missing. Review recovery before continuing." }
+                    }
+                }
+                else -> throw IllegalArgumentException("Unsupported bisync operation")
+            }
+            require(childDirectory.isDirectory || childDirectory.mkdirs()) { "Cannot create bisync working folder" }
+            if (advisory) {
+                val baseline = state.read().getString("baselineId")
+                require(java.util.UUID.fromString(baseline).toString() == baseline) { "Invalid baseline identity" }
+                val source = File(directory, "baselines/$baseline")
+                require(source.isDirectory) { "The saved baseline is missing" }
+                // Dry-run may write temporary listings. Copy the listings and the
+                // engine's verified pair identity, never its live OS lock inodes.
+                val savedFiles = requireNotNull(source.listFiles()) { "Cannot read the saved baseline" }
+                val identities = savedFiles.filter {
+                    it.isFile && it.name.matches(Regex("bisync-identity-[0-9a-f]{64}\\.lck-guard"))
+                }
+                require(identities.size == 1 && identities.single().length() in 1..65536) {
+                    "The saved baseline has no unambiguous endpoint identity. Review initialisation again."
+                }
+                (savedFiles.filter { it.isFile && it.name.endsWith(".lst") } + identities).forEach {
+                    it.copyTo(File(childDirectory, it.name), overwrite = false)
                 }
             }
-            else -> throw IllegalArgumentException("Unsupported bisync operation")
-        }
-        require(childDirectory.isDirectory || childDirectory.mkdirs()) { "Cannot create bisync working folder" }
-        if (advisory) {
-            val baseline = state.read().getString("baselineId")
-            require(java.util.UUID.fromString(baseline).toString() == baseline) { "Invalid baseline identity" }
-            val source = File(directory, "baselines/$baseline")
-            require(source.isDirectory) { "The saved baseline is missing" }
-            // Dry-run may write temporary listings. Copy the listings and the
-            // engine's verified pair identity, never its live OS lock inodes.
-            val savedFiles = requireNotNull(source.listFiles()) { "Cannot read the saved baseline" }
-            val identities = savedFiles.filter {
-                it.isFile && it.name.matches(Regex("bisync-identity-[0-9a-f]{64}\\.lck-guard"))
+            // Parse every custom flag against the exact bundled engine before authentication or mutation.
+            val check = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, true), false)
+            require(check.success()) { detail.ifBlank { "The selected engine rejected a task option" } }
+            diagnostics.setLength(0)
+            exitCode = null
+            state.begin(operation, fingerprint, inputData.getString(BISYNC_APPROVAL), id.toString())
+            var success = false
+            try {
+                if (isStopped || cancelled) throw InterruptedException("Cancelled before bisync started")
+                val child = mRclone.bisync(task, childDirectory, engineOperation, filters, false)
+                // launch registered its native lease under the same lock, so configuration
+                // writers stay excluded after preparation releases its thread-bound lock.
+                preparation.close()
+                val outcome = execute(child, true)
+                success = outcome.success() && !isStopped && !cancelled
+                completed = success
+                if (success && operation != BisyncStateStore.PREVIEW) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
+            } finally {
+                state.finish(operation, fingerprint, id.toString(), success && !isStopped && !cancelled,
+                    exitCode, detail, diagnosticText())
             }
-            require(identities.size == 1 && identities.single().length() in 1..65536) {
-                "The saved baseline has no unambiguous endpoint identity. Review initialisation again."
-            }
-            (savedFiles.filter { it.isFile && it.name.endsWith(".lst") } + identities).forEach {
-                it.copyTo(File(childDirectory, it.name), overwrite = false)
-            }
-        }
-        // Parse every custom flag against the exact bundled engine before authentication or mutation.
-        val check = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, true), false)
-        require(check.success()) { detail.ifBlank { "The selected engine rejected a task option" } }
-        diagnostics.setLength(0)
-        exitCode = null
-        state.begin(operation, fingerprint, inputData.getString(BISYNC_APPROVAL), id.toString())
-        var success = false
-        try {
-            if (isStopped || cancelled) throw InterruptedException("Cancelled before bisync started")
-            val outcome = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, false), true)
-            success = outcome.success() && !isStopped && !cancelled
-            completed = success
-            if (success && operation != BisyncStateStore.PREVIEW) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
-        } finally {
-            state.finish(operation, fingerprint, id.toString(), success && !isStopped && !cancelled,
-                exitCode, detail, diagnosticText())
-        }
+        } finally { preparation.close() }
     }
 
     private fun execute(child: Process?, progress: Boolean): ProcessRunner.Outcome {
