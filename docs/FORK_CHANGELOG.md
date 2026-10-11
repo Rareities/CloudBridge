@@ -33,6 +33,43 @@ Validation results and remaining device/live-account limits are recorded in
 this changelog. No signed release is published by
 these source changes.
 
+### Simpler bisync editor follow-up
+
+- Keep Preview and Review/initialise in the main flow; collapse optional backups,
+  access markers, manual flags and helper tools under Advanced settings.
+- Explain each helper and rename Proton connection to Proton login help.
+- Allow opening a completed, unexpired preview for review without waiting for a
+  separate background configuration check. Click-time and worker fingerprint
+  checks remain mandatory before any initialization.
+- Display queued/running work, pre-preview failures and configuration-check errors
+  so disabled actions have an actionable explanation.
+- Keep saved options when Advanced is collapsed; extend editor regressions and
+  adapt disposable-device actions/screenshots to the collapsible controls.
+
+### Task startup and execution feedback follow-up
+
+- Bound Android foreground-service startup and the local, non-mutating rclone
+  flag check to 30 seconds. Timeouts fail with an actionable message; normal
+  transfers have no new overall deadline.
+- Publish task phases and elapsed time to WorkManager and the editor. A quiet
+  engine reports time since its last output instead of leaving “Preparing task”
+  indefinitely. Transfers still finish according to the native exit result.
+- Preserve specific retry reasons for required network, charging, quiet hours,
+  competing native operations and competing transfers.
+- Keep progress publication advisory: notification failures cannot abandon a
+  native child, bypass cancellation or release its ownership before exit.
+- Add real child-process regressions for silent-check deadlines and ordinary
+  successful completion with a deadline.
+
+These address confirmed feedback and unbounded-startup problems. The exact
+cause on the user's installed APK is not established without device logs.
+
+Validation for the editor/execution follow-up: **176 host tests** passed with
+no failures, errors or skips. Lint, all five OSS debug APK builds and instrumentation
+Kotlin compilation passed. Independent review passed. All APK native payloads
+match the pinned engine. See [validation record](validation/bisync-execution-followup.json).
+No device or live-account execution was performed for this follow-up.
+
 ### First-run UUID error follow-up
 
 Run now checks baseline readiness before resolving its UUID/path. A new task

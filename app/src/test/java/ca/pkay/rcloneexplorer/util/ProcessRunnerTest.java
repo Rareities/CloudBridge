@@ -36,6 +36,17 @@ public class ProcessRunnerTest {
         assertTrue(result.exited);
         assertFalse(result.success());
     }
+    @Test(timeout=20000) public void silentLocalCheckIsStoppedAtDeadline() throws Exception {
+        ProcessRunner.Outcome result = new ProcessRunner().run(child("sleep"), () -> false, null, null, 200L);
+        assertTrue(result.timedOut);
+        assertTrue(result.exited);
+        assertFalse(result.success());
+    }
+    @Test(timeout=10000) public void deadlineDoesNotTurnNormalExitIntoTimeout() throws Exception {
+        ProcessRunner.Outcome result = new ProcessRunner().run(child("warning"), () -> false, null, null, 5000L);
+        assertTrue(result.success());
+        assertFalse(result.timedOut);
+    }
     @Test public void missingProcessIsNeverSuccess() {
         assertFalse(new ProcessRunner().run(null, () -> false, null, null).success());
     }

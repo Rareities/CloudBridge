@@ -234,4 +234,34 @@ class TaskWorkflowIntegrationTest {
             assertTrue(dialog.isShowing)
         }
     }
+    @Test fun advancedToolsStartCollapsedAndCanBeOpenedWithoutChangingSavedOptions() {
+        val id = createSavedBisync()
+        val before = db.getTask(id)!!.asJSON().toString()
+        val launch = Intent(app, TaskActivity::class.java).putExtra(TaskActivity.ID_EXTRA, id)
+        Robolectric.buildActivity(TaskActivity::class.java, launch).setup().use { controller ->
+            val activity = controller.get()
+            val panel = activity.findViewById<android.view.View>(R.id.bisync_advanced_panel)
+            val toggle = activity.findViewById<android.widget.Button>(R.id.bisync_advanced_toggle)
+            assertEquals(android.view.View.GONE, panel.visibility)
+            toggle.performClick()
+            assertEquals(android.view.View.VISIBLE, panel.visibility)
+            toggle.performClick()
+            assertEquals(android.view.View.GONE, panel.visibility)
+            assertEquals(before, db.getTask(id)!!.asJSON().toString())
+        }
+    }
+
+    @Test fun completedPreviewCanBeReviewedBeforeBackgroundIdentityCheckCompletes() {
+        val task = db.getTask(createSavedBisync())!!
+        val store = ca.pkay.rcloneexplorer.util.BisyncStateStore(
+            ca.pkay.rcloneexplorer.util.BisyncPolicy.workdir(app, task))
+        store.begin("preview", "fixture", null, "preview-run")
+        store.finish("preview", "fixture", "preview-run", true, 0, "Preview complete", "test-file.txt")
+        val launch = Intent(app, TaskActivity::class.java).putExtra(TaskActivity.ID_EXTRA, task.id)
+        Robolectric.buildActivity(TaskActivity::class.java, launch).setup().use { controller ->
+            val button = controller.get().findViewById<android.widget.Button>(R.id.bisync_initialize_button)
+            assertTrue("Review is available; click-time and worker checks still enforce identity", button.isEnabled)
+        }
+    }
+
 }

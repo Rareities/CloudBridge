@@ -17,12 +17,14 @@ public final class ProcessRunner {
         public final boolean streamFailure;
         public final boolean forced;
         public final boolean exited;
-        Outcome(Integer exitCode, boolean cancelled, boolean streamFailure, boolean forced, boolean exited) {
+        public final boolean timedOut;
+        Outcome(Integer exitCode, boolean cancelled, boolean streamFailure, boolean forced, boolean exited, boolean timedOut) {
             this.exitCode = exitCode;
             this.cancelled = cancelled;
             this.streamFailure = streamFailure;
             this.forced = forced;
             this.exited = exited;
+            this.timedOut = timedOut;
         }
         public boolean success() { return exited && exitCode != null && exitCode == 0 && !cancelled && !streamFailure; }
     }
@@ -40,7 +42,14 @@ public final class ProcessRunner {
     public Process child() { return process; }
 
     public Outcome run(Process child, StopCheck stop, LineHandler stdout, LineHandler stderr) {
-        if (child == null) return new Outcome(null, cancel.get(), false, false, true);
+        return run(child, stop, stdout, stderr, 0L);
+    }
+
+    /** Bounds local checks only; zero leaves transfers without an overall deadline. */
+    public Outcome run(Process child, StopCheck stop, LineHandler stdout, LineHandler stderr, long timeoutMillis) {
+        if (child == null) return new Outcome(null, cancel.get(), false, false, true, false);
+        long started = System.nanoTime();
+        boolean timedOut = false;
         process = child;
         AtomicBoolean streamFailure = new AtomicBoolean();
         Thread out = drain(child.getInputStream(), stdout, streamFailure, "rclone-stdout");
@@ -51,7 +60,8 @@ public final class ProcessRunner {
         boolean interrupted = false;
         long cancelStarted = 0L;
         while (exit == null) {
-            if (stop.stopped() || cancel.get() || Thread.currentThread().isInterrupted()) {
+            if (timeoutMillis > 0 && (System.nanoTime() - started) / 1_000_000L >= timeoutMillis) timedOut = true;
+            if (timedOut || stop.stopped() || cancel.get() || Thread.currentThread().isInterrupted()) {
                 if (Thread.interrupted()) interrupted = true;
                 requestStop();
                 if (cancelStarted == 0L) cancelStarted = System.nanoTime();
@@ -76,7 +86,7 @@ public final class ProcessRunner {
             if (out.isAlive() || err.isAlive()) streamFailure.set(true);
         }
         if (interrupted) Thread.currentThread().interrupt();
-        return new Outcome(exit, cancel.get() || stop.stopped(), streamFailure.get(), forced, exit != null);
+        return new Outcome(exit, cancel.get() || stop.stopped(), streamFailure.get(), forced, exit != null, timedOut);
     }
 
     private static Thread drain(InputStream input, LineHandler handler, AtomicBoolean failed, String name) {
