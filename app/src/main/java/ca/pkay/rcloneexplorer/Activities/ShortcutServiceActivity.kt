@@ -4,6 +4,9 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
+import ca.pkay.rcloneexplorer.Database.DatabaseHandler
+import ca.pkay.rcloneexplorer.util.ShortcutAuthorisation
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.workmanager.SyncManager
 import ca.pkay.rcloneexplorer.workmanager.SyncWorker.Companion.EXTRA_TASK_ID
@@ -15,22 +18,23 @@ class ShortcutServiceActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        moveTaskToBack(true)
-
-        Log.e(TAG, "Recieved start signal!")
-
-        if(intent.action == TASK_SYNC_ACTION) {
-            Log.e(TAG, "Recieved valid intent.")
-            val id = intent.extras?.getLong(EXTRA_TASK_ID)
-            if(id != null) {
-                SyncManager(this.baseContext).queue(id)
-                Toast.makeText(this, getString(R.string.shortcut_start_service), Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, getString(R.string.shortcut_missing_id), Toast.LENGTH_SHORT).show()
-            }
+        if (intent.action != TASK_SYNC_ACTION || !intent.hasExtra(EXTRA_TASK_ID)) { finish(); return }
+        val task = DatabaseHandler(this).getTask(intent.getLongExtra(EXTRA_TASK_ID, -1))
+        if (task == null) { finish(); return }
+        val start = {
+            SyncManager(this).queue(task.id)
+            Toast.makeText(this, getString(R.string.shortcut_start_service), Toast.LENGTH_SHORT).show()
+            finish()
         }
-
-        Log.e(TAG, "Finish up.")
-        finish()
+        if (ShortcutAuthorisation.verify(this, task, intent.getStringExtra(ShortcutAuthorisation.EXTRA_CAPABILITY))) {
+            start()
+        } else {
+            // Existing shortcuts and untrusted automation require visible consent.
+            AlertDialog.Builder(this).setTitle("Run task?")
+                .setMessage("An external request wants to run '${task.title}'.\n\n${task.localPath}\n${task.remoteId}:${task.remotePath}")
+                .setNegativeButton(android.R.string.cancel) { _, _ -> finish() }
+                .setPositiveButton("Run task") { _, _ -> start() }
+                .setOnCancelListener { finish() }.show()
+        }
     }
 }

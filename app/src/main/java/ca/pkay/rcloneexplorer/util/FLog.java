@@ -57,7 +57,7 @@ public abstract class FLog {
 
     public static void w(String tag, String message, Exception e, Object... args) {
         if (isLoggable(tag, Log.WARN)) {
-            Log.w(tag, applyFormatting(message, args), e);
+            Log.w(tag, applyFormatting(message, args) + "\n" + DiagnosticRedactor.redact(Log.getStackTraceString(e)));
         }
     }
 
@@ -95,21 +95,21 @@ public abstract class FLog {
     public static void e(String tag, String message, Throwable e, Object... args) {
         String formatted = applyFormatting(message, args);
         if (isLoggable(tag, Log.ERROR)) {
-            Log.e(tag, formatted, e);
+            Log.e(tag, formatted + "\n" + DiagnosticRedactor.redact(Log.getStackTraceString(e)));
         }
     }
 
     private static String applyFormatting(String message, Object... args) {
         if (args.length == 0) {
-            return message;
+            return DiagnosticRedactor.redact(message);
         } else {
             try {
-                return String.format(message, args);
+                return DiagnosticRedactor.redact(String.format(message, args));
             } catch (IllegalFormatException e) {
                 // We really shouldn't crash here even if there is a format
                 // error since this is usally used without in error logging
                 // itself.
-                return message;
+                return DiagnosticRedactor.redact(message);
             }
         }
     }

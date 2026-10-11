@@ -29,6 +29,7 @@ class SessionGuardianWorker(
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        if (!SessionGuardianScheduler.isEnabled(mContext)) return@withContext Result.success()
         val rclone = Rclone(mContext)
 
         try {
@@ -56,6 +57,7 @@ class SessionGuardianWorker(
 
             // Iterate through all remotes
             for (remote in remotes) {
+                if (isStopped || !SessionGuardianScheduler.isEnabled(mContext)) return@withContext Result.success()
                 val remoteName = remote.name
                 try {
                     val remoteConfig = configJson.optJSONObject(remoteName)

@@ -21,6 +21,12 @@ import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_AD
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_ID2
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_TYPE2
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_PATH2
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_UUID
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_ADVANCED
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_POLICY
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_ZONE
+import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_NEXT_DUE
 import ca.pkay.rcloneexplorer.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_TYPE
 import ca.pkay.rcloneexplorer.Items.Filter
 import ca.pkay.rcloneexplorer.Items.Task
@@ -45,6 +51,12 @@ class DatabaseHandler(context: Context?) :
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
         sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_UUID)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_ADVANCED)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_POLICY)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_ZONE)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_NEXT_DUE)
     }
 
     override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -74,6 +86,41 @@ class DatabaseHandler(context: Context?) :
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
             sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        }
+        if (oldVersion < 9) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_UUID)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_ADVANCED)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_POLICY)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_ZONE)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_NEXT_DUE)
+        }
+    }
+
+    /** All three collections come from one SQLite read transaction. */
+    fun exportSnapshot(): org.json.JSONObject {
+        val db = readableDatabase
+        db.beginTransaction()
+        try {
+            val result = org.json.JSONObject()
+            val tasks = org.json.JSONArray()
+            db.query(Task.TABLE_NAME, taskProjection, null, null, null, null, Task.COLUMN_NAME_ID + " ASC").use { cursor ->
+                while (cursor.moveToNext()) tasks.put(taskFromCursor(cursor).asJSON())
+            }
+            val filters = org.json.JSONArray()
+            db.query(Filter.TABLE_NAME, filterProjection, null, null, null, null, Filter.COLUMN_NAME_ID + " ASC").use { cursor ->
+                while (cursor.moveToNext()) filters.put(filterFromCursor(cursor).asJSON())
+            }
+            val triggers = org.json.JSONArray()
+            db.query(Trigger.TABLE_NAME, triggerProjection, null, null, null, null, Trigger.COLUMN_NAME_ID + " ASC").use { cursor ->
+                while (cursor.moveToNext()) triggers.put(triggerFromCursor(cursor).asJSON())
+            }
+            result.put("tasks", tasks).put("filters", filters).put("trigger", triggers)
+            db.setTransactionSuccessful()
+            return result
+        } finally {
+            db.endTransaction()
+            db.close()
         }
     }
 
@@ -128,7 +175,8 @@ class DatabaseHandler(context: Context?) :
 
     fun createTask(taskToStore: Task, withId: Boolean = false): Task {
         val db = writableDatabase
-        val newRowId = db.insert(Task.TABLE_NAME, null, if(withId) getTaskContentValuesWithID(taskToStore) else getTaskContentValues(taskToStore))
+        if (taskToStore.bisyncUUID.isEmpty()) taskToStore.bisyncUUID = java.util.UUID.randomUUID().toString()
+        val newRowId = db.insertOrThrow(Task.TABLE_NAME, null, if(withId) getTaskContentValuesWithID(taskToStore) else getTaskContentValues(taskToStore))
         db.close()
         taskToStore.id = newRowId
         return taskToStore
@@ -163,7 +211,11 @@ class DatabaseHandler(context: Context?) :
             Task.COLUMN_NAME_TRANSFERS,
             Task.COLUMN_NAME_REMOTE_ID2,
             Task.COLUMN_NAME_REMOTE_TYPE2,
-            Task.COLUMN_NAME_REMOTE_PATH2
+            Task.COLUMN_NAME_REMOTE_PATH2,
+            Task.COLUMN_NAME_BISYNC_UUID,
+            Task.COLUMN_NAME_BISYNC_ADVANCED,
+            Task.COLUMN_NAME_BISYNC_MAX_DELETE,
+            Task.COLUMN_NAME_POLICY
         )
 
     private fun taskFromCursor(cursor: Cursor): Task {
@@ -176,15 +228,19 @@ class DatabaseHandler(context: Context?) :
         task.direction = cursor.getInt(6)
         task.md5sum = getBoolean(cursor, 7)
         task.wifionly = getBoolean(cursor, 8)
-        task.filterId = cursor.getLong(9)
+        task.filterId = if (cursor.isNull(9)) null else cursor.getLong(9)
         task.deleteExcluded = getBoolean(cursor, 10)
-        task.onFailFollowup = cursor.getLong(11)
-        task.onSuccessFollowup = cursor.getLong(12)
+        task.onFailFollowup = if (cursor.isNull(11)) null else cursor.getLong(11)
+        task.onSuccessFollowup = if (cursor.isNull(12)) null else cursor.getLong(12)
         task.transfers = if (cursor.isNull(13)) null else cursor.getInt(13)
         // Columns added in v8 are NULL for rows created under older schema versions; coalesce to defaults.
         task.remoteId2 = cursor.getString(14) ?: ""
         task.remoteType2 = cursor.getInt(15)
         task.remotePath2 = cursor.getString(16) ?: ""
+        task.bisyncUUID = cursor.getString(17) ?: ""
+        task.bisyncAdvancedOptions = cursor.getString(18) ?: ""
+        task.bisyncMaxDelete = if (cursor.isNull(19)) 10 else cursor.getInt(19)
+        task.readPolicyJSON(cursor.getString(20))
         return task
     }
 
@@ -221,6 +277,10 @@ class DatabaseHandler(context: Context?) :
         values.put(Task.COLUMN_NAME_REMOTE_ID2, task.remoteId2)
         values.put(Task.COLUMN_NAME_REMOTE_TYPE2, task.remoteType2)
         values.put(Task.COLUMN_NAME_REMOTE_PATH2, task.remotePath2)
+        values.put(Task.COLUMN_NAME_BISYNC_UUID, task.bisyncUUID)
+        values.put(Task.COLUMN_NAME_BISYNC_ADVANCED, task.bisyncAdvancedOptions)
+        values.put(Task.COLUMN_NAME_BISYNC_MAX_DELETE, task.bisyncMaxDelete)
+        values.put(Task.COLUMN_NAME_POLICY, task.policyJSON())
         return values
     }
 
@@ -277,7 +337,7 @@ class DatabaseHandler(context: Context?) :
 
     fun createTrigger(triggerToStore: Trigger, withId: Boolean = false): Trigger {
         val db = writableDatabase
-        val newRowId = db.insert(Trigger.TABLE_NAME, null, if(withId) getTriggerContentValuesWithID(triggerToStore) else getTriggerContentValues(triggerToStore))
+        val newRowId = db.insertOrThrow(Trigger.TABLE_NAME, null, if(withId) getTriggerContentValuesWithID(triggerToStore) else getTriggerContentValues(triggerToStore))
         db.close()
         triggerToStore.id = newRowId
         return triggerToStore
@@ -320,6 +380,8 @@ class DatabaseHandler(context: Context?) :
         values.put(Trigger.COLUMN_NAME_WEEKDAY, t.getWeekdays())
         values.put(Trigger.COLUMN_NAME_TARGET, t.triggerTarget)
         values.put(Trigger.COLUMN_NAME_TYPE, t.type)
+        values.put(Trigger.COLUMN_NAME_ZONE, t.zoneId)
+        values.put(Trigger.COLUMN_NAME_NEXT_DUE, t.nextDue)
         return values
     }
 
@@ -331,7 +393,9 @@ class DatabaseHandler(context: Context?) :
                 Trigger.COLUMN_NAME_TIME,
                 Trigger.COLUMN_NAME_WEEKDAY,
                 Trigger.COLUMN_NAME_TARGET,
-                Trigger.COLUMN_NAME_TYPE
+                Trigger.COLUMN_NAME_TYPE,
+                Trigger.COLUMN_NAME_ZONE,
+                Trigger.COLUMN_NAME_NEXT_DUE
         )
 
     private fun triggerFromCursor(cursor: Cursor): Trigger {
@@ -343,6 +407,8 @@ class DatabaseHandler(context: Context?) :
         trigger.setWeekdays(weekdays.toByte())
         trigger.triggerTarget = cursor.getLong(5)
         trigger.type = cursor.getInt(6)
+        trigger.zoneId = cursor.getString(7) ?: ""
+        trigger.nextDue = if (cursor.isNull(8)) 0 else cursor.getLong(8)
         return trigger
     }
 
@@ -399,7 +465,7 @@ class DatabaseHandler(context: Context?) :
 
     fun createFilter(filterToStore: Filter, withId: Boolean = false): Filter {
         val db = writableDatabase
-        val newRowId = db.insert(Filter.TABLE_NAME, null, if(withId) getFilterContentValuesWithID(filterToStore) else getFilterContentValues(filterToStore))
+        val newRowId = db.insertOrThrow(Filter.TABLE_NAME, null, if(withId) getFilterContentValuesWithID(filterToStore) else getFilterContentValues(filterToStore))
         db.close()
         filterToStore.id = newRowId
         return filterToStore
@@ -461,6 +527,24 @@ class DatabaseHandler(context: Context?) :
         }
         for (filter in allFilters) {
             deleteFilter(filter.id)
+        }
+    }
+
+    /** A failed insert rolls back every delete and insert in the restore. */
+    fun replaceAll(tasks: List<Task>, filters: List<Filter>, triggers: List<Trigger>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(Trigger.TABLE_NAME, null, null)
+            db.delete(Task.TABLE_NAME, null, null)
+            db.delete(Filter.TABLE_NAME, null, null)
+            for (filter in filters) db.insertOrThrow(Filter.TABLE_NAME, null, getFilterContentValuesWithID(filter))
+            for (task in tasks) db.insertOrThrow(Task.TABLE_NAME, null, getTaskContentValuesWithID(task))
+            for (trigger in triggers) db.insertOrThrow(Trigger.TABLE_NAME, null, getTriggerContentValuesWithID(trigger))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
         }
     }
 

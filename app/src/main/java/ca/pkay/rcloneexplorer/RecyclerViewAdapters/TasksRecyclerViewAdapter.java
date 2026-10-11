@@ -255,6 +255,8 @@ public class TasksRecyclerViewAdapter extends RecyclerView.Adapter<TasksRecycler
         intent.setAction(TASK_SYNC_ACTION);
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK);
         intent.putExtra(EXTRA_TASK_ID, task.getId());
+        intent.putExtra(ca.pkay.rcloneexplorer.util.ShortcutAuthorisation.EXTRA_CAPABILITY,
+                ca.pkay.rcloneexplorer.util.ShortcutAuthorisation.issue(c, task));
 
         String id = String.valueOf(task.getTitle()+task.getLocalPath()+task.getRemotePath()+task.getDirection());
         ShortcutInfoCompat shortcut = new ShortcutInfoCompat.Builder(c, id)

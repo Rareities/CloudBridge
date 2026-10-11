@@ -55,14 +55,20 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import ca.pkay.rcloneexplorer.Items.FileItem;
 import ca.pkay.rcloneexplorer.Items.RemoteItem;
 import ca.pkay.rcloneexplorer.RcloneRcd.ListItem;
 import ca.pkay.rcloneexplorer.Services.RcdService;
+import ca.pkay.rcloneexplorer.util.BisyncPolicy;
+import ca.pkay.rcloneexplorer.util.NativePipeTransfer;
+import ca.pkay.rcloneexplorer.util.RcPipeLifetime;
 import ca.pkay.rcloneexplorer.util.FLog;
 import io.github.x0b.safdav.provider.SingleRootProvider;
 import java9.util.concurrent.CompletableFuture;
@@ -94,6 +100,9 @@ public class VirtualContentProvider extends SingleRootProvider {
             Root.COLUMN_DOCUMENT_ID};
 
     private static final String TAG = "VirtualContentProvider";
+    private static final Object ADMISSION_MONITOR = new Object();
+    private static BisyncPolicy.Admission providerAdmission;
+    private static int providerAdmissionUsers;
     private static final String ROOT_ID = "rclone";
     @VisibleForTesting()
     static final String ROOT_DOC_ID = ROOT_ID + "/remotes";
@@ -117,6 +126,7 @@ public class VirtualContentProvider extends SingleRootProvider {
     RcloneRcd rcd;
     RcdService rcdService;
     volatile boolean rcdAvailable;
+    private boolean bindingRequested;
 
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
@@ -125,14 +135,23 @@ public class VirtualContentProvider extends SingleRootProvider {
             RcdService.RcdBinder binder = (RcdService.RcdBinder) service;
             rcdService = binder.getService();
             rcd = rcdService.getLocalRcd();
-            rcdAvailable = true;
-            CompletableFuture.runAsync(() -> reloadRemotesIfRequired(), asyncExc);
+            RcdService connected = rcdService;
+            CompletableFuture.runAsync(() -> {
+                boolean ready = connected.waitOnline(3000);
+                if (rcdService != connected) return;
+                rcdAvailable = ready;
+                if (ready) reloadRemotesIfRequired();
+            }, asyncExc);
         }
 
         @Override
         public void onServiceDisconnected(ComponentName name) {
             FLog.d(TAG, "onServiceDisconnected: service disconnected");
             rcdAvailable = false;
+            rcdService = null;
+            rcd = null;
+            // Android retains the binding and reconnects it when the service
+            // returns; a second bindService here would leak a binding count.
         }
     };
 
@@ -145,28 +164,36 @@ public class VirtualContentProvider extends SingleRootProvider {
         if (!preferences.getBoolean(context.getString(R.string.pref_key_enable_vcp), false)) {
             return false;
         }
-        if (rcdAvailable && rcd.isAlive()) {
+        if (rcdAvailable && rcd != null && rcd.isAlive()) {
+            rcdService.onNotifyUse();
             return true;
+        }
+        if (rcdService != null) {
+            startRcdForeground(context);
+            rcd = rcdService.getLocalRcd();
+            rcdAvailable = rcdService.waitOnline(3000);
+            return rcdAvailable && rcd.isAlive();
         }
         FLog.d(TAG, "acquireRcdService: connecting to RcdService");
-        Context appCtx = context.getApplicationContext();
-        if (rcdService != null && rcdService.isShutdown()) {
-            FLog.d(TAG, "Removing old binding");
-            appCtx.unbindService(connection);
-        }
         startBindService(context);
         awaitRcdService();
-        if (null != rcdService) {
-            FLog.w(TAG, "acquireRcd: rcd not ready in time");
-            return true;
-        }
-        return false;
+        boolean ready = rcdAvailable && rcd != null && rcd.isAlive();
+        if (!ready) FLog.w(TAG, "acquireRcd: rcd not ready in time");
+        return ready;
     }
 
     private void startBindService(Context context) {
         Context appCtx = context.getApplicationContext();
         Intent startIntent = new Intent(context, RcdService.class);
-        appCtx.bindService(startIntent, connection, Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
+        if (!bindingRequested) {
+            bindingRequested = appCtx.bindService(startIntent, connection, Context.BIND_AUTO_CREATE | Context.BIND_IMPORTANT);
+        }
+        startRcdForeground(context);
+    }
+
+    private void startRcdForeground(Context context) {
+        Context appCtx = context.getApplicationContext();
+        Intent startIntent = new Intent(context, RcdService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             appCtx.startForegroundService(startIntent);
         } else {
@@ -175,16 +202,14 @@ public class VirtualContentProvider extends SingleRootProvider {
     }
 
     private void awaitRcdService() {
-        long waitTime = 500;
-        while (waitTime > 0 && null != rcdService) {
-            FLog.d(TAG, "acquireRcd: waiting for service");
-            long waitStart = System.nanoTime();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while ((!rcdAvailable || rcd == null || !rcd.isAlive()) && System.nanoTime() < deadline) {
             try {
-                Thread.sleep(100);
-            } catch (InterruptedException ignored) {
+                Thread.sleep(50);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return;
             }
-            long actualWait = (System.nanoTime() - waitStart) / 1000000;
-            waitTime -= actualWait;
         }
     }
 
@@ -608,6 +633,8 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public String createDocument(String parentDocumentId, String mimeType, String displayName) throws FileNotFoundException {
+        if (displayName.isEmpty() || ".".equals(displayName) || "..".equals(displayName) ||
+                displayName.indexOf((char) 0) >= 0) throw mutationFailure("Create", "invalid file name");
         if (displayName.contains("/")) {
             char[] normalized = displayName.toCharArray();
             for (int i = 0, charArrayLength = normalized.length; i < charArrayLength; i++) {
@@ -633,7 +660,7 @@ public class VirtualContentProvider extends SingleRootProvider {
 
         ListItem item = new ListItem();
         item.path = rclonePath;
-        item.name = displayName;
+        item.name = getChildName(documentId);
         item.lastModified = System.currentTimeMillis();
         item.mimeType = mimeType;
         item.isDir = MIME_TYPE_DIR.equals(mimeType);
@@ -642,7 +669,7 @@ public class VirtualContentProvider extends SingleRootProvider {
         // the underlying cloud storage. We don't create placeholders for
         // normal files since they might be sync'ed by a different client.
         if (item.isDir) {
-            try {
+            try (ProviderAdmissionLease admission = acquireMutationAdmission()) {
                 String remoteName = getRemoteName(getNoRootId(documentId));
                 String path = getRclonePath(documentId);
                 if (acquireRcd()) {
@@ -651,18 +678,57 @@ public class VirtualContentProvider extends SingleRootProvider {
                     throw new FileNotFoundException();
                 }
             } catch (RcloneRcd.RcdIOException e) {
-                throw new FileNotFoundException(e.getError());
+                throw mutationFailure("Create directory", e.getError());
             } catch (RcloneRcd.RcdOpException e) {
                 FLog.e(TAG, "Unexpected RCD error", e);
-                throw new FileNotFoundException(e.getError());
+                throw mutationFailure("Create directory", e.getError());
             }
         } else {
-            // However, we need to add this to the cache to capture the subsequent queryDocument call
-            fsCache.put(cacheId, item);
-            remoteState.put(cacheId, item, FsStateNode.STICKY);
+            // Materialise the empty file before acknowledging SAF createDocument.
+            // Later openDocument("w") may upload its contents using the existing pipe.
+            if (!acquireRcd()) throw mutationFailure("Create file", "remote service unavailable");
+            File staging = new File(getContext().getCacheDir(), "vcp-create-" + UUID.randomUUID());
+            if (!staging.mkdir()) throw mutationFailure("Create file", "cannot prepare local staging");
+            File source = new File(staging, item.name);
+            final String createdDocumentId = documentId;
+            boolean jobQueued = false;
+            RcMutation listener = null;
+            try {
+                if (!Objects.equals(source.getCanonicalFile().getParentFile(), staging.getCanonicalFile())
+                        || !source.createNewFile()) {
+                    throw mutationFailure("Create file", "invalid local staging file");
+                }
+                listener = new RcMutation(() -> {
+                    fsCache.put(cacheId, item);
+                    remoteState.put(cacheId, item, FsStateNode.STICKY);
+                    notifyChange(createdDocumentId);
+                }, () -> {
+                    source.delete();
+                    staging.delete();
+                });
+                listener.holdAdmission(acquireMutationAdmission());
+                rcd.copy(staging.getAbsolutePath(), getRcloneFullPath(parentDocumentId), listener);
+                jobQueued = true;
+                listener.awaitSuccess(10000, "Create file");
+            } catch (IOException | RcloneRcd.RcdOpException error) {
+                if (!jobQueued) {
+                    if (listener != null) listener.releaseAdmission();
+                    source.delete();
+                    staging.delete();
+                }
+                throw mutationFailure("Create file", error instanceof RcloneRcd.RcdOpException
+                        ? ((RcloneRcd.RcdOpException) error).getError() : error.getMessage());
+            } catch (RuntimeException error) {
+                if (!jobQueued) {
+                    if (listener != null) listener.releaseAdmission();
+                    source.delete();
+                    staging.delete();
+                }
+                throw error;
+            }
         }
 
-        notifyChange(documentId);
+        if (item.isDir) notifyChange(documentId);
         FLog.v(TAG, "createDocument: created %s, %s, %s, %s", documentId, mimeType, displayName, item.lastModified);
         return documentId;
     }
@@ -683,107 +749,130 @@ public class VirtualContentProvider extends SingleRootProvider {
         if (!acquireRcd()) {
             throw new FileNotFoundException();
         }
-        MaxWait lock = new MaxWait(5000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
-            @Override
-            void onFinish(RcloneRcd.JobStatusResponse status) {
-                FLog.v(TAG, "rename finished with: %s at %d", status.success, status.endTime);
-                lock.release();
-                if (!status.success) {
-                    FLog.w(TAG, "renameDocument: failed to rename %s to %s", srcPath, dstPath);
-                } else {
-                    String cacheId = getNoRootId(documentId);
-                    fsCache.remove(cacheId);
-                    remoteState.remove(cacheId);
-                    notifyChange(documentId);
-                    notifyChange(targetDocId);
-                }
-            }
-        };
+        RcMutation listener = new RcMutation(() -> {
+            String cacheId = getNoRootId(documentId);
+            fsCache.remove(cacheId);
+            remoteState.remove(cacheId);
+            notifyChange(documentId);
+            notifyChange(targetDocId);
+        });
+        listener.holdAdmission(acquireMutationAdmission());
+        boolean jobQueued = false;
         try {
             rcd.moveFile(remoteName, srcPath, remoteName, dstPath, listener);
-            if (!lock.await()) {
-                FLog.w(TAG, "renameDocument: timed out waiting for rcd job (still running)");
-            }
+            jobQueued = true;
+            listener.awaitSuccess(5000, "Rename");
             return targetDocId;
         } catch (RcloneRcd.RcdOpException e) {
+            if (!jobQueued) listener.releaseAdmission();
             FLog.e(TAG, "RCD move failure", e);
-            throw new FileNotFoundException();
+            throw mutationFailure("Rename", e.getError());
+        } catch (RuntimeException e) {
+            if (!jobQueued) listener.releaseAdmission();
+            throw e;
+        }
+    }
+
+    private static FileNotFoundException mutationFailure(String operation, String reason) {
+        String explanation = reason == null || reason.isEmpty() ? "RC reported a failure" : reason;
+        return new FileNotFoundException(operation + " failed: " +
+                explanation.substring(0, Math.min(400, explanation.length())));
+    }
+
+    /** Fail closed if a bisync/one-way transfer owns the exclusive admission lock. */
+    private ProviderAdmissionLease acquireMutationAdmission() throws FileNotFoundException {
+        synchronized (ADMISSION_MONITOR) {
+            if (providerAdmission == null) {
+                try {
+                    providerAdmission = BisyncPolicy.Admission.Companion.acquire(getContext());
+                } catch (Exception error) {
+                    throw mutationFailure("Remote operation", "could not acquire transfer admission: " + error.getMessage());
+                }
+                if (providerAdmission == null)
+                    throw mutationFailure("Remote operation", "another transfer is active; retry when it completes");
+            }
+            providerAdmissionUsers++;
+            return new ProviderAdmissionLease();
+        }
+    }
+
+    private static final class ProviderAdmissionLease implements AutoCloseable {
+        private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+        @Override public void close() {
+            if (!closed.compareAndSet(false, true)) return;
+            synchronized (ADMISSION_MONITOR) {
+                if (--providerAdmissionUsers == 0) {
+                    try { providerAdmission.close(); }
+                    finally { providerAdmission = null; }
+                }
+            }
         }
     }
 
     /**
-     * Finish listener that will notify() on the lock object on completion
+     * A mutation is acknowledged only on terminal successful job/status. A timeout
+     * does not cancel or replay the remote job: it may still finish, so clients
+     * receive an explicit unconfirmed result and should inspect the destination.
      */
-    private static class OnJobFinishListener implements RcloneRcd.JobStatusHandler {
+    @VisibleForTesting
+    static final class RcMutation implements RcloneRcd.JobStatusHandler {
+        private final CountDownLatch completed = new CountDownLatch(1);
+        private final Runnable onSuccess;
+        private final Runnable onTerminal;
+        private volatile RcloneRcd.JobStatusResponse outcome;
+        private ProviderAdmissionLease admission;
 
-        private final MaxWait lock;
+        RcMutation(Runnable onSuccess) {
+            this(onSuccess, null);
+        }
 
-        public OnJobFinishListener(MaxWait lock) {
-            this.lock = lock;
+        RcMutation(Runnable onSuccess, Runnable onTerminal) {
+            this.onSuccess = onSuccess;
+            this.onTerminal = onTerminal;
+        }
+
+        void holdAdmission(ProviderAdmissionLease lease) { admission = lease; }
+
+        synchronized void releaseAdmission() {
+            if (admission != null) {
+                admission.close();
+                admission = null;
+            }
         }
 
         @Override
-        public final void handleJobStatus(RcloneRcd.JobStatusResponse jobStatusResponse) {
-            if (null != lock) {
-                // markCompleted() sets the done flag and notifies any thread blocked in await().
-                lock.markCompleted();
-            }
-            onFinish(jobStatusResponse);
-        }
-
-        void onFinish(RcloneRcd.JobStatusResponse jobStatusResponse) {
-        }
-    }
-
-    /**
-     * An inefficient but simple lock to increase compatibility with clients
-     * that don't understand change notifications.
-     */
-    private static class MaxWait {
-
-        private final long timeout;
-        private final Object lock;
-        private volatile boolean completed;
-
-        MaxWait(long timeout) {
-            this.timeout = timeout;
-            this.lock = new Object();
-        }
-
-        /**
-         * Await release of
-         * @return {@code true} if the rcd job signalled completion, {@code false} if the
-         *         timeout elapsed first (the job may still be running).
-         */
-        public boolean await() {
-            synchronized (lock) {
-                if (!completed) {
-                    try {
-                        lock.wait(timeout);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
+        public synchronized void handleJobStatus(RcloneRcd.JobStatusResponse status) {
+            if (status == null || !status.finished || outcome != null) return;
+            outcome = status;
+            try {
+                if (status.success && onSuccess != null) onSuccess.run();
+            } catch (RuntimeException error) {
+                FLog.e(TAG, "RC mutation succeeded but cache notification failed", error);
+            } finally {
+                try {
+                    if (onTerminal != null) onTerminal.run();
+                } catch (RuntimeException error) {
+                    FLog.e(TAG, "RC mutation staging cleanup failed", error);
+                } finally {
+                    try { releaseAdmission(); }
+                    finally { completed.countDown(); }
                 }
-                return completed;
             }
         }
 
-        /** Marks the awaited job as completed and releases a blocked await(). */
-        public void markCompleted() {
-            synchronized (lock) {
-                completed = true;
-                lock.notify();
+        void awaitSuccess(long timeoutMillis, String operation) throws FileNotFoundException {
+            try {
+                if (!completed.await(timeoutMillis, TimeUnit.MILLISECONDS)) {
+                    throw mutationFailure(operation, "outcome unconfirmed (job may still be running); check remote before retrying");
+                }
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw mutationFailure(operation, "interrupted while awaiting confirmation; check remote before retrying");
             }
-        }
-
-        /** Equivalent to {@link #markCompleted()}; kept for call-site compatibility. */
-        public void release() {
-            markCompleted();
-        }
-
-        public boolean isCompleted() {
-            return completed;
+            RcloneRcd.JobStatusResponse status = outcome;
+            if (status == null || !status.finished || !status.success) {
+                throw mutationFailure(operation, status == null ? "missing terminal job status" : status.error);
+            }
         }
     }
 
@@ -804,35 +893,35 @@ public class VirtualContentProvider extends SingleRootProvider {
             throw new FileNotFoundException();
         }
 
-        MaxWait lock = new MaxWait(10000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
-            @Override
-            void onFinish(RcloneRcd.JobStatusResponse jobStatusResponse) {
-                FLog.v(TAG, "deleteDocument/onFinish(): success=%s", jobStatusResponse.success);
-                fsCache.remove(documentId);
-                remoteState.remove(documentId);
-                revokeDocumentPermission(rootedDocumentId);
-                lock.release();
-                notifyChange(rootedDocumentId);
-            }
-        };
+        RcMutation listener = new RcMutation(() -> {
+            fsCache.remove(documentId);
+            remoteState.remove(documentId);
+            revokeDocumentPermission(rootedDocumentId);
+            notifyChange(rootedDocumentId);
+        });
 
         // Service guard
         if (!acquireRcd()) {
             throw new FileNotFoundException();
         }
 
+        listener.holdAdmission(acquireMutationAdmission());
+        boolean jobQueued = false;
         try {
             if (document.isDir) {
                 rcd.purge(remoteName, document.path, listener);
             } else {
                 rcd.deleteFile(remoteName, document.path, listener);
             }
-            if (!lock.await()) {
-                FLog.w(TAG, "deleteDocument: timed out waiting for rcd job (still running)");
-            }
+            jobQueued = true;
+            listener.awaitSuccess(10000, "Delete");
         } catch (RcloneRcd.RcdOpException e) {
+            if (!jobQueued) listener.releaseAdmission();
             FLog.e(TAG, "deleteDocument() failed", e);
+            throw mutationFailure("Delete", e.getError());
+        } catch (RuntimeException e) {
+            if (!jobQueued) listener.releaseAdmission();
+            throw e;
         }
     }
 
@@ -858,34 +947,31 @@ public class VirtualContentProvider extends SingleRootProvider {
 
         // copyDocument is a data-transfer operation; allow up to 30s for the rcd job so we don't
         // report success to the client while bytes are still moving.
-        final MaxWait lock = new MaxWait(30000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
-            @Override
-            void onFinish(RcloneRcd.JobStatusResponse jobStatusResponse) {
-                FLog.v(TAG, "copyDocument/onFinish(): success=%s", jobStatusResponse.success);
-                lock.release();
-                notifyChange(targetDocumentId);
-            }
-        };
+        RcMutation listener = new RcMutation(() -> notifyChange(targetDocumentId));
 
         // Service guard
         if (!acquireRcd()) {
             throw new FileNotFoundException();
         }
 
+        listener.holdAdmission(acquireMutationAdmission());
+        boolean jobQueued = false;
         try {
             if (document.isDir) {
                 rcd.copy(srcPath, dstFullPath, listener);
             } else {
                 rcd.copyFile(srcRemoteName, document.path, dstRemoteName, dstPath, listener);
             }
-            if (!lock.await()) {
-                FLog.w(TAG, "copyDocument: timed out waiting for rcd job; client may see success before completion");
-            }
+            jobQueued = true;
+            listener.awaitSuccess(30000, "Copy");
             return getRootedDocumentId(targetDocumentId);
         } catch (RcloneRcd.RcdOpException e) {
+            if (!jobQueued) listener.releaseAdmission();
             FLog.e(TAG, "copyDocument() failed", e);
-            throw new FileNotFoundException();
+            throw mutationFailure("Copy", e.getError());
+        } catch (RuntimeException e) {
+            if (!jobQueued) listener.releaseAdmission();
+            throw e;
         }
     }
 
@@ -906,25 +992,21 @@ public class VirtualContentProvider extends SingleRootProvider {
 
         final String targetDocumentId = getTargetDocumentId(sourceDocumentId, targetParentDocumentId);
         // moveDocument is a data-transfer operation; allow up to 30s for the rcd job.
-        MaxWait lock = new MaxWait(30000);
-        OnJobFinishListener listener = new OnJobFinishListener(lock) {
-            @Override
-            void onFinish(RcloneRcd.JobStatusResponse status) {
-                FLog.v(TAG, "move finished with: %s at %d", status.success, status.endTime);
-                fsCache.remove(getNoRootId(sourceDocumentId));
-                remoteState.remove(getNoRootId(sourceDocumentId));
-                revokeDocumentPermission(rootedSrcDocId);
-                lock.release();
-                notifyChange(rootedSrcDocId);
-                notifyChange(targetDocumentId);
-            }
-        };
+        RcMutation listener = new RcMutation(() -> {
+            fsCache.remove(getNoRootId(sourceDocumentId));
+            remoteState.remove(getNoRootId(sourceDocumentId));
+            revokeDocumentPermission(rootedSrcDocId);
+            notifyChange(rootedSrcDocId);
+            notifyChange(targetDocumentId);
+        });
 
         // Service guard
         if (!acquireRcd()) {
             throw new FileNotFoundException();
         }
 
+        listener.holdAdmission(acquireMutationAdmission());
+        boolean jobQueued = false;
         try {
             if (document.isDir) {
                 String srcFs = getRcloneFullPath(sourceDocumentId);
@@ -938,13 +1020,16 @@ public class VirtualContentProvider extends SingleRootProvider {
                 rcd.moveFile(srcRemote, srcPath, dstRemote, dstPath, listener);
             }
 
-            if (!lock.await()) {
-                FLog.w(TAG, "moveDocument: timed out waiting for rcd job; client may see success before completion");
-            }
+            jobQueued = true;
+            listener.awaitSuccess(30000, "Move");
             return getRootedDocumentId(targetDocumentId);
         } catch (RcloneRcd.RcdOpException e) {
+            if (!jobQueued) listener.releaseAdmission();
             FLog.e(TAG, "moveDocument() failed", e);
-            throw new FileNotFoundException();
+            throw mutationFailure("Move", e.getError());
+        } catch (RuntimeException e) {
+            if (!jobQueued) listener.releaseAdmission();
+            throw e;
         }
     }
 
@@ -1196,7 +1281,9 @@ public class VirtualContentProvider extends SingleRootProvider {
      * @return Item or null if not found
      */
     @Nullable
-    private ListItem getFileItem(String documentId) {
+    @VisibleForTesting
+    ListItem getFileItem(String documentId) {
+        if (documentId == null || documentId.indexOf(':') <= 0 || !acquireRcd()) return null;
         int sep = documentId.indexOf(':') + 1;
         if (documentId.length() == sep) {
             FLog.w(TAG, "getFileItem: naked root! Your SAF client may be buggy.");
@@ -1312,36 +1399,112 @@ public class VirtualContentProvider extends SingleRootProvider {
 
         long len = document.size;
         if ("r".equals(mode)) {
+            StreamLease lease = acquireStreamLease();
+            NativePipeTransfer[] started = new NativePipeTransfer[1];
             ParcelFileDescriptor consumer;
             ParcelFileDescriptor producer;
             try {
                 ParcelFileDescriptor[] descriptors = ParcelFileDescriptor.createReliablePipe();
                 consumer = descriptors[0];
                 producer = descriptors[1];
-                PipeTransferThread pipeTransfer = new PipeTransferThread(rclone.downloadToPipe(documentId),
-                        new ParcelFileDescriptor.AutoCloseOutputStream(producer), signal, len);
+                NativePipeTransfer transfer;
+                try { transfer = rclone.openDownloadPipe(documentId); }
+                catch (IOException | RuntimeException error) {
+                    consumer.close(); producer.close(); throw error;
+                }
+                started[0] = transfer;
+                transfer.onExit(lease::processFinished);
+                PipeTransferThread pipeTransfer = new PipeTransferThread(transfer.input(),
+                        new ParcelFileDescriptor.AutoCloseOutputStream(producer), signal, len,
+                        transfer, lease, producer, false);
+                signal.setOnCancelListener(() -> {
+                    transfer.cancel();
+                    try { producer.closeWithError("Document read cancelled"); } catch (IOException ignored) { }
+                });
                 pipeTransfer.start();
                 return consumer;
             } catch (IOException e) {
-                throw new IllegalArgumentException();
+                abortPipeSetup(started[0], lease);
+                throw mutationFailure("Open document", e.getMessage());
+            } catch (RuntimeException error) {
+                abortPipeSetup(started[0], lease);
+                throw error;
             }
         } else if ("w".equals(mode) || "wt".equals(mode)) {
+            StreamLease lease = acquireStreamLease();
+            NativePipeTransfer[] started = new NativePipeTransfer[1];
             ParcelFileDescriptor consumer;
             ParcelFileDescriptor producer;
             try {
                 ParcelFileDescriptor[] descriptors = ParcelFileDescriptor.createReliablePipe();
                 consumer = descriptors[0];
                 producer = descriptors[1];
+                NativePipeTransfer transfer;
+                try { transfer = rclone.openUploadPipe(documentId); }
+                catch (IOException | RuntimeException error) {
+                    consumer.close(); producer.close(); throw error;
+                }
+                started[0] = transfer;
+                transfer.onExit(lease::processFinished);
                 PipeTransferThread pipeTransfer = new PipeTransferThread(
                         new ParcelFileDescriptor.AutoCloseInputStream(consumer),
-                        rclone.uploadFromPipe(documentId), signal, len);
+                        transfer.output(), signal, len, transfer, lease, null, true);
+                signal.setOnCancelListener(() -> {
+                    transfer.cancel();
+                    try { consumer.close(); } catch (IOException ignored) { }
+                });
                 pipeTransfer.start();
                 return producer;
             } catch (IOException e) {
-                throw new IllegalArgumentException();
+                abortPipeSetup(started[0], lease);
+                throw mutationFailure("Open document", e.getMessage());
+            } catch (RuntimeException error) {
+                abortPipeSetup(started[0], lease);
+                throw error;
             }
         }
         throw new UnsupportedOperationException();
+    }
+
+    private static void abortPipeSetup(NativePipeTransfer transfer, StreamLease lease) {
+        if (transfer == null) { lease.close(); return; }
+        // Process launch succeeded but handing its pipe to Android failed.
+        // Wait for the actual child exit before releasing bisync admission.
+        transfer.onExit(lease::processFinished);
+        transfer.cancel();
+        lease.pipeFinished();
+    }
+
+    private StreamLease acquireStreamLease() throws FileNotFoundException {
+        // A cat/rcat transfer launches a separate rclone process, so RCD's
+        // job accounting cannot observe it. Admit before starting the process.
+        ProviderAdmissionLease admission = acquireMutationAdmission();
+        try {
+            if (!acquireRcd() || rcdService == null)
+                throw mutationFailure("Open document", "remote service unavailable");
+            return new StreamLease(admission, rcdService.acquireDocumentLease());
+        } catch (RuntimeException | FileNotFoundException error) {
+            admission.close();
+            throw error;
+        }
+    }
+
+    private static final class StreamLease implements AutoCloseable {
+        private final RcPipeLifetime lifetime;
+
+        StreamLease(ProviderAdmissionLease admission, RcdService.DocumentLease serviceLease) {
+            lifetime = new RcPipeLifetime(() -> {
+                try { serviceLease.close(); } finally { admission.close(); }
+            });
+        }
+
+        void processFinished() { lifetime.processFinished(); }
+
+        void pipeFinished() { lifetime.pipeFinished(); }
+
+        @Override public void close() {
+            lifetime.close();
+        }
     }
 
     private void grantPermission(String documentId) {
@@ -1381,14 +1544,8 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     @Override
     public boolean onCreate() {
-        Context context = getContext();
-        assert null != context;
-        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
-        if (preferences.getBoolean(context.getString(R.string.pref_key_enable_vcp), false)) {
-            Intent intent = new Intent(context, RcdService.class);
-            FLog.d(TAG, "onCreate: initiating service connection");
-            context.bindService(intent, connection, Context.BIND_AUTO_CREATE);
-        }
+        // Bind on the first document request, so simply enabling SAF does not
+        // keep a native rcd process or a dataSync foreground service alive.
         return true;
     }
 
@@ -1634,15 +1791,41 @@ public class VirtualContentProvider extends SingleRootProvider {
         private final InputStream is;
         private final OutputStream os;
         private final CancellationSignal cancellationSignal;
+        private final AutoCloseable lease;
+        private final NativePipeTransfer nativeTransfer;
+        private final ParcelFileDescriptor reliableProducer;
+        private final boolean upload;
 
         private boolean checkOverrun = false;
         private long streamLength;
 
         public PipeTransferThread(InputStream srcIs, OutputStream dstOs, CancellationSignal signal, long streamLength) {
+            this(srcIs, dstOs, signal, streamLength, null);
+        }
+
+        public PipeTransferThread(InputStream srcIs, OutputStream dstOs, CancellationSignal signal,
+                                  long streamLength, AutoCloseable lease) {
             this.is = srcIs;
             this.os = dstOs;
             this.cancellationSignal = signal;
             this.streamLength = streamLength;
+            this.lease = lease;
+            this.nativeTransfer = null;
+            this.reliableProducer = null;
+            this.upload = false;
+        }
+
+        PipeTransferThread(InputStream src, OutputStream dst, CancellationSignal signal, long length,
+                           NativePipeTransfer transfer, StreamLease lease,
+                           ParcelFileDescriptor producer, boolean upload) {
+            this.is = src;
+            this.os = dst;
+            this.cancellationSignal = signal;
+            this.streamLength = length;
+            this.nativeTransfer = transfer;
+            this.lease = lease;
+            this.reliableProducer = producer;
+            this.upload = upload;
         }
 
         public PipeTransferThread(InputStream is, OutputStream os, CancellationSignal cancellationSignal, boolean checkOverrun, long streamLength) {
@@ -1651,6 +1834,10 @@ public class VirtualContentProvider extends SingleRootProvider {
             this.cancellationSignal = cancellationSignal;
             this.checkOverrun = checkOverrun;
             this.streamLength = streamLength;
+            this.lease = null;
+            this.nativeTransfer = null;
+            this.reliableProducer = null;
+            this.upload = false;
         }
 
         @Override
@@ -1658,6 +1845,7 @@ public class VirtualContentProvider extends SingleRootProvider {
             byte[] buf = new byte[128 * 1024];
             int len;
             long lengthBarrier = this.streamLength;
+            IOException failure = null;
             try {
                 FLog.v(TAG, "Running Pipe Transfer...");
                 while ((len = is.read(buf)) > 0) {
@@ -1673,14 +1861,35 @@ public class VirtualContentProvider extends SingleRootProvider {
                     }
                 }
                 FLog.v(TAG, "Stopping Pipe Transfer, cancelled=" + cancellationSignal.isCanceled());
-                is.close();
-                os.flush();
-                os.close();
             } catch (IOException e) {
+                failure = e;
                 if (e.getCause() instanceof ErrnoException && ((ErrnoException) e.getCause()).errno == OsConstants.EPIPE) {
                     FLog.v(TAG, "Pipe closed unexpectedly, Pipe Transfer stopped");
                 } else {
                     FLog.e(TAG, "PipeTransferThread, cancelled=%s", cancellationSignal.isCanceled(), e);
+                }
+            } finally {
+                try { is.close(); } catch (IOException ignored) { }
+                if (nativeTransfer != null) {
+                    if (failure != null || cancellationSignal.isCanceled()) nativeTransfer.cancel();
+                    // rcat needs stdin closed to finish sending the last buffered bytes.
+                    if (upload) {
+                        try { os.close(); } catch (IOException error) { if (failure == null) failure = error; nativeTransfer.cancel(); }
+                    }
+                    try { nativeTransfer.awaitSuccessfulExit(); }
+                    catch (Exception error) {
+                        if (failure == null) failure = new IOException("Native transfer failed: " + error.getMessage(), error);
+                    }
+                }
+                if (failure != null) FLog.e(TAG, "Provider pipe did not complete: %s", failure.getClass().getSimpleName());
+                if (failure != null && reliableProducer != null) {
+                    try { reliableProducer.closeWithError(failure.getMessage()); } catch (IOException ignored) { }
+                }
+                if (!upload) try { os.close(); } catch (IOException ignored) { }
+                if (lease instanceof StreamLease) {
+                    ((StreamLease) lease).pipeFinished();
+                } else if (lease != null) {
+                    try { lease.close(); } catch (Exception error) { FLog.e(TAG, "Pipe lease release failed", error); }
                 }
             }
         }

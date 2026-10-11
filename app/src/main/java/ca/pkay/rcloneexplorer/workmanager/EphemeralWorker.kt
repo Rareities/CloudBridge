@@ -22,6 +22,10 @@ import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.notifications.prototypes.WorkerNotification
 import ca.pkay.rcloneexplorer.notifications.support.StatusObject
+import ca.pkay.rcloneexplorer.util.BisyncPolicy
+import ca.pkay.rcloneexplorer.util.ProcessRunner
+import ca.pkay.rcloneexplorer.util.DiagnosticRedactor
+import java.util.concurrent.atomic.AtomicBoolean
 import ca.pkay.rcloneexplorer.util.FLog
 import ca.pkay.rcloneexplorer.util.SyncLog
 import ca.pkay.rcloneexplorer.util.TransferLocks
@@ -90,8 +94,10 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private val sCleanupFiles = ArrayList<File>()
     private var sDeleteEntries: List<DeleteEntry> = emptyList()
     private val statusObject = StatusObject(mContext)
-    private var failureReason = FAILURE_REASON.NO_FAILURE
-    private var endNotificationAlreadyPosted = false
+    @Volatile private var failureReason = FAILURE_REASON.NO_FAILURE
+    @Volatile private var processRunner = ProcessRunner()
+    private val receiverRegistered = AtomicBoolean()
+    private val endNotificationAlreadyPosted = AtomicBoolean()
     private var silentRun = false
     private val ongoingNotificationID = Random.nextInt()
 
@@ -99,6 +105,29 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
     private var mTitle: String = mNotificationManager?.initialTitle ?: ""
 
     override fun doWork(): Result {
+        if (isStopped) return Result.failure()
+        val admission = try { BisyncPolicy.Admission.acquire(mContext) } catch (_: Exception) { null }
+            ?: return if (runAttemptCount < 8) Result.retry() else Result.failure()
+        var success = false
+        try {
+            success = performWork()
+            if (!success && failureReason == FAILURE_REASON.NO_FAILURE) failureReason = FAILURE_REASON.NO_TASK
+        } catch (e: Exception) {
+            failureReason = if (isStopped || e is InterruptedException) FAILURE_REASON.CANCELLED else FAILURE_REASON.RCLONE_ERROR
+            FLog.e(tag(), "Transfer failed: ${e.javaClass.simpleName}")
+            processRunner.requestStop()
+            if (e is InterruptedException) Thread.currentThread().interrupt()
+        } finally {
+            if (isStopped) failureReason = FAILURE_REASON.CANCELLED
+            if (receiverRegistered.compareAndSet(true, false)) mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
+            admission.closeAfterExit(sRcloneProcess)
+            postSync()
+            mNotificationManager?.cancelSyncNotification(ongoingNotificationID)
+        }
+        return if (success && failureReason == FAILURE_REASON.NO_FAILURE && !isStopped) Result.success() else Result.failure()
+    }
+
+    private fun performWork(): Boolean {
 
         registerBroadcastReceivers()
 
@@ -109,7 +138,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
             val remoteItem = getRemoteitemFromParcel(REMOTE)
             if(remoteItem == null){
                 log("$REMOTE: No valid remote was passed!")
-                return Result.failure()
+                return false
             }
 
             // The title and the first foreground promotion need the notification manager, which
@@ -137,7 +166,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
                         if(fileItem == null){
                             log("$DOWNLOAD_SOURCE: No valid target was passed!")
-                            return Result.failure()
+                            return false
                         }
 
                         sPendingProcesses.add { Rclone(mContext).downloadFile(
@@ -162,7 +191,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
                         if(fileItem == null){
                             log("$MOVE_FILE: No valid target was passed!")
-                            return Result.failure()
+                            return false
                         }
 
                         sPendingProcesses.add { Rclone(mContext).moveTo(
@@ -175,7 +204,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                         val manifestFile = File(inputData.getString(DELETE_MANIFEST) ?: "")
                         if (!manifestFile.exists()) {
                             log("$DELETE_MANIFEST: the delete manifest is missing!")
-                            return Result.failure()
+                            return false
                         }
                         val entries = DeleteManifest.decode(manifestFile.readText())
                         // Keep the manifest until the batch finishes: if the process dies
@@ -183,7 +212,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                         sCleanupFiles.add(manifestFile)
                         if (entries.isEmpty()) {
                             log("$DELETE_MANIFEST: no deletable items were passed!")
-                            return Result.failure()
+                            return false
                         }
                         sDeleteEntries = entries
 
@@ -216,30 +245,20 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 }
             } else {
                 log("Preconditions are not met!")
-                postSync()
-                return Result.failure()
+                return false
             }
 
-            postSync()
             // Indicate whether the work finished successfully with the Result
-            return Result.success()
+            return failureReason == FAILURE_REASON.NO_FAILURE && !isStopped
         }
         log("Critical: No valid ephemeral type passed!")
-        return Result.failure()
+        return false
     }
 
     override fun onStopped() {
-        super.onStopped()
-        SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_sync_cancelled))
-        SyncLog.info(mContext, mTitle, statusObject.toString())
         failureReason = FAILURE_REASON.CANCELLED
-        finishWork()
-    }
-
-    private fun finishWork() {
-        sRcloneProcess?.destroy()
-        mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
-        postSync()
+        processRunner.requestStop()
+        super.onStopped()
     }
 
     fun prepareNotificationManager(type: Type): WorkerNotification {
@@ -253,81 +272,53 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
 
     private fun handleSync(title: String) {
         if (sPendingProcesses.isEmpty()) {
+            failureReason = FAILURE_REASON.RCLONE_ERROR
             log("Sync: No Rclone Process!")
             mNotificationManager?.cancelSyncNotification(ongoingNotificationID)
             return
         }
-        while (!isStopped && sPendingProcesses.isNotEmpty()) {
+        while (!isStopped && failureReason == FAILURE_REASON.NO_FAILURE && sPendingProcesses.isNotEmpty()) {
             // Fold the finished process's deletions into the running total; its stats are
             // replaced as soon as the next process starts reporting.
             statusObject.accumulateDeletions()
             sRcloneProcess = sPendingProcesses.removeFirst().invoke()
             if (sRcloneProcess == null) {
+                failureReason = FAILURE_REASON.RCLONE_ERROR
                 log("Sync: Rclone process could not be started")
-                continue
+                break
             }
             readProcess(sRcloneProcess!!, title)
         }
         mNotificationManager?.cancelSyncNotification(ongoingNotificationID)
     }
 
-    private fun readProcess(localProcessReference: Process, title: String) {
-        try {
-            val reader = BufferedReader(InputStreamReader(localProcessReference.errorStream))
-            val iterator = reader.lineSequence().iterator()
-            // Throttle notification rebuilds: rclone emits a stats line roughly every second,
-            // but with -vvv there can be many more log lines. Rebuilding a Notification and
-            // calling setForegroundAsync() on every line wastes CPU that the transfer needs.
-            var lastNotifyMs = 0L
-            val minNotifyIntervalMs = 500L
-            while(iterator.hasNext()) {
-                val line = iterator.next()
-                try {
-                    val logline = JSONObject(line)
-                    //todo: migrate this to StatusObject, so that we can handle everything properly.
-                    if (logline.getString("level") == "error") {
-                        if (sIsLoggingEnabled) {
-                            log2File?.log(line)
-                        }
-                    }
-
-                    // Process all log lines so stats/progress advance the notification
-                    statusObject.parseLoglineToStatusObject(logline)
-
-                    // Only rebuild when there is content to show, and at most once per
-                    // minNotifyIntervalMs to avoid notification churn on busy logs.
-                    if (statusObject.notificationContent.isNotEmpty()) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastNotifyMs >= minNotifyIntervalMs) {
-                            lastNotifyMs = now
-                            updateForegroundNotification(mNotificationManager?.updateNotification(
-                                title,
-                                statusObject.notificationContent,
-                                statusObject.notificationBigText,
-                                statusObject.notificationPercent,
-                                ongoingNotificationID
-                            ))
-                        }
-                    }
-                } catch (e: JSONException) {
-                    Log.e(tag(), "Error: the offending line: $line")
-                    //FLog.e(TAG, "onHandleIntent: error reading json", e)
+    private fun readProcess(child: Process, title: String) {
+        processRunner = ProcessRunner()
+        var lastNotifyMs = 0L
+        val result = processRunner.run(child, { isStopped || failureReason == FAILURE_REASON.CANCELLED }, null, { raw ->
+            val line = DiagnosticRedactor.redact(raw)
+            try {
+                val logline = JSONObject(line)
+                if (logline.optString("level") == "error" && sIsLoggingEnabled) log2File?.log(line)
+                statusObject.parseLoglineToStatusObject(logline)
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (statusObject.notificationContent.isNotEmpty() && now - lastNotifyMs >= 500L) {
+                    lastNotifyMs = now
+                    updateForegroundNotification(mNotificationManager?.updateNotification(title,
+                        statusObject.notificationContent, statusObject.notificationBigText,
+                        statusObject.notificationPercent, ongoingNotificationID))
                 }
-            }
-        } catch (e: InterruptedIOException) {
-            FLog.e(tag(), "onHandleIntent: I/O interrupted, stream closed", e)
-        } catch (e: IOException) {
-            FLog.e(tag(), "onHandleIntent: error reading stdout", e)
-        }
-        try {
-            localProcessReference.waitFor()
-        } catch (e: InterruptedException) {
-            FLog.e(tag(), "onHandleIntent: error waiting for process", e)
+            } catch (_: Exception) { /* Progress is optional; the process exit is authoritative. */ }
+        })
+        if (result.cancelled) failureReason = FAILURE_REASON.CANCELLED
+        else if (!result.success()) {
+            failureReason = FAILURE_REASON.RCLONE_ERROR
+            SyncLog.error(mContext, title, "rclone did not complete successfully (exit ${result.exitCode})")
         }
     }
 
     private fun postSync() {
-        if (endNotificationAlreadyPosted) {
+        if (!endNotificationAlreadyPosted.compareAndSet(false, true)) {
             return
         }
         if (silentRun) {
@@ -344,7 +335,6 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
             }
             FAILURE_REASON.CANCELLED -> {
                 showCancelledNotification(notificationId)
-                endNotificationAlreadyPosted = true
                 return
             }
             FAILURE_REASON.NO_TASK -> {
@@ -364,8 +354,6 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
             }
         }
         showFailNotification(notificationId, content)
-        endNotificationAlreadyPosted = true
-        finishWork()
     }
 
     private fun showCancelledNotification(notificationId: Int) {
@@ -483,12 +471,13 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
         val intentFilter = IntentFilter()
         intentFilter.addAction(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION)
         mContext.registerReceiver(connectivityChangeBroadcastReceiver, intentFilter)
+        receiverRegistered.set(true)
     }
 
     private val connectivityChangeBroadcastReceiver: BroadcastReceiver =
         object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
-                if(endNotificationAlreadyPosted){
+                if(endNotificationAlreadyPosted.get()){
                     return
                 }
                 sConnectivityChanged = true

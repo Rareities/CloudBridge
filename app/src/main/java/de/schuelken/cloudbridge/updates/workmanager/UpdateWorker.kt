@@ -9,121 +9,86 @@ import ca.pkay.rcloneexplorer.BuildConfig
 import ca.pkay.rcloneexplorer.R
 import de.schuelken.cloudbridge.extensions.tag
 import de.schuelken.cloudbridge.notifications.AppUpdateNotification
+import de.schuelken.cloudbridge.updates.ReleaseSelector
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
+import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class UpdateWorker (private var mContext: Context, workerParams: WorkerParameters): CoroutineWorker(mContext, workerParams) {
 
     private val preferenceManager = PreferenceManager.getDefaultSharedPreferences(mContext)
 
-    private var checkForUpdates = preferenceManager.getBoolean(mContext.getString(R.string.pref_key_app_updates), false)
-    private val ignoredVersion = preferenceManager.getString(mContext.getString(R.string.pref_key_app_update_dismiss_current_update), "")
-    private var lastFoundVersion = preferenceManager.getString(mContext.getString(R.string.pref_key_app_updates_found_update_for_version), BuildConfig.VERSION_NAME)?:BuildConfig.VERSION_NAME
-
-
     override suspend fun doWork(): Result {
-
-        Log.e(tag(), "Try to check updates...")
-
-        // this is supposed to only run on startup and once a week.
-        if(!checkForUpdates) {
-            return Result.success()
-        }
-
-        // if we have a new version stored in the preference, only show a notification
-        if(BuildConfig.VERSION_NAME != lastFoundVersion) {
-            notifyIfRequired()
-            // If the last found version is ignored, still do the check
-            if (ignoredVersion != lastFoundVersion) {
-                return Result.success()
-            }
-        }
-
+        if (!preferenceManager.getBoolean(mContext.getString(R.string.pref_key_app_updates), false)) return Result.success()
         try {
             checkGithubReleases()
         } catch (e: Exception) {
-            Log.e(tag(), "Error: ${e.message}")
+            Log.w(tag(), "Update check unavailable: ${e.javaClass.simpleName}")
         }
-
-        // Indicate whether the work finished successfully with the Result
         return Result.success()
     }
 
     companion object {
-        private const val REPO_OWNER = "thies2005"
+        private const val REPO_OWNER = "Rareities"
         private const val REPO_NAME = "CloudBridge"
+        private const val MAX_RESPONSE_BYTES = 512 * 1024
+        private val client = OkHttpClient.Builder()
+            .callTimeout(15, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .build()
     }
 
-    /**
-     * Notification-only update check: fetches the newest GitHub release and compares
-     * semantic version prefixes (e.g. "1.0.1" of "v1.0.1-beta.abc123"). Inlined to
-     * replace the AppUpdateChecker library (flagged NonFreeNet by the FOSS scan).
-     */
     private suspend fun checkGithubReleases() = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases?per_page=10")
+            .url("https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases?per_page=20")
             .header("Accept", "application/vnd.github+json")
             .header("User-Agent", "CloudBridge-Updater")
             .build()
 
-        OkHttpClient().newCall(request).execute().use { response ->
+        client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 Log.e(tag(), "Release API returned HTTP ${response.code}")
                 return@withContext
             }
-            val body = response.body?.string()
-            val releases = if (body.isNullOrEmpty()) null else JSONArray(body)
-            if (releases == null || releases.length() == 0) {
-                setFoundVersion(BuildConfig.VERSION_NAME)
+            val body = response.body ?: throw IOException("Missing release response")
+            val buffer = ByteArrayOutputStream()
+            body.byteStream().use { stream ->
+                val bytes = ByteArray(8192)
+                while (true) {
+                    val count = stream.read(bytes)
+                    if (count < 0) break
+                    if (buffer.size() + count > MAX_RESPONSE_BYTES) throw IOException("Release response exceeds limit")
+                    buffer.write(bytes, 0, count)
+                }
+            }
+            val release = ReleaseSelector.newest(BuildConfig.VERSION_NAME,
+                JSONArray(buffer.toString(Charsets.UTF_8.name())))
+            val installed = BuildConfig.VERSION_NAME
+            val previouslyFound = preferenceManager.getString(
+                mContext.getString(R.string.pref_key_app_updates_found_update_for_version), installed)
+            if (release == null) {
+                if (previouslyFound != installed) {
+                    setFoundVersion(installed)
+                    setChangelog("")
+                }
                 return@withContext
             }
-            val newest = releases.getJSONObject(0)
-            val tagName = newest.optString("tag_name")
-            if (isNewerVersion(BuildConfig.VERSION_NAME, tagName)) {
-                Log.e(tag(), "Update found: $tagName")
-                setFoundVersion(tagName)
-                setChangelog(newest.optString("body"))
-                notifyIfRequired()
-            } else {
-                setFoundVersion(BuildConfig.VERSION_NAME)
+            if (release.tag != previouslyFound) {
+                setFoundVersion(release.tag)
+                setChangelog(release.changelog)
+                val ignored = preferenceManager.getString(
+                    mContext.getString(R.string.pref_key_app_update_dismiss_current_update), "")
+                if (ignored != release.tag) {
+                    AppUpdateNotification.RELEASES_URL = "https://github.com/Rareities/CloudBridge/releases"
+                    AppUpdateNotification(mContext).showNotification(release.tag)
+                }
             }
-        }
-    }
-
-    private fun isNewerVersion(currentVersion: String, tagName: String): Boolean {
-        val currentParts = numericVersionParts(currentVersion) ?: return false
-        val tagParts = numericVersionParts(tagName) ?: return false
-        for (i in 0 until maxOf(currentParts.size, tagParts.size)) {
-            val current = currentParts.getOrElse(i) { 0 }
-            val tag = tagParts.getOrElse(i) { 0 }
-            if (tag != current) {
-                return tag > current
-            }
-        }
-        return false
-    }
-
-    private fun numericVersionParts(version: String): List<Int>? {
-        val cleaned = version.substringBefore('-').removePrefix("v").removePrefix("V")
-        if (cleaned.isEmpty() || !cleaned[0].isDigit()) {
-            return null
-        }
-        return cleaned.split('.').map { segment -> segment.toIntOrNull() ?: return null }
-    }
-
-
-
-    /**
-     * Does not notify the user when the user skipped this update.
-     */
-    private fun notifyIfRequired(){
-        if (ignoredVersion != lastFoundVersion){
-            AppUpdateNotification(mContext).showNotification(lastFoundVersion)
-        } else {
-            Log.e(tag(), "Hide this version, because it is ignored.")
         }
     }
 
@@ -137,7 +102,6 @@ class UpdateWorker (private var mContext: Context, workerParams: WorkerParameter
     }
 
     private fun setFoundVersion(version: String){
-        lastFoundVersion = version
         val key = mContext.getString(R.string.pref_key_app_updates_found_update_for_version)
         preferenceManager.edit().putString(key, version).apply()
     }

@@ -18,7 +18,7 @@ class EphemeralTaskManager(private var mContext: Context) {
 
     companion object {
 
-        private const val EPHEMERAL_WORK_TAG = "ephemeral_work"
+        const val EPHEMERAL_WORK_TAG = "ephemeral_work"
 
         fun queueDownload(
             context: Context,

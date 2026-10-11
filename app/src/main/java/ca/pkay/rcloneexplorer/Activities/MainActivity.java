@@ -111,6 +111,7 @@ public class MainActivity extends AppCompatActivity
     private Context context;
     private HashMap<Integer, RemoteItem> drawerPinnedRemoteIds;
     private int availableDrawerPinnedRemoteId;
+    private volatile boolean protectedConfigReady;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -153,50 +154,6 @@ public class MainActivity extends AppCompatActivity
         Intent intent = getIntent();
         Bundle bundle = intent.getExtras();
 
-        int lastVersionCode = sharedPreferences.getInt(getString(R.string.pref_key_version_code), -1);
-        String lastVersionName = sharedPreferences.getString(getString(R.string.pref_key_version_name), "");
-        int currentVersionCode = BuildConfig.VERSION_CODE / 10; // drop ABI flag digit
-        String currentVersionName = BuildConfig.VERSION_NAME;
-
-        if (lastVersionCode < currentVersionCode || !lastVersionName.equals(currentVersionName)) {
-            if (lastVersionCode == 9) {
-                AppShortcutsHelper.removeAllAppShortcuts(this);
-                AppShortcutsHelper.populateAppShortcuts(this, rclone.getRemotes());
-            }
-
-            startRemotesFragment();
-
-            SharedPreferences.Editor editor = sharedPreferences.edit();
-            editor.putInt(getString(R.string.pref_key_version_code), currentVersionCode);
-            editor.putString(getString(R.string.pref_key_version_name), currentVersionName);
-            editor.apply();
-        } else if (rclone.isConfigEncrypted()) {
-            askForConfigPassword();
-        } else if (savedInstanceState != null) {
-            fragment = getSupportFragmentManager().findFragmentByTag(FILE_EXPLORER_FRAGMENT_TAG);
-            if (fragment instanceof FileExplorerFragment) {
-                FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
-                transaction.replace(R.id.flFragment, fragment, FILE_EXPLORER_FRAGMENT_TAG);
-                transaction.commit();
-            } else {
-                startRemotesFragment();
-            }
-        } else if (bundle != null && bundle.containsKey(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME)) {
-            String remoteName = bundle.getString(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME);
-            RemoteItem remoteItem = rclone.getRemoteItemFromName(remoteName);
-            if (remoteItem != null) {
-                AppShortcutsHelper.reportAppShortcutUsage(this, remoteItem.getName());
-                startRemote(remoteItem, false);
-            } else {
-                Toasty.error(this, getString(R.string.remote_not_found), Toast.LENGTH_SHORT, true).show();
-                finish();
-            }
-        } else {
-            startRemotesFragment();
-        }
-
-        handleIntentAction(intent);
-
         findViewById(R.id.navAbout).setOnClickListener(v -> {
             Intent aboutIntent = new Intent(this, AboutActivity.class);
             startActivity(aboutIntent);
@@ -207,14 +164,94 @@ public class MainActivity extends AppCompatActivity
             tryStartActivityForResult(this, settingsIntent, SETTINGS_CODE);
         });
 
-        pinRemotesToDrawer();
         updatePermissionFragmentVisibility();
-        TriggerService triggerService = new TriggerService(context);
-        triggerService.queueTrigger();
+        startProtectedConfigInitialisation(savedInstanceState, intent, sharedPreferences);
+    }
 
-        // Schedule Session Guardian Worker for proactive session health monitoring
+    /** Native encryption and validation can each take seconds, so keep them off the UI thread. */
+    private void startProtectedConfigInitialisation(Bundle savedInstanceState, Intent intent, SharedPreferences preferences) {
+        LoadingDialog loading = new LoadingDialog().setTitle(R.string.working).setCanCancel(false);
+        loading.show(getSupportFragmentManager(), "initial configuration protection");
+        new Thread(() -> {
+            IOException failure = null;
+            boolean unlockRequired = false;
+            try {
+                rclone.prepareProtectedConfig();
+                unlockRequired = rclone.isConfigEncrypted();
+            } catch (IOException e) {
+                failure = e;
+            }
+            final IOException startupFailure = failure;
+            final boolean needsUnlock = unlockRequired;
+            runOnUiThread(() -> {
+                Dialogs.dismissSilently(loading);
+                if (isFinishing() || isDestroyed()) return;
+                if (startupFailure != null) {
+                    new MaterialAlertDialogBuilder(this)
+                            .setTitle("Configuration unavailable")
+                            .setMessage("The encrypted configuration could not be prepared. You can unlock the existing file or import an encrypted backup. No configuration was deleted.")
+                            .setPositiveButton("Import backup", (dialog, which) -> importConfigFile())
+                            .setNeutralButton("Unlock existing", (dialog, which) -> askForConfigPassword())
+                            .setNegativeButton(android.R.string.cancel, null).show();
+                    return;
+                }
+                if (needsUnlock) {
+                    askForConfigPassword();
+                    return;
+                }
+                protectedConfigReady = true;
+                showInitialContent(savedInstanceState, intent, preferences);
+            });
+        }, "cloudbridge-config-startup").start();
+    }
+
+    private void showInitialContent(Bundle savedInstanceState, Intent intent, SharedPreferences sharedPreferences) {
+        Bundle bundle = intent == null ? null : intent.getExtras();
+        int lastVersionCode = sharedPreferences.getInt(getString(R.string.pref_key_version_code), -1);
+        String lastVersionName = sharedPreferences.getString(getString(R.string.pref_key_version_name), "");
+        int currentVersionCode = BuildConfig.VERSION_CODE / 10;
+        String currentVersionName = BuildConfig.VERSION_NAME;
+        if (lastVersionCode < currentVersionCode || !lastVersionName.equals(currentVersionName)) {
+            if (lastVersionCode == 9) {
+                AppShortcutsHelper.removeAllAppShortcuts(this);
+            }
+            startRemotesFragment();
+            sharedPreferences.edit().putInt(getString(R.string.pref_key_version_code), currentVersionCode)
+                    .putString(getString(R.string.pref_key_version_name), currentVersionName).apply();
+        } else if (savedInstanceState != null) {
+            fragment = getSupportFragmentManager().findFragmentByTag(FILE_EXPLORER_FRAGMENT_TAG);
+            if (fragment instanceof FileExplorerFragment) {
+                FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
+                transaction.replace(R.id.flFragment, fragment, FILE_EXPLORER_FRAGMENT_TAG).commit();
+            } else startRemotesFragment();
+        } else if (bundle != null && bundle.containsKey(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME)) {
+            String remoteName = bundle.getString(AppShortcutsHelper.APP_SHORTCUT_REMOTE_NAME);
+            new Thread(() -> {
+                RemoteItem remoteItem = rclone.getRemoteItemFromName(remoteName);
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) return;
+                    if (remoteItem == null) {
+                        Toasty.error(this, getString(R.string.remote_not_found), Toast.LENGTH_SHORT, true).show();
+                        finish();
+                    } else {
+                        AppShortcutsHelper.reportAppShortcutUsage(this, remoteItem.getName());
+                        startRemote(remoteItem, false);
+                    }
+                });
+            }, "cloudbridge-shortcut-remote").start();
+        } else startRemotesFragment();
+        handleIntentAction(intent);
+        final boolean refreshShortcuts = lastVersionCode == 9;
+        new Thread(() -> {
+            List<RemoteItem> initialRemotes = rclone.getRemotes();
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || !protectedConfigReady) return;
+                pinRemotesToDrawer(initialRemotes);
+                if (refreshShortcuts) AppShortcutsHelper.populateAppShortcuts(this, initialRemotes);
+            });
+        }, "cloudbridge-initial-drawer").start();
+        new TriggerService(context).queueTrigger();
         ca.pkay.rcloneexplorer.workmanager.SessionGuardianScheduler.schedule(this);
-
         (new UpdateChecker(this)).schedule();
     }
 
@@ -320,7 +357,7 @@ public class MainActivity extends AppCompatActivity
             if (data != null) {
                 uri = data.getData();
                 if (uri != null) {
-                    new CopyConfigFile().execute(uri);
+                    promptBackupPassword(uri, false);
                 }
             }
         } else if (requestCode == SETTINGS_CODE && resultCode == RESULT_OK) {
@@ -335,12 +372,7 @@ public class MainActivity extends AppCompatActivity
             if (data != null) {
                 uri = data.getData();
                 if (uri != null) {
-                    try {
-                        rclone.exportConfigFile(uri);
-                    } catch (IOException e) {
-                        FLog.e(TAG, "Could not export config file to %s", e, uri);
-                        Toasty.error(this, getString(R.string.error_exporting_config_file), Toast.LENGTH_SHORT, true).show();
-                    }
+                    promptBackupPassword(uri, true);
                 }
             }
         } else if (requestCode == FileExplorerFragment.STREAMING_INTENT_RESULT) {
@@ -513,6 +545,10 @@ public class MainActivity extends AppCompatActivity
     }
 
     private void pinRemotesToDrawer() {
+        pinRemotesToDrawer(rclone.getRemotes());
+    }
+
+    private void pinRemotesToDrawer(List<RemoteItem> remoteItems) {
         Menu menu = navigationView.getMenu();
         MenuItem existingMenu = menu.findItem(1);
         if (existingMenu != null) {
@@ -521,7 +557,6 @@ public class MainActivity extends AppCompatActivity
 
         SubMenu subMenu = menu.addSubMenu(R.id.drawer_pinned_header, 1, Menu.NONE, R.string.nav_drawer_pinned_header);
 
-        List<RemoteItem> remoteItems = rclone.getRemotes();
         Collections.sort(remoteItems);
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
         Set<String> renamedRemotes = sharedPreferences.getStringSet(getString(R.string.pref_key_renamed_remotes), new HashSet<>());
@@ -618,12 +653,71 @@ public class MainActivity extends AppCompatActivity
     public void exportConfigFile() {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("text/*");
+        intent.setType("application/zip");
         SimpleDateFormat date = new SimpleDateFormat("yyyy-MM-dd_HHmmss");
         String localTime = date.format(Calendar.getInstance().getTime());
 
         intent.putExtra(Intent.EXTRA_TITLE, getString(R.string.app_name)+"-backup-"+localTime+".zip");
         tryStartActivityForResult(this, intent, WRITE_REQUEST_CODE);
+    }
+
+    private void promptBackupPassword(Uri uri, boolean exporting) {
+        android.widget.LinearLayout fields = new android.widget.LinearLayout(this);
+        fields.setOrientation(android.widget.LinearLayout.VERTICAL);
+        fields.setPadding(32, 8, 32, 8);
+        android.widget.EditText password = new android.widget.EditText(this);
+        password.setHint("Configuration backup password");
+        password.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        fields.addView(password);
+        android.widget.EditText confirmation = new android.widget.EditText(this);
+        if (exporting) {
+            confirmation.setHint("Confirm backup password");
+            confirmation.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            fields.addView(confirmation);
+        }
+        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+                .setTitle(exporting ? "Protect backup credentials" : "Unlock configuration backup")
+                .setMessage(exporting ? "Use at least 12 characters and keep the password separately. Remote credentials are encrypted in rclone.conf. Task names, paths and preferences remain visible in the ZIP."
+                        : "Enter the backup or rclone configuration password. Leave blank for a legacy unencrypted backup. Your current configuration is kept until all parts pass validation.")
+                .setView(fields).setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(exporting ? "Export" : "Import", null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+            String value = password.getText().toString();
+            try {
+                if (exporting || !value.isEmpty()) ca.pkay.rcloneexplorer.util.NativeConfigEncryption.validatePassword(value);
+                if (exporting && (value.length() < 12 || !value.equals(confirmation.getText().toString()))) {
+                    password.setError("Use matching passwords of at least 12 characters");
+                    return;
+                }
+            } catch (IllegalArgumentException error) { password.setError(error.getMessage()); return; }
+            password.setText("");
+            confirmation.setText("");
+            dialog.dismiss();
+            if (exporting) new ExportProtectedConfig(uri).execute(value);
+            else new CopyConfigFile(value).execute(uri);
+        }));
+        dialog.show();
+    }
+
+    @SuppressLint("StaticFieldLeak")
+    private class ExportProtectedConfig extends AsyncTask<String, Void, String> {
+        private final Uri destination;
+        private LoadingDialog loading;
+        ExportProtectedConfig(Uri destination) { this.destination = destination; }
+        @Override protected void onPreExecute() {
+            loading = new LoadingDialog().setTitle(R.string.working).setCanCancel(false);
+            loading.show(getSupportFragmentManager(), "protected export");
+        }
+        @Override protected String doInBackground(String... passwords) {
+            try { rclone.exportConfigFile(destination, passwords[0]); return null; }
+            catch (Exception error) { return ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(error.getMessage()); }
+            finally { java.util.Arrays.fill(passwords, null); }
+        }
+        @Override protected void onPostExecute(String error) {
+            Dialogs.dismissSilently(loading);
+            if (error == null) Toasty.success(context, "Backup saved with encrypted credentials", Toast.LENGTH_LONG, true).show();
+            else Toasty.error(context, "Backup failed: " + error, Toast.LENGTH_LONG, true).show();
+        }
     }
 
     public void requestPermissions() {
@@ -716,6 +810,10 @@ public class MainActivity extends AppCompatActivity
     @SuppressLint("StaticFieldLeak")
     private class CopyConfigFile extends AsyncTask<Uri, Void, Boolean> {
 
+        private String importPassword;
+        CopyConfigFile() { this(null); }
+        CopyConfigFile(String password) { importPassword = password; }
+
         private final int SUCCESS_IMPORT = 0;
         private final int FAILURE_UNSPECIFIED = 1;
         private final int FAILURE_RCLONE_CONF_NOT_VALID = 2;
@@ -725,7 +823,9 @@ public class MainActivity extends AppCompatActivity
         private final int FAILURE_ZIP_MISSING_CONF = 6;
 
         private int statusCode = FAILURE_UNSPECIFIED;
+        private String failureDetail = "";
         private LoadingDialog loadingDialog;
+        private boolean importedConfigLocked;
 
 
         @Override
@@ -738,47 +838,44 @@ public class MainActivity extends AppCompatActivity
             loadingDialog.show(getSupportFragmentManager(), "loading dialog");
         }
 
-        //todo: Check shared preferences if they will be overridden by the onPostExecute
-        //todo: This assumes that zip-files are uncorrupted. That means that if the rclone.conf is valid,
-        //todo: but the jsons are not, we import half a configuration package.
+        // ZIP parts are validated together and committed with a private rollback journal.
 
         @Override
         protected Boolean doInBackground(Uri... uris) {
 
+            String suppliedPassword = importPassword;
+            importPassword = null;
+
             ContentResolver resolver = context.getContentResolver();
             String mime = resolver.getType(uris[0]);
 
-            if(mime.equals("application/zip")) {
+            boolean zip = "application/zip".equals(mime);
+            if (!zip) {
+                try (java.io.InputStream stream = resolver.openInputStream(uris[0])) {
+                    zip = stream != null && stream.read() == 'P' && stream.read() == 'K';
+                } catch (IOException e) {
+                    statusCode = FAILURE_UNSPECIFIED;
+                    return false;
+                }
+            }
+            if (zip) {
                 try {
-                    boolean validRclone = rclone.copyConfigFileFromZip(uris[0]);
-                    if(!validRclone) {
-                        statusCode = FAILURE_ZIP_INVALID_CONF;
-                        return false;
-                    }
+                    ca.pkay.rcloneexplorer.Database.json.BackupRestore.restore(context, rclone, uris[0], suppliedPassword);
+                    importedConfigLocked = rclone.isConfigEncrypted();
                     statusCode = SUCCESS_IMPORT;
+                    new ca.pkay.rcloneexplorer.Services.TriggerService(context).queueTrigger();
+                    return true;
                 } catch (Exception e) {
-                    statusCode = FAILURE_ZIP_MISSING_CONF;
-                    return false;
-                }
-
-                try {
-                    String json = rclone.readDatabaseJson(uris[0]);
-                    Importer.importJson(json, context);
-                    json = rclone.readSharedPrefs(uris[0]);
-                    SharedPreferencesBackup.importJson(json, context);
-                } catch (JSONException e) {
                     statusCode = FAILURE_ZIP_INVALID_JSON;
-                    return false;
-                } catch (Exception e) {
-                    statusCode = FAILURE_ZIP_NO_JSON;
+                    failureDetail = ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(e.getMessage());
                     return false;
                 }
-                return true;
             }
 
             try {
-                boolean validRclone = rclone.copyConfigFile(uris[0]);
+                boolean validRclone = rclone.copyConfigFile(uris[0], suppliedPassword);
                 if(validRclone) {
+                    importedConfigLocked = rclone.isConfigEncrypted();
                     statusCode = SUCCESS_IMPORT;
                     return true;
                 }
@@ -786,6 +883,7 @@ public class MainActivity extends AppCompatActivity
                 return false;
             } catch (IOException e) {
                 statusCode = FAILURE_RCLONE_CONF_NOT_VALID;
+                failureDetail = ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(e.getMessage());
                 return false;
             }
         }
@@ -810,6 +908,7 @@ public class MainActivity extends AppCompatActivity
                         errorMessage = getString(R.string.import_configuration_fail_zip_json_missing);
                         break;
                 }
+                if (!failureDetail.isEmpty()) errorMessage += "\n" + failureDetail;
                 Toasty.error(context, errorMessage, Toast.LENGTH_LONG, true).show();
                 return;
             }
@@ -826,14 +925,20 @@ public class MainActivity extends AppCompatActivity
             editor.remove(getString(R.string.pref_key_accessible_storage_locations));
             editor.apply();
 
-            if (rclone.isConfigEncrypted()) {
-                pinRemotesToDrawer(); // this will clear any previous pinned remotes
+            if (importedConfigLocked) {
                 askForConfigPassword();
             } else {
+                protectedConfigReady = true;
                 AppShortcutsHelper.removeAllAppShortcuts(context);
-                AppShortcutsHelper.populateAppShortcuts(context, rclone.getRemotes());
-                pinRemotesToDrawer();
                 startRemotesFragment();
+                new Thread(() -> {
+                    List<RemoteItem> updated = rclone.getRemotes();
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) return;
+                        AppShortcutsHelper.populateAppShortcuts(context, updated);
+                        pinRemotesToDrawer(updated);
+                    });
+                }, "cloudbridge-import-remotes").start();
             }
         }
     }
@@ -1056,8 +1161,21 @@ public class MainActivity extends AppCompatActivity
                 askForConfigPassword();
             } else {
                 findViewById(R.id.locked_config).setVisibility(View.GONE);
-                AppShortcutsHelper.removeAllAppShortcuts(context);
-                AppShortcutsHelper.populateAppShortcuts(context, rclone.getRemotes());
+                if (!protectedConfigReady) {
+                    protectedConfigReady = true;
+                    showInitialContent(null, getIntent(), PreferenceManager.getDefaultSharedPreferences(context));
+                } else {
+                    AppShortcutsHelper.removeAllAppShortcuts(context);
+                    startRemotesFragment();
+                    new Thread(() -> {
+                        List<RemoteItem> updated = rclone.getRemotes();
+                        runOnUiThread(() -> {
+                            if (isFinishing() || isDestroyed()) return;
+                            AppShortcutsHelper.populateAppShortcuts(context, updated);
+                            pinRemotesToDrawer(updated);
+                        });
+                    }, "cloudbridge-unlock-remotes").start();
+                }
             }
         }
     }

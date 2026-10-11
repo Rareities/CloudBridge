@@ -34,11 +34,11 @@ Keep this repository easy to upgrade from upstream rclone.
 - Do not modify generated or fetched rclone source under `rclone/cache/`.
 - Do not reintroduce the deprecated `rclone/patches/` flow. The fork already contains project-specific rclone changes, including Internxt auto-token-renewal.
 - Prefer Android-side integration changes in `app/` over Go-side changes in rclone.
-- If a Go-side rclone change is unavoidable, keep it in the rclone fork at `https://github.com/thies2005/rclone`; do not vendor local source patches here.
+- If a Go-side rclone change is unavoidable, keep it in the rclone fork at `https://github.com/Rareities/rclone`; do not vendor local source patches here.
 
 ## Build
 
-Prerequisites: Go 1.25+, JDK 17, Android SDK with NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
+Prerequisites: Go 1.26+, JDK 17, Android SDK. The rclone executable is CGO-disabled and does not need a C compiler. Release symbol tasks may require the configured NDK. Versions are pinned in `gradle.properties`; check there first if builds break.
 
 ```sh
 ./gradlew assembleOssDebug
@@ -90,7 +90,7 @@ Run the checks that match the change. Before any commit or push, required checks
 
 ## Gotchas
 
-- Windows builds require the rclone module's Windows-specific NDK handling (`.cmd` suffixes and CRLF to LF conversion).
+- The rclone build uses structured cross-platform Go/Git commands and checks the generated ELF architecture for every ABI.
 - Debug builds append `.debug` to the application ID, so debug and release can coexist on a device.
 - `local.properties` with `sdk.dir` or `ANDROID_HOME` is required for rclone cross-compilation.
 - Translations are managed via Weblate and Crowdin; do not manually edit localized `strings.xml` unless adding a new language.

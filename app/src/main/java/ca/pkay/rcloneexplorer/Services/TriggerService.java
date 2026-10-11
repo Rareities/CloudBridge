@@ -10,187 +10,155 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
-
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.preference.PreferenceManager;
-
-import java.util.Calendar;
-
 import ca.pkay.rcloneexplorer.BroadcastReceivers.TriggerReceiver;
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler;
 import ca.pkay.rcloneexplorer.Items.Trigger;
 import ca.pkay.rcloneexplorer.R;
-import ca.pkay.rcloneexplorer.notifications.AppErrorNotificationManager;
-import ca.pkay.rcloneexplorer.util.PermissionManager;
+import ca.pkay.rcloneexplorer.util.ScheduleCalculator;
 import ca.pkay.rcloneexplorer.workmanager.SyncManager;
+import java.util.Calendar;
+import java.util.TimeZone;
 
+/** Alarm adapter. Dispatch now runs through WorkManager, without starting a foreground service. */
 public class TriggerService extends Service {
-
-    private DatabaseHandler dbHandler;
+    public static final String TRIGGER_RECIEVE = "TRIGGER_RECIEVE";
+    public static final String TRIGGER_ID = "TRIGGER_ID";
+    public static final String CHANNEL_ID = "CHANNEL_ID";
+    public static final int SERVICE_NOTIFICATION_ID = 42;
+    private static final Object SCHEDULE_LOCK = new Object();
     private Context context;
+    private DatabaseHandler dbHandler;
 
-    public static String TRIGGER_RECIEVE = "TRIGGER_RECIEVE";
-    public static String TRIGGER_ID = "TRIGGER_ID";
-
-    public static String CHANNEL_ID = "CHANNEL_ID";
-    public static int SERVICE_NOTIFICATION_ID = 42;
-
-    //Required for Servicecall
     public TriggerService() {}
-
-    public TriggerService(Context c) {
-        this.dbHandler = new DatabaseHandler(c);
-        this.context = c;
+    public TriggerService(Context context) {
+        this.context = context.getApplicationContext();
+        this.dbHandler = new DatabaseHandler(this.context);
     }
 
-    public void queueTrigger(){
-        for(Trigger t : dbHandler.getAllTrigger()){
-            queueSingleTrigger(t);
-        }
-    }
-
-    public void queueSingleTrigger(Trigger trigger){
-        if(trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
-            queueSingleScheduleTrigger(trigger);
-        } else {
-            queueSingleIntervalTrigger(trigger);
-        }
-
-    }
-
-    @SuppressLint("ScheduleExactAlarm") // this is caught by the PermissionManager itself
-    private void queueSingleScheduleTrigger(Trigger trigger){
-        if(trigger.isEnabled()){
-            Calendar calendar = Calendar.getInstance();
-            calendar.setTimeInMillis(System.currentTimeMillis());
-
-            int seconds = trigger.getTime();
-            calendar.set(Calendar.HOUR_OF_DAY, seconds/60);
-            calendar.set(Calendar.MINUTE, seconds%60);
-
-            long difference = calendar.getTimeInMillis()-System.currentTimeMillis();
-            //Properly schedule past events
-            if(difference<0){
-                difference = (24*60*60*1000) + difference;
-            }
-
-            // If a triggered event schedules the next occurence, we need to make sure that it does not create an endless loop for 60 seconds.
-            // If it is "now", do it in 24h
-            if(Calendar.getInstance().get(Calendar.MINUTE) == seconds%60){
-                difference = (24*60*60*1000);
-            }
-
-            long timeToTrigger = System.currentTimeMillis() + difference;
-
-            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId());
-            am.cancel(pi);
-
-            SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-            boolean allowWhileIdle = sharedPreferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
-
-            if((new PermissionManager(context)).grantedAlarms()) {
-                if (allowWhileIdle) {
-                    am.setExactAndAllowWhileIdle(
-                            AlarmManager.RTC_WAKEUP,
-                            timeToTrigger,
-                            pi
-                    );
-                } else {
-                    am.setExact(
-                            AlarmManager.RTC_WAKEUP,
-                            timeToTrigger,
-                            pi
-                    );
-                }
-            } else {
-                new AppErrorNotificationManager(context).showNotification();
+    public void queueTrigger() {
+        synchronized (SCHEDULE_LOCK) {
+            long now = System.currentTimeMillis();
+            for (Trigger trigger : dbHandler.getAllTrigger()) {
+                if (trigger.isEnabled() && trigger.getNextDue() > 0 && trigger.getNextDue() <= now)
+                    queueDueTask(trigger);
+                schedule(trigger, now);
             }
         }
     }
 
-    private void queueSingleIntervalTrigger(Trigger trigger){
-        if(trigger.isEnabled()){
+    public void queueSingleTrigger(Trigger trigger) {
+        synchronized (SCHEDULE_LOCK) { schedule(trigger, System.currentTimeMillis()); }
+    }
 
-            int intervalMillis = trigger.getTime() * 60 * 1000;
-            long timeToTrigger = System.currentTimeMillis();
-
-            AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            PendingIntent pi = getIntent(trigger.getId());
-            am.cancel(pi);
-            am.setInexactRepeating(
-                    AlarmManager.RTC_WAKEUP,
-                    timeToTrigger+intervalMillis,
-                    intervalMillis,
-                    pi
-            );
+    public void receiveTrigger(long id) {
+        synchronized (SCHEDULE_LOCK) {
+            Trigger trigger = dbHandler.getTrigger(id);
+            if (trigger == null || !trigger.isEnabled()) { cancelTrigger(id); return; }
+            long now = System.currentTimeMillis();
+            if (trigger.getNextDue() > 0 && trigger.getNextDue() > now) {
+                schedule(trigger, now);
+                return;
+            }
+            queueDueTask(trigger);
+            schedule(trigger, now);
         }
     }
 
-    public void cancelTrigger(long triggerID){
-        AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        am.cancel(getIntent(triggerID));
+    private void queueDueTask(Trigger trigger) {
+        if (trigger.getType() == Trigger.TRIGGER_TYPE_INTERVAL) {
+            Calendar now = Calendar.getInstance(ScheduleCalculator.resolveZone(trigger.getZoneId()));
+            int weekday = (now.get(Calendar.DAY_OF_WEEK) + 5) % 7;
+            if (!trigger.isEnabledAtDay(weekday)) return;
+        }
+        new SyncManager(context).queue(trigger);
     }
 
-    private void startTask(Trigger trigger){
-        boolean skipBecauseOfWeekday;
-        //account for monday beeing 1 and sunday beeing 0. Therefor we need to offset by 2
-        int day = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)-2;
-
-        //check for sundays. Calendar starts with sunday.
-        if(day==-1){
-            skipBecauseOfWeekday = !trigger.isEnabledAtDay(6);
-        }else{
-            skipBecauseOfWeekday = !trigger.isEnabledAtDay(day);
-        }
-
-        if(skipBecauseOfWeekday){
+    @SuppressLint("ScheduleExactAlarm")
+    private void schedule(Trigger trigger, long now) {
+        AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarm == null) throw new IllegalStateException("AlarmManager is unavailable; retry schedule dispatch");
+        PendingIntent pending = getIntent(trigger.getId());
+        alarm.cancel(pending);
+        cancelLegacyIntent(trigger.getId(), alarm);
+        if (!trigger.isEnabled()) {
+            trigger.setNextDue(0);
+            dbHandler.updateTrigger(trigger);
             return;
         }
-
-        SyncManager sm = new SyncManager(this.context);
-        sm.queue(trigger);
-    }
-
-    private PendingIntent getIntent(long triggerId){
-        Intent i = new Intent(context, TriggerReceiver.class);
-        i.setAction(TRIGGER_RECIEVE);
-        i.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        i.putExtra(TRIGGER_ID, triggerId);
-
-        // Todo: Beacause of the long to int cast, this may fail when the user has more than Integer.MAX tasks.
-        return PendingIntent.getBroadcast(context, (int) triggerId, i, PendingIntent.FLAG_UPDATE_CURRENT ^ PendingIntent.FLAG_IMMUTABLE);
-    }
-
-    @Override
-    public int onStartCommand(Intent intent, int flags, int startId) {
-        createNotification();
-        long id = intent.getLongExtra(TRIGGER_ID, -1);
-        this.dbHandler = new DatabaseHandler(getBaseContext());
-        this.context = getBaseContext();
-        Trigger t = dbHandler.getTrigger(id);
-
-        // this can happen if the trigger was scheduled, but then deleted.
-        if(t == null) {
-            stopForeground(true);
-            return Service.START_NOT_STICKY;
+        final long due;
+        try {
+            if (dbHandler.getTask(trigger.getTriggerTarget()) == null) throw new IllegalArgumentException("Scheduled task no longer exists");
+            TimeZone zone = ScheduleCalculator.resolveZone(trigger.getZoneId());
+            if (trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE) {
+                due = ScheduleCalculator.nextWeeklyTime(now, trigger.getTime(), trigger.getWeekdays() & 127, zone);
+            } else if (trigger.getType() == Trigger.TRIGGER_TYPE_INTERVAL) {
+                if (trigger.getTime() < 15) throw new IllegalArgumentException("Scheduled intervals must be at least 15 minutes");
+                due = ScheduleCalculator.nextInterval(now, trigger.getTime(), trigger.getNextDue());
+            } else throw new IllegalArgumentException("Unsupported schedule type");
+        } catch (IllegalArgumentException invalid) {
+            trigger.setEnabled(false);
+            trigger.setNextDue(0);
+            dbHandler.updateTrigger(trigger);
+            Log.e("TriggerService", "Schedule disabled: " + invalid.getMessage());
+            return;
         }
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        boolean idle = preferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
+        boolean exact = trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE &&
+                (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarm.canScheduleExactAlarms());
+        try {
+            if (exact && idle) alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, pending);
+            else if (exact) alarm.setExact(AlarmManager.RTC_WAKEUP, due, pending);
+            else if (idle) alarm.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, pending);
+            else alarm.set(AlarmManager.RTC_WAKEUP, due, pending);
+        } catch (SecurityException denied) {
+            // Permission can be revoked between checking and scheduling. Keep a deferrable fallback.
+            alarm.set(AlarmManager.RTC_WAKEUP, due, pending);
+        }
+        // Only acknowledge the next occurrence once AlarmManager accepted it.
+        // Platform failures propagate to ScheduleDispatchWorker so WorkManager can retry.
+        trigger.setNextDue(due);
+        dbHandler.updateTrigger(trigger);
+    }
 
-        startTask(t);
-        queueSingleTrigger(t);
+    public void cancelTrigger(long id) {
+        AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarm != null) {
+            alarm.cancel(getIntent(id));
+            cancelLegacyIntent(id, alarm);
+        }
+    }
+
+    private PendingIntent getIntent(long id) {
+        Intent intent = new Intent(context, TriggerReceiver.class).setAction(TRIGGER_RECIEVE)
+                .setData(Uri.parse("cloudbridge://schedule/" + id)).putExtra(TRIGGER_ID, id);
+        return PendingIntent.getBroadcast(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    private void cancelLegacyIntent(long id, AlarmManager alarm) {
+        Intent old = new Intent(context, TriggerReceiver.class).setAction(TRIGGER_RECIEVE);
+        PendingIntent pending = PendingIntent.getBroadcast(context, (int) id, old,
+                PendingIntent.FLAG_NO_CREATE | PendingIntent.FLAG_IMMUTABLE);
+        if (pending != null) { alarm.cancel(pending); pending.cancel(); }
+    }
+
+    @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        createNotification();
+        context = getApplicationContext();
+        dbHandler = new DatabaseHandler(context);
+        if (intent != null) receiveTrigger(intent.getLongExtra(TRIGGER_ID, -1));
         stopForeground(true);
-        return Service.START_NOT_STICKY;
+        stopSelfResult(startId);
+        return START_NOT_STICKY;
     }
-
-    @Nullable
-    @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
+    @Nullable @Override public IBinder onBind(Intent intent) { return null; }
 
     private void createNotification(){
         createNotificationChannel();

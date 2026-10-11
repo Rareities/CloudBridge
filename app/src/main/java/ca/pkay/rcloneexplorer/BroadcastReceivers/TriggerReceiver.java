@@ -14,23 +14,13 @@ public class TriggerReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        FLog.e(TAG, "Received Intent");
-
-        assert intent != null;
-        if(intent.getAction().equals(TriggerService.TRIGGER_RECIEVE)){
+        if(intent != null && TriggerService.TRIGGER_RECIEVE.equals(intent.getAction())){
             long i = intent.getLongExtra(TriggerService.TRIGGER_ID, -1);
             FLog.e(TAG, "Start Trigger: "+i);
             if(i==-1)
                 return;
 
-            Intent service = new Intent(context, TriggerService.class);
-            service.setAction(TriggerService.TRIGGER_RECIEVE);
-            service.putExtra(TriggerService.TRIGGER_ID, i);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(service);
-            }else{
-                context.startService(service);
-            }
+            ca.pkay.rcloneexplorer.workmanager.ScheduleDispatchWorker.enqueue(context, i);
         }
     }
 

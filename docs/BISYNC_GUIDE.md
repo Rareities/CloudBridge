@@ -1,0 +1,154 @@
+# Proton Drive bisync candidate
+
+This branch extends CloudBridge's existing Android application. The supported
+first validation target is an ordinary Proton Drive folder paired with a native
+local directory. It retains ordinary copy, one-way sync, cloud-to-cloud copy/sync,
+remote forms and Android document-provider integration. It is not a replacement
+transfer engine or a desktop application.
+
+## Create and initialise a task
+
+1. Configure the remote through the existing remote editor. Use a disposable
+   Proton folder for initial validation and keep an independent backup.
+2. Create a task, select **Bisync**, and choose the local and remote folders.
+   The local directory must exist and remain accessible to the app.
+3. Choose which side should win differing files **during initialisation**.
+   This is separate from normal conflict handling, which preserves conflicts.
+4. Review the deletion percentage, optional backup folders and access markers.
+   The initial deletion limit is 10 percent, not ten files. A backup folder must
+   be outside the synchronised root; a whole-remote-root task cannot use a
+   subfolder of that root as its remote backup.
+5. Save and run **Preview**. Read the summary, then explicitly approve
+   initialisation. A preview is advisory, can authenticate to the remote, and
+   is not a frozen cloud snapshot. Long output is a bounded, labelled summary.
+6. After successful initialisation the task becomes ready for normal runs.
+   Use **Run**, **Cancel**, **History** and **Schedules** in the task editor.
+
+Approval expires after 30 minutes and is bound to the task, ordered endpoints,
+filters, effective options, configuration identity and exact engine commit.
+Editing baseline settings or changing the engine requires a new review. Missing
+or interrupted baseline state cannot silently become a successful run. The app
+does not automatically apply `--resync`, `--force`, empty trash or delete
+unfamiliar remote drafts to repair a failure.
+
+## Comparison, deletion and conflicts
+
+Managed bisync uses size and a common checksum with the fork's opt-in
+`--require-checksum` guard. Missing plaintext sizes, missing common/per-file
+hashes and damaged baseline rows stop reconciliation. The app does not quietly
+fall back to size-only comparison. Backends or paths without the required
+metadata therefore cannot use this managed mode.
+
+Normal conflicts retain both contents. Newer/older automatic precedence is not
+offered because meaningful modification times are not guaranteed for this
+local/Proton pairing. Existing filters remain available, but changing them
+requires baseline review. Enable access checks only after deliberately placing
+the required `RCLONE_TEST` marker in both roots. The marker checks availability;
+it is not a transactional consistency guarantee.
+
+## Advanced flags
+
+Use the option/value dialog or one `--flag` / `--flag=value` per line. Examples:
+
+```text
+--bwlimit=8M
+--checkers=4
+--retries=3
+--timeout=2m
+--exclude=*.tmp
+```
+
+Values are individual process arguments, not shell text. Spaces and Unicode
+are retained. Repeated filter/include/exclude rules are supported; duplicate
+scalar options are rejected. The exact bundled executable validates option
+names and values before remote mutation. Its help is available in the editor.
+
+Relevant ordinary flags are supported, while app-owned state, endpoints,
+initialisation, comparison/deletion protection, listeners, credentials,
+executable hooks and unsafe diagnostics cannot be overridden through a task.
+Use the task controls or remote editor for these. This deliberately does not
+mean unrestricted execution of arbitrary rclone commands.
+
+## Scheduling and task editing
+
+The editor exposes saved schedules, next run, Wi-Fi/unmetered constraints,
+charging, battery-not-low and quiet hours. Daily/selected-weekday schedules use
+civil time and a timezone; fixed intervals use checked long arithmetic and have
+a 15-minute minimum. Missed occurrences coalesce instead of replaying a backlog.
+Follow-up chains retain success/failure semantics, reject cycles and stop after
+a bounded number of tasks.
+
+WorkManager owns constrained transfers. Exact alarms are used only when
+permitted; otherwise scheduling falls back to an inexact alarm. Doze, Android
+quotas, permission changes and force-stop can delay work. Force-stopped apps
+cannot promise automatic resumption before reopening. Quiet hours defer
+automatic work; an explicit manual request is not silently treated as automatic.
+
+The native child exit code determines success. Cancellation, missing processes,
+stream failures and nonzero exits cannot trigger success follow-ups. A durable
+in-progress history entry without a terminal result is shown as **completion
+unconfirmed**, not success.
+
+## Security and resource behaviour
+
+Native configuration encryption, explicit encrypted credential backup and
+journalled recovery are described in [ADR-002](ADR-002-native-rclone-config.md).
+Backup task/path metadata is readable because the ZIP container is not itself
+encrypted. Keep the export password separately and validate recovery.
+
+Task IDs alone cannot authorise exported shortcuts. Diagnostics are redacted
+and bounded, and private history is retained by task identity. Release signing
+requires the approved certificate fingerprint; debug packages are clearly
+separate. App self-updates remain notification-only.
+
+Mutating task workers share conservative admission. Document-provider mutations
+and native streams participate in that exclusion. A stream lease lasts until
+both pipe handling and native process exit finish. RC starts on demand and
+retires after a 30-second idle grace when no requests, jobs or streams remain.
+This grace is an initial policy, not a measured optimum. Periodic session-health
+checks are opt-in and default off. No energy-saving percentage is claimed.
+
+## Engine and validation boundaries
+
+The packaged engine is pinned to Rareities/rclone commit
+`789cfc5c4fde57ad301485a809e23a4aa84e5e31`, source label `v1.76.0` (development),
+with the reviewed API and bridge dependencies. The APK includes an engine
+provenance manifest, per-ABI SHA-256 values and module versions. Engine fixes
+and upstream relationships are recorded in that repository's
+`docs/PROTON_BISYNC_PATCHES.md` and `third_party/proton-api-bridge/UPSTREAM.md`.
+
+Automated local/fake-server tests cover session ownership, token adoption,
+modern-name ambiguity, metadata, upload cancellation, locks, strict checksum
+comparison, task state, restore failure, schedules and option handling.
+The engine's Linux CI includes race checks. Build and test outcomes are reported
+separately from the following release gates:
+
+| Gate | Required evidence |
+| --- | --- |
+| Live Proton compatibility | Disposable account tests, official-client read/overwrite, aliases and two-password accounts, long-lived rotation and multiple processes |
+| Crypto/service evolution | Maintainer-supported compatibility for new Proton models; invalid signatures must keep failing |
+| Android operation | Real-device native launch, permissions, reboot/Doze, force-stop/reopen, foreground timeout, SAF cancellation and Keystore recovery |
+| Resource and battery budgets | Controlled cold/warm measurements of memory, CPU, wakeups, native child counts, network and energy |
+| Release distribution | Approved signing certificate, device gates and an explicit promotion decision |
+
+Photos, Shared With Me, instant event-driven sync, automatic unknown-draft
+recovery, desktop support and biometric-per-run unlocking are not advertised
+as implemented. A successful build does not establish universal Proton
+compatibility or safe deployment against irreplaceable production data.
+
+## Build
+
+Use JDK 17, the Android SDK and Go at least 1.26. The executable is CGO-disabled.
+
+```sh
+./gradlew testOssDebugUnitTest lintOssDebug assembleOssDebug
+```
+
+Debug application ID is `de.schuelken.cloudbridge.debug`. It can coexist with
+the release app and has separate storage and configuration. Debug APKs are
+test artifacts, not an in-place signed update of an existing release install.
+
+Release builds require the usual keystore inputs plus `CB_SIGNING_CERT_SHA256`
+(or `certificateSha256` in git-ignored `keystore.properties`). The value is the
+expected signing certificate SHA-256, not a password. CI uses the repository
+variable of that name. A missing or mismatched identity fails the release build.

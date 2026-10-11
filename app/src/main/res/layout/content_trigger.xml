@@ -96,6 +96,12 @@
                         android:layout_height="48dp"
                         android:entries="@array/triggerIntervals" />
 
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:labelFor="@id/trigger_custom_interval" android:text="@string/schedule_custom_interval" />
+                    <EditText android:id="@+id/trigger_custom_interval" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:minHeight="48dp" android:inputType="number"
+                        android:singleLine="true" android:autofillHints="" />
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
@@ -207,6 +213,12 @@
                         android:layout_height="wrap_content"
                         android:timePickerMode="spinner" />
 
+                    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:labelFor="@id/trigger_zone" android:text="@string/schedule_zone" />
+                    <AutoCompleteTextView android:id="@+id/trigger_zone" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:minHeight="48dp" android:inputType="textNoSuggestions"
+                        android:singleLine="true" android:autofillHints="" />
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
@@ -242,6 +254,11 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
+            <TextView android:id="@+id/trigger_next_run" android:layout_width="match_parent"
+                android:layout_height="wrap_content" android:padding="16dp" android:accessibilityLiveRegion="polite" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:padding="16dp" android:text="@string/schedule_platform_note" />
+            <Space android:layout_width="match_parent" android:layout_height="80dp" />
         </LinearLayout>
 
     </ScrollView>

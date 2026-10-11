@@ -2,6 +2,8 @@ package ca.pkay.rcloneexplorer.Activities
 
 import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
 import android.view.MenuItem
 import android.view.View
@@ -15,6 +17,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.WindowCompat
@@ -30,7 +33,9 @@ import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.SpinnerAdapters.FilterSpinnerAdapter
+import ca.pkay.rcloneexplorer.workmanager.SyncManager
 import ca.pkay.rcloneexplorer.util.ActivityHelper
+import ca.pkay.rcloneexplorer.util.BisyncPolicy
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import es.dmoral.toasty.Toasty
 import java.io.UnsupportedEncodingException
@@ -48,6 +53,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     private lateinit var remoteDropdown: Spinner
     private lateinit var syncDirection: Spinner
     private lateinit var transfersDropdown: Spinner
+    private lateinit var taskControls: TaskEditorControls
+    private var editorReady = false
     private lateinit var fab: FloatingActionButton
 
     // Destination remote for cloud-to-cloud directions (7/8).
@@ -166,6 +173,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                         this.resources.getString(R.string.taskactivity_task_not_found)
                     ).show()
                     finish()
+                    return
                 }
             }
         }
@@ -193,6 +201,9 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         switchWifi.isChecked = existingTask?.wifionly ?: false
         switchMD5sum.isChecked = existingTask?.md5sum ?: false
         switchDeleteExcluded.isChecked = existingTask?.deleteExcluded ?: false
+        taskControls = TaskEditorControls(this, rcloneInstance, { existingTask }, { persistWithoutExit() },
+            { saved -> editorReady && draftMatchesSaved(saved) })
+        taskControls.populate(existingTask)
         prepareSyncDirectionDropdown()
         prepareTransfersDropdown()
         prepareLocal()
@@ -201,6 +212,9 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         prepareFilterDropdown()
         prepareOnFailDropdown()
         prepareOnSuccessDropdown()
+        editorReady = true
+        watchTaskPathChanges()
+        taskControls.refresh()
     }
 
     private val remoteItems: Array<String?>
@@ -255,9 +269,11 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     private fun getTaskValues(id: Long): Task? {
         val taskToPopulate = Task(id)
         taskToPopulate.title = findViewById<EditText>(R.id.task_title_textfield).text.toString()
-        val remotename = remoteDropdown.selectedItem.toString()
+        val remotename = remoteDropdown.selectedItem?.toString() ?: return null
         taskToPopulate.remoteId = remotename
         val direction = SyncDirectionObject.directionForSpinnerPosition(syncDirection.selectedItemPosition)
+        if (direction < 0) { Toasty.error(this, getString(R.string.task_unknown_mode)).show(); return null }
+        if (taskToPopulate.title.isBlank()) { Toasty.error(this, "Enter a task name").show(); return null }
         for (ri in rcloneInstance.remotes) {
             if (ri.name == taskToPopulate.remoteId) {
                 taskToPopulate.remoteType = ri.type
@@ -266,11 +282,12 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskToPopulate.remotePath = remotePath.text.toString()
         taskToPopulate.localPath = localPath.text.toString()
         taskToPopulate.direction = direction
+        taskToPopulate.bisyncUUID = BisyncPolicy.identityForEdit(existingTask, direction)
 
         // Destination remote is only meaningful for cloud-to-cloud directions (7/8).
         if (direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
             || direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE) {
-            taskToPopulate.remoteId2 = remoteDropdown2.selectedItem.toString()
+            taskToPopulate.remoteId2 = remoteDropdown2.selectedItem?.toString() ?: return null
             for (ri in rcloneInstance.remotes) {
                 if (ri.name == taskToPopulate.remoteId2) {
                     taskToPopulate.remoteType2 = ri.type
@@ -331,7 +348,45 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 return null
             }
         }
+        try { taskControls.applyTo(taskToPopulate) } catch (e: IllegalArgumentException) {
+            Toasty.error(this, e.message ?: "Invalid task settings", Toast.LENGTH_LONG, true).show()
+            return null
+        }
         return taskToPopulate
+    }
+
+    /** Compare unsaved baseline inputs without persisting or showing validation popups. */
+    private fun draftMatchesSaved(saved: Task): Boolean {
+        val mode = SyncDirectionObject.directionForSpinnerPosition(syncDirection.selectedItemPosition)
+        val transfersValue = resources.getStringArray(R.array.task_transfers_values)
+            .getOrNull(transfersDropdown.selectedItemPosition)?.toIntOrNull()?.takeIf { it > 0 }
+        val filter = if (filterDropdown.selectedItemPosition > 0)
+            filterItems.getOrNull(filterDropdown.selectedItemPosition - 1)?.id else null
+        return BisyncPolicy.normalisedMode(mode) == BisyncPolicy.normalisedMode(saved.direction) &&
+            remoteDropdown.selectedItem?.toString() == saved.remoteId &&
+            remotePath.text.toString() == saved.remotePath &&
+            localPath.text.toString() == saved.localPath &&
+            filter == saved.filterId && transfersValue == saved.transfers &&
+            switchDeleteExcluded.isChecked == saved.deleteExcluded &&
+            taskControls.matchesSavedOptions(saved)
+    }
+
+    private fun watchTaskPathChanges() {
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                taskControls.onDraftChanged()
+            }
+            override fun afterTextChanged(s: Editable?) {}
+        }
+        localPath.addTextChangedListener(watcher)
+        remotePath.addTextChangedListener(watcher)
+        transfersDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                taskControls.onDraftChanged()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
     }
 
     private fun startRemotePicker(remote: RemoteItem, initialPath: String, destination: Boolean) {
@@ -381,7 +436,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
     private fun prepareRemote() {
 
-        remotePathHolder = existingTask?.remotePath.toString()
+        remotePathHolder = existingTask?.remotePath ?: ""
         remoteDropdown.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, remoteItems)
 
         if (existingTask != null) {
@@ -399,6 +454,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 if(existingTask?.remoteId.equals(remotename)) {
                     remotePath.setText(remotePathHolder)
                 }
+                taskControls.onDraftChanged()
 
             }
 
@@ -409,6 +465,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         //       Catch this issue by forcing the path to be emtpy
         remotePath.onFocusChangeListener = object : View.OnFocusChangeListener {
             override fun onFocusChange(p0: View?, p1: Boolean) {
+                if (!p1) return
+                if (remoteDropdown.selectedItem == null) return
                 startRemotePicker(
                     rcloneInstance.getRemoteItemFromName(remoteDropdown.selectedItem.toString()), "/", false
                 )
@@ -418,7 +476,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     private fun prepareRemote2() {
-        remotePathHolder2 = existingTask?.remotePath2.toString()
+        remotePathHolder2 = existingTask?.remotePath2 ?: ""
         remoteDropdown2.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, remoteItems)
 
         if (existingTask != null) {
@@ -436,6 +494,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 if (existingTask?.remoteId2.equals(remotename)) {
                     remotePath2.setText(remotePathHolder2)
                 }
+                taskControls.onDraftChanged()
             }
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
@@ -443,6 +502,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
         remotePath2.onFocusChangeListener = object : View.OnFocusChangeListener {
             override fun onFocusChange(p0: View?, p1: Boolean) {
+                if (!p1) return
+                if (remoteDropdown.selectedItem == null) return
                 startRemotePicker(
                     rcloneInstance.getRemoteItemFromName(remoteDropdown2.selectedItem.toString()), "/", true
                 )
@@ -456,6 +517,32 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 || direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
         taskRemote2Card.visibility = if (cloudToCloud) View.VISIBLE else View.GONE
         taskLocalCard.visibility = if (cloudToCloud) View.GONE else View.VISIBLE
+        taskControls.mode(direction)
+        val bisync = isBisyncDirection(direction)
+        switchMD5sum.isEnabled = !bisync
+        switchDeleteExcluded.isEnabled = !bisync
+        if (bisync) { switchMD5sum.isChecked = true; switchDeleteExcluded.isChecked = false }
+    }
+
+    private fun isBisyncDirection(direction: Int) =
+        direction == SyncDirectionObject.SYNC_BIDIRECTIONAL_INITIAL ||
+            direction == SyncDirectionObject.SYNC_BIDIRECTIONAL
+
+    private fun persistWithoutExit(): Task? {
+        val candidate = getTaskValues(existingTask?.id ?: 0) ?: return null
+        try {
+            if (existingTask == null) dbHandler.createTask(candidate) else dbHandler.updateTask(candidate)
+            existingTask = candidate
+            return candidate
+        } catch (e: Exception) {
+            Toasty.error(this, "Could not save task settings", Toast.LENGTH_LONG, true).show()
+            return null
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::taskControls.isInitialized) taskControls.refreshAfterResume()
     }
 
     private fun prepareOnFailDropdown() {
@@ -534,6 +621,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
             filterDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
                     selectedFilter = if (position > 0 && position < titles.size) filterItems[position - 1] else null
+                    taskControls.onDraftChanged()
                 }
                 override fun onNothingSelected(parentView: AdapterView<*>?) {}
             }
@@ -593,6 +681,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 val direction = SyncDirectionObject.directionForSpinnerPosition(position)
                 updateSpinnerDescription(direction)
                 updateRemoteFieldVisibility(direction)
+                taskControls.onDraftChanged()
             }
 
             override fun onNothingSelected(adapterView: AdapterView<*>?) {}
@@ -632,7 +721,9 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
             SyncDirectionObject.COPY_REMOTE_TO_REMOTE -> text =
                 getString(R.string.description_sync_direction_copy_remotetoremote)
             SyncDirectionObject.SYNC_BIDIRECTIONAL -> text =
-                getString(R.string.description_sync_direction_sync_bidirectional)
+                getString(R.string.bisync_description)
+            SyncDirectionObject.SYNC_BIDIRECTIONAL_INITIAL -> text =
+                getString(R.string.bisync_description)
         }
         syncDescription.text = text
     }

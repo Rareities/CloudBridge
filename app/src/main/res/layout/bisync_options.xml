@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bisync_options_panel" android:layout_width="match_parent"
+    android:layout_height="wrap_content" android:orientation="vertical" android:padding="8dp"
+    android:visibility="gone">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/bisync_title" android:textAppearance="@style/TextAppearance.AppCompat.Title" />
+    <TextView android:id="@+id/bisync_status" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:accessibilityLiveRegion="polite" android:text="@string/bisync_status_initial" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:labelFor="@id/bisync_precedence" android:text="@string/bisync_preference_label" />
+    <Spinner android:id="@+id/bisync_precedence" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="48dp" android:entries="@array/bisync_precedence_options" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preference_help" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:labelFor="@id/bisync_max_delete" android:text="@string/bisync_delete_label" />
+    <EditText android:id="@+id/bisync_max_delete" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:inputType="number" android:singleLine="true" android:minHeight="48dp" android:autofillHints="" android:text="10" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_delete_help" />
+    <Switch android:id="@+id/bisync_check_access" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="48dp" android:text="@string/bisync_check_access" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_check_access_help" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:labelFor="@id/bisync_backup_local" android:text="@string/bisync_backup_local" />
+    <EditText android:id="@+id/bisync_backup_local" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:inputType="textNoSuggestions" android:singleLine="true" android:minHeight="48dp" android:autofillHints="" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:labelFor="@id/bisync_backup_remote" android:text="@string/bisync_backup_remote" />
+    <EditText android:id="@+id/bisync_backup_remote" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:inputType="textNoSuggestions" android:singleLine="true" android:minHeight="48dp" android:autofillHints="" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_backup_help" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:labelFor="@id/bisync_advanced_flags" android:text="@string/bisync_flags_label" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_flags_help" />
+    <EditText android:id="@+id/bisync_advanced_flags" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:inputType="textMultiLine|textNoSuggestions" android:hint="@string/bisync_flags_hint"
+        android:minHeight="96dp" android:gravity="top|start" android:autofillHints="" />
+    <Button android:id="@+id/bisync_add_option" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_add_flag" />
+    <Button android:id="@+id/bisync_help_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_engine_help" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview_help" />
+    <Button android:id="@+id/bisync_preview_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview" />
+    <Button android:id="@+id/bisync_initialize_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_review" android:enabled="false" />
+</LinearLayout>

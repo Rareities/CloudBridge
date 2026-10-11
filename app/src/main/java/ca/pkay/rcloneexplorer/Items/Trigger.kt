@@ -12,7 +12,9 @@ data class Trigger(var id: Long) {
     var title = ""
     @JsonNames("enabled") var isEnabled = true
     private var weekdays: Byte = 0b01111111 //treat as binary, so that each digit represents an boolean.
-    var time = 0 //in seconds since 00:00
+    var time = 0 // Minutes after midnight, or interval duration in minutes.
+    var zoneId = "" // Empty follows the device timezone.
+    var nextDue = 0L
     @JsonNames("target", "whatToTrigger") var triggerTarget = 0L
     var type = TRIGGER_TYPE_SCHEDULE
 
@@ -80,6 +82,8 @@ data class Trigger(var id: Long) {
         const val COLUMN_NAME_ENABLED = "trigger_enabled"
         const val COLUMN_NAME_TARGET = "trigger_target"
         const val COLUMN_NAME_TYPE = "trigger_type"
+        const val COLUMN_NAME_ZONE = "trigger_zone"
+        const val COLUMN_NAME_NEXT_DUE = "trigger_next_due"
 
         const val TRIGGER_TYPE_SCHEDULE = 0
         const val TRIGGER_TYPE_INTERVAL = 1

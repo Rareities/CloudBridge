@@ -1,23 +1,20 @@
 package ca.pkay.rcloneexplorer.workmanager
 
 import android.app.Notification
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-import android.net.wifi.WifiManager
 import androidx.annotation.StringRes
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
-import androidx.preference.PreferenceManager
+import androidx.work.Data
 import androidx.work.ForegroundInfo
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler
+import ca.pkay.rcloneexplorer.Items.FilterEntry
 import ca.pkay.rcloneexplorer.Items.RemoteItem
 import ca.pkay.rcloneexplorer.Items.SyncDirectionObject
 import ca.pkay.rcloneexplorer.Items.Task
-import ca.pkay.rcloneexplorer.Log2File
 import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Rclone
 import ca.pkay.rcloneexplorer.notifications.GenericSyncNotification
@@ -25,394 +22,255 @@ import ca.pkay.rcloneexplorer.notifications.ReportNotifications
 import ca.pkay.rcloneexplorer.notifications.SyncServiceNotifications
 import ca.pkay.rcloneexplorer.notifications.SyncServiceNotifications.Companion.GROUP_ID
 import ca.pkay.rcloneexplorer.notifications.support.StatusObject
+import ca.pkay.rcloneexplorer.util.BisyncPolicy
+import ca.pkay.rcloneexplorer.util.BisyncStateStore
+import ca.pkay.rcloneexplorer.util.DiagnosticRedactor
 import ca.pkay.rcloneexplorer.util.FLog
+import ca.pkay.rcloneexplorer.util.ProcessRunner
+import ca.pkay.rcloneexplorer.util.RunHistory
+import ca.pkay.rcloneexplorer.util.ScheduleCalculator
 import ca.pkay.rcloneexplorer.util.SyncLog
 import ca.pkay.rcloneexplorer.util.TransferLocks
 import ca.pkay.rcloneexplorer.util.WifiConnectivitiyUtil
 import kotlinx.serialization.json.Json
-import org.json.JSONException
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.IOException
-import java.io.InputStreamReader
-import java.io.InterruptedIOException
+import java.io.File
 import java.util.Random
+import java.util.TimeZone
+import java.util.concurrent.atomic.AtomicBoolean
 
-class SyncWorker (private var mContext: Context, workerParams: WorkerParameters): Worker(mContext, workerParams) {
-
+class SyncWorker(private val mContext: Context, params: WorkerParameters) : Worker(mContext, params) {
     companion object {
         const val TASK_ID = "TASK_ID"
         const val TASK_EPHEMERAL = "TASK_EPHEMERAL"
-        private const val TAG = "SyncWorker"
-
-        //those Extras do not follow the above schema, because they are exposed to external applications
-        //That means shorter values make it easier to use. There is no other technical reason
+        const val BISYNC_OPERATION = "BISYNC_OPERATION"
+        const val BISYNC_APPROVAL = "BISYNC_APPROVAL"
         const val TASK_SYNC_ACTION = "START_TASK"
         const val TASK_CANCEL_ACTION = "CANCEL_TASK"
         const val EXTRA_TASK_ID = "task"
-
-        // Todo: Allow SyncWorker to run in silent mode, or remove this!
         const val EXTRA_TASK_SILENT = "notification"
+        private const val TAG = "SyncWorker"
     }
 
-
-
-    internal enum class FAILURE_REASON {
-        NO_FAILURE, NO_UNMETERED, NO_CONNECTION, RCLONE_ERROR, CONNECTIVITY_CHANGED, CANCELLED, NO_TASK, UNSUPPORTED_DIRECTION
-    }
-
-    // Objects
-    private var mRclone = Rclone(mContext)
-    private var mDatabase = DatabaseHandler(mContext)
-    private var mNotificationManager = SyncServiceNotifications(mContext)
-    private val mPreferences = PreferenceManager.getDefaultSharedPreferences(mContext)
-
-
-    private var log2File: Log2File? = null
-
-
-
-    // States
-    private val sIsLoggingEnabled = mPreferences.getBoolean(getString(R.string.pref_key_logs), false)
-    private var sConnectivityChanged = false
-
-    private var sRcloneProcess: Process? = null
+    private val mRclone = Rclone(mContext)
+    private val mDatabase = DatabaseHandler(mContext)
+    private val mNotificationManager = SyncServiceNotifications(mContext)
     private val statusObject = StatusObject(mContext)
-    private var failureReason = FAILURE_REASON.NO_FAILURE
-    private var endNotificationAlreadyPosted = false
-    private var silentRun = false
+    private val terminal = AtomicBoolean()
     private val ongoingNotificationID = Random().nextInt()
-
-
-    // Task
-    private lateinit var mTask: Task
-    private var mTitle: String = mContext.getString(R.string.sync_service_notification_startingsync)
-
-
+    private var mTitle = "Transfer"
+    @Volatile private var currentRunner = ProcessRunner()
+    @Volatile private var currentProcess: Process? = null
+    @Volatile private var cancelled = false
+    private val diagnostics = StringBuilder()
+    private var lastNotify = 0L
+    private var exitCode: Int? = null
+    private var completed = false
+    private var detail = ""
+    private var startedAt = 0L
 
     override fun doWork(): Result {
-
-        prepareNotifications()
-        registerBroadcastReceivers()
-
-        updateForegroundNotification(mNotificationManager.updateSyncNotification(
-            mTitle,
-            mTitle,
-            ArrayList(),
-            0,
-            ongoingNotificationID
-        ))
-
-
-        var ephemeralTask: Task? = null
-
-        if(inputData.keyValueMap.containsKey(TASK_ID)){
-            val id = inputData.getLong(TASK_ID, -1)
-            ephemeralTask = mDatabase.getTask(id)
+        val initialTask = try {
+            if (inputData.keyValueMap.containsKey(TASK_EPHEMERAL)) {
+                Json.decodeFromString<Task>(inputData.getString(TASK_EPHEMERAL) ?: "")
+            } else mDatabase.getTask(inputData.getLong(TASK_ID, -1L))
+        } catch (_: Exception) { null }
+        if (initialTask == null) return Result.failure(Data.Builder().putString("error", "Task is missing or invalid").build())
+        var task: Task = initialTask
+        val operation = inputData.getString(BISYNC_OPERATION) ?: BisyncStateStore.RUN
+        mTitle = task.title.ifBlank { "Task ${task.id}" }
+        startedAt = System.currentTimeMillis()
+        if (isStopped) return failBeforeStart(task, operation, "Cancelled before the task started", true)
+        val automatic = inputData.getBoolean(SyncManager.AUTOMATIC, false)
+        if (automatic && ScheduleCalculator.afterQuietHours(System.currentTimeMillis(), task.quietHoursStart,
+                task.quietHoursEnd, TimeZone.getDefault()) > System.currentTimeMillis()) return Result.retry()
+        if (!networkAvailable(task)) return if (runAttemptCount < 6) Result.retry()
+            else failBeforeStart(task, operation, "Required network remained unavailable. Review the task constraints before retrying.")
+        val admission = try { BisyncPolicy.Admission.acquire(mContext) } catch (_: Exception) { null }
+        if (admission == null) return if (runAttemptCount < 8) Result.retry()
+            else failBeforeStart(task, operation, "Another transfer remained active. This task did not start.")
+        var transferLocks: TransferLocks? = null
+        try {
+            if (!inputData.keyValueMap.containsKey(TASK_EPHEMERAL)) {
+                task = requireNotNull(mDatabase.getTask(task.id)) { "The task was deleted while waiting" }
+                val expected = inputData.getString("TASK_UUID")
+                require(expected == null || expected == task.bisyncUUID) { "This queued request belongs to an older task configuration" }
+            }
+            require(task.validationError == null) { task.validationError ?: "Invalid task" }
+            require(task.direction in 1..8) { "Unsupported task mode; edit this task before running it" }
+            require(BisyncPolicy.isBisync(task) || operation == BisyncStateStore.RUN) { "This task does not support bisync initialisation" }
+            RunHistory.record(mContext, task, id.toString(), operation, "IN_PROGRESS", startedAt, null,
+                "Task started; a terminal result has not yet been confirmed.")
+            prepareNotifications()
+            mNotificationManager.setCancelId(id)
+            mNotificationManager.updateSyncNotification(mTitle, "Preparing task", ArrayList(), 0, ongoingNotificationID)?.let {
+                setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC)).get()
+            }
+            if (isStopped) throw InterruptedException("Task was cancelled")
+            transferLocks = TransferLocks.acquire(mContext, "task")
+            val filters = task.filterId?.takeIf { it >= 0 }?.let { filterId ->
+                requireNotNull(mDatabase.getFilter(filterId)) { "The selected filter no longer exists" }.getFilters()
+            } ?: arrayListOf()
+            if (BisyncPolicy.isBisync(task)) handleBisync(task, operation, filters) else handleOneWay(task, filters)
+        } catch (e: InterruptedException) {
+            cancelled = true
+            currentRunner.requestStop()
+            detail = "Cancelled. Any interrupted bisync baseline requires review."
+            Thread.currentThread().interrupt()
+        } catch (e: Exception) {
+            detail = DiagnosticRedactor.redact(e.message ?: e.javaClass.simpleName)
+            completed = false
+        } finally {
+            cancelled = cancelled || isStopped
+            if (cancelled) currentRunner.requestStop()
+            try { transferLocks?.release() } finally { admission.closeAfterExit(currentProcess) }
+            try { deliverResult(task, operation) } catch (e: Exception) {
+                FLog.e(TAG, "Could not deliver task result: ${e.javaClass.simpleName}")
+            }
+            mNotificationManager.cancelSyncNotification(ongoingNotificationID)
         }
+        return if (completed && !cancelled) Result.success() else
+            Result.failure(Data.Builder().putString("error", detail.take(1800)).build())
+    }
 
-        if(inputData.keyValueMap.containsKey(TASK_EPHEMERAL)){
-            val taskString = inputData.getString(TASK_EPHEMERAL) ?: ""
-            if(taskString.isNotEmpty()) {
-                try {
-                    ephemeralTask = Json.decodeFromString<Task>(taskString)
-                } catch (e: Exception) {
-                    log("Could not deserialize")
+    private fun failBeforeStart(task: Task, operation: String, message: String, stopped: Boolean = false): Result {
+        detail = message
+        cancelled = stopped || isStopped
+        completed = false
+        try {
+            prepareNotifications()
+            deliverResult(task, operation)
+        } catch (e: Exception) {
+            FLog.e(TAG, "Could not deliver task start failure: ${e.javaClass.simpleName}")
+        }
+        return Result.failure(Data.Builder().putString("error", message).build())
+    }
+
+    private fun handleOneWay(task: Task, filters: ArrayList<FilterEntry>) {
+        val remote = RemoteItem(task.remoteId, task.remoteType, "")
+        val cloudToCloud = task.direction == 7 || task.direction == 8
+        val child = if (cloudToCloud) mRclone.sync(remote, task.remotePath,
+            RemoteItem(task.remoteId2, task.remoteType2, ""), task.remotePath2, task.direction,
+            task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
+        else mRclone.sync(remote, task.localPath, task.remotePath, task.direction,
+            task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
+        val outcome = execute(child, true)
+        completed = outcome.success()
+        if (completed) sendUploadFinishedBroadcast(if (cloudToCloud) task.remoteId2 else task.remoteId,
+            if (cloudToCloud) task.remotePath2 else task.remotePath)
+    }
+
+    private fun handleBisync(task: Task, operation: String, filters: ArrayList<FilterEntry>) {
+        BisyncPolicy.validate(mContext, task)
+        val directory = BisyncPolicy.workdir(mContext, task)
+        val state = BisyncStateStore(directory)
+        val fingerprint = BisyncPolicy.fingerprint(task, filters, mRclone.configurationIdentity { isStopped || cancelled })
+        val childDirectory = when (operation) {
+            BisyncStateStore.PREVIEW -> File(directory, "previews/$id")
+            BisyncStateStore.INITIALISE -> File(directory, "baselines/$id")
+            BisyncStateStore.RUN -> {
+                val baseline = state.read().optString("baselineId")
+                require(java.util.UUID.fromString(baseline).toString() == baseline) { "The bisync baseline identity is invalid. Review initialisation again." }
+                File(directory, "baselines/$baseline").also {
+                    require(it.isDirectory) { "The saved bisync baseline is missing. Review recovery before continuing." }
                 }
             }
+            else -> throw IllegalArgumentException("Unsupported bisync operation")
         }
-
-        if (ephemeralTask != null) {
-            mTask = ephemeralTask
-            handleTask()
-            postSync()
-        } else {
-            postSync()
-            return Result.failure()
+        require(childDirectory.isDirectory || childDirectory.mkdirs()) { "Cannot create bisync working folder" }
+        // Parse every custom flag against the exact bundled engine before authentication or mutation.
+        val check = execute(mRclone.bisync(task, childDirectory, operation, filters, true), false)
+        require(check.success()) { detail.ifBlank { "The selected engine rejected a task option" } }
+        diagnostics.setLength(0)
+        exitCode = null
+        state.begin(operation, fingerprint, inputData.getString(BISYNC_APPROVAL), id.toString())
+        var success = false
+        try {
+            if (isStopped || cancelled) throw InterruptedException("Cancelled before bisync started")
+            val outcome = execute(mRclone.bisync(task, childDirectory, operation, filters, false), true)
+            success = outcome.success() && !isStopped && !cancelled
+            completed = success
+            if (success && operation != BisyncStateStore.PREVIEW) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
+        } finally {
+            state.finish(operation, fingerprint, id.toString(), success && !isStopped && !cancelled,
+                exitCode, detail, diagnostics.toString())
         }
+    }
 
-        // Indicate whether the work finished successfully with the Result
-        return Result.success()
+    private fun execute(child: Process?, progress: Boolean): ProcessRunner.Outcome {
+        currentProcess = child
+        currentRunner = ProcessRunner()
+        val outcome = currentRunner.run(child, { isStopped || cancelled },
+            { line -> if (!progress) appendDiagnostic(line) },
+            { line ->
+                val safe = DiagnosticRedactor.redact(line)
+                val json = try { JSONObject(safe) } catch (_: Exception) { null }
+                appendDiagnostic(json?.optString("msg", safe) ?: safe)
+                if (json != null && progress) {
+                    try {
+                        statusObject.parseLoglineToStatusObject(json)
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        if (now - lastNotify >= 750L && statusObject.notificationContent.isNotEmpty()) {
+                            lastNotify = now
+                            updateForegroundNotification(mNotificationManager.updateSyncNotification(
+                                mTitle, statusObject.notificationContent, statusObject.notificationBigText,
+                                statusObject.notificationPercent, ongoingNotificationID))
+                        }
+                    } catch (_: Exception) { /* Progress is advisory; the exit result remains authoritative. */ }
+                }
+            })
+        exitCode = outcome.exitCode
+        cancelled = cancelled || outcome.cancelled
+        detail = when {
+            cancelled -> "Cancelled. Bisync state may need recovery."
+            !outcome.exited -> "The process did not confirm exit; another transfer remains blocked until it stops."
+            outcome.streamFailure -> "Could not completely read the process output. Review the task before retrying."
+            outcome.exitCode == null -> "The rclone process could not be started."
+            outcome.exitCode != 0 -> "rclone exited with status ${outcome.exitCode}.\n${diagnostics.toString().takeLast(1400)}"
+            else -> "Completed successfully"
+        }
+        return outcome
+    }
+
+    @Synchronized private fun appendDiagnostic(line: String) {
+        diagnostics.append(DiagnosticRedactor.redact(line)).append('\n')
+        if (diagnostics.length > 20000) diagnostics.delete(0, diagnostics.length - 20000)
     }
 
     override fun onStopped() {
+        cancelled = true
+        currentRunner.requestStop()
         super.onStopped()
-        SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_sync_cancelled))
-        SyncLog.info(mContext, mTitle, statusObject.toString())
-        failureReason = FAILURE_REASON.CANCELLED
-        finishWork()
     }
 
-    private fun finishWork() {
-        sRcloneProcess?.destroy()
-        mContext.unregisterReceiver(connectivityChangeBroadcastReceiver)
-        postSync()
-    }
-
-    private fun handleTask() {
-        mTitle = mTask.title
-        mNotificationManager.setCancelId(id)
-        val remoteItem = RemoteItem(mTask.remoteId, mTask.remoteType, "")
-
-        if (mTask.title == "") {
-            mTitle = mTask.remotePath
-        }
-        statusObject.syncDirection = mTask.direction
-        if (!isDirectionSupported(mTask.direction)) {
-            failureReason = FAILURE_REASON.UNSUPPORTED_DIRECTION
-            return
-        }
-        if(arePreconditionsMet()) {
-            val transferLocks = TransferLocks.acquire(mContext, "sync")
-            try {
-                val taskFilter = if(mTask.filterId != null ) mDatabase.getFilter(mTask.filterId!!) else null;
-                val taskFilterList = taskFilter?.getFilters() ?: ArrayList()
-                val isCloudToCloud = mTask.direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
-                        || mTask.direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
-                sRcloneProcess = if (isCloudToCloud) {
-                    val remoteItem2 = RemoteItem(mTask.remoteId2, mTask.remoteType2, "")
-                    mRclone.sync(
-                        remoteItem,
-                        mTask.remotePath,
-                        remoteItem2,
-                        mTask.remotePath2,
-                        mTask.direction,
-                        mTask.md5sum,
-                        taskFilterList,
-                        mTask.deleteExcluded,
-                        mTask.transfers?.toString()
-                    )
-                } else {
-                    mRclone.sync(
-                        remoteItem,
-                        mTask.localPath,
-                        mTask.remotePath,
-                        mTask.direction,
-                        mTask.md5sum,
-                        taskFilterList,
-                        mTask.deleteExcluded,
-                        mTask.transfers?.toString()
-                    )
-                }
-                if (sRcloneProcess == null) {
-                    failureReason = FAILURE_REASON.RCLONE_ERROR
-                    log("Sync: Rclone process could not be started for direction ${mTask.direction}")
-                    return
-                }
-                handleSync(mTitle)
-                if (isCloudToCloud) {
-                    // Refresh any open FileExplorer on the destination remote so copied content appears.
-                    sendUploadFinishedBroadcast(mTask.remoteId2, mTask.remotePath2)
-                } else {
-                    sendUploadFinishedBroadcast(remoteItem.name, mTask.remotePath)
-                }
-            } finally {
-                transferLocks?.release()
-            }
-        }
-    }
-
-    private fun isDirectionSupported(direction: Int): Boolean {
-        return direction == SyncDirectionObject.SYNC_LOCAL_TO_REMOTE ||
-               direction == SyncDirectionObject.SYNC_REMOTE_TO_LOCAL ||
-               direction == SyncDirectionObject.COPY_LOCAL_TO_REMOTE ||
-               direction == SyncDirectionObject.COPY_REMOTE_TO_LOCAL ||
-               direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE ||
-               direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE
-    }
-
-    private fun handleSync(title: String) {
-        SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_start_sync))
-        if (sRcloneProcess != null) {
-            val localProcessReference = sRcloneProcess!!
-            try {
-                val reader = BufferedReader(InputStreamReader(localProcessReference.errorStream))
-                val iterator = reader.lineSequence().iterator()
-                while(iterator.hasNext()) {
-                    val line = iterator.next()
-                    try {
-                        val logline = JSONObject(line)
-                        //todo: migrate this to StatusObject, so that we can handle everything properly.
-                        if (logline.getString("level") == "error") {
-                            if (sIsLoggingEnabled) {
-                                log2File?.log(line)
-                            }
-                        }
-                        
-                        // Process all log lines for stats/progress updates, not just error/warning
-                        // This fixes the notification being stuck on "starting sync"
-                        statusObject.parseLoglineToStatusObject(logline)
-
-                        // Only update notification if we have content to show
-                        if (statusObject.notificationContent.isNotEmpty()) {
-                            updateForegroundNotification(mNotificationManager.updateSyncNotification(
-                                title,
-                                statusObject.notificationContent,
-                                statusObject.notificationBigText,
-                                statusObject.notificationPercent,
-                                ongoingNotificationID
-                            ))
-                        }
-                    } catch (e: JSONException) {
-                        FLog.e(TAG, "SyncService-Error: the offending line: $line")
-                        //FLog.e(TAG, "onHandleIntent: error reading json", e)
-                    }
-                }
-            } catch (e: InterruptedIOException) {
-                FLog.e(TAG, "onHandleIntent: I/O interrupted, stream closed", e)
-            } catch (e: IOException) {
-                FLog.e(TAG, "onHandleIntent: error reading stdout", e)
-            }
-            try {
-                localProcessReference.waitFor()
-            } catch (e: InterruptedException) {
-                FLog.e(TAG, "onHandleIntent: error waiting for process", e)
-            }
-        } else {
-            log("Sync: No Rclone Process!")
-        }
-        mNotificationManager.cancelSyncNotification(ongoingNotificationID)
-    }
-
-    private fun postSync() {
-        if (endNotificationAlreadyPosted) {
-            return
-        }
-        if (silentRun) {
-            return
-        }
-
+    private fun deliverResult(task: Task, operation: String) {
+        if (!terminal.compareAndSet(false, true)) return
+        val status = if (cancelled) "CANCELLED" else if (completed) "SUCCESS" else "FAILED"
+        RunHistory.record(mContext, task, id.toString(), operation, status, startedAt, exitCode, detail)
         val notificationId = System.currentTimeMillis().toInt()
-
-        var content = mContext.getString(R.string.operation_failed_unknown, mTitle)
-        when (failureReason) {
-            FAILURE_REASON.NO_FAILURE -> {
-                showSuccessNotification(notificationId)
-                followupTask(mTask.onSuccessFollowup)
-                return
-            }
-            FAILURE_REASON.CANCELLED -> {
-                showCancelledNotification(notificationId)
-                endNotificationAlreadyPosted = true
-                return
-            }
-            FAILURE_REASON.NO_TASK -> {
-                content = getString(R.string.operation_failed_notask)
-            }
-            FAILURE_REASON.CONNECTIVITY_CHANGED -> {
-                content = mContext.getString(R.string.operation_failed_data_change, mTitle)
-            }
-            FAILURE_REASON.NO_UNMETERED -> {
-                content = mContext.getString(R.string.operation_failed_no_unmetered, mTitle)
-            }
-            FAILURE_REASON.NO_CONNECTION -> {
-                content = mContext.getString(R.string.operation_failed_no_connection, mTitle)
-            }
-            FAILURE_REASON.RCLONE_ERROR -> {
-                content = mContext.getString(R.string.operation_failed_unknown_rclone_error, mTitle)
-            }
-            FAILURE_REASON.UNSUPPORTED_DIRECTION -> {
-                content = mContext.getString(R.string.operation_failed_unsupported_direction, mTitle)
+        when {
+            cancelled -> mNotificationManager.showCancelledNotificationOrReport(mTitle, notificationId, task.id)
+            completed -> mNotificationManager.showSuccessNotificationOrReport(mTitle,
+                if (operation == BisyncStateStore.PREVIEW) "Preview ready. Open the task to review and approve initialisation."
+                else "Transfer completed successfully", notificationId)
+            else -> mNotificationManager.showFailedNotificationOrReport(mTitle, detail, notificationId, task.id)
+        }
+        SyncLog.info(mContext, mTitle, "$status: $detail")
+        if (operation == BisyncStateStore.RUN && !cancelled) {
+            val followup = if (completed) task.onSuccessFollowup else task.onFailFollowup
+            if (followup != null && followup >= 0) {
+                val chain = inputData.getLongArray(SyncManager.CHAIN_TASKS) ?: longArrayOf(task.id)
+                if (!SyncManager(mContext).queueFollowup(followup, chain))
+                    SyncLog.error(mContext, mTitle, "Follow-up stopped: repeated task or chain limit reached")
             }
         }
-        followupTask(mTask.onFailFollowup)
-        showFailNotification(notificationId, content)
-        endNotificationAlreadyPosted = true
-        finishWork()
     }
 
-    private fun showCancelledNotification(notificationId: Int) {
-        SyncLog.info(mContext, mTitle, mContext.getString(R.string.operation_failed_cancelled))
-        mNotificationManager.showCancelledNotificationOrReport(
-            mTitle,
-            notificationId,
-            mTask.id
-        )
-    }
-
-    private fun showSuccessNotification(notificationId: Int) {
-        //Todo: Show sync-errors in notification. Also see line 169
-
-        var message = generateSuccessMessage(statusObject)
-        mNotificationManager.showSuccessNotificationOrReport(
-            mTitle,
-            message,
-            notificationId
-        )
-
-        message += """
-                        
-        Est. Speed: ${statusObject.getEstimatedAverageSpeed()}
-        Avg. Speed: ${statusObject.getLastItemAverageSpeed()}
-                        """.trimIndent()
-        SyncLog.info(mContext, mContext.getString(R.string.operation_success, mTitle), message)
-    }
-
-    // this is currently only a useless mapper. It is supposed to keep this worker in sync with the ephemeral one.
-    // when they are merged eventually, this can be easily extracted.
-    private fun generateSuccessMessage(statusObject: StatusObject): String {
-        var message = mContext.resources.getQuantityString(
-                R.plurals.operation_success_description,
-                statusObject.getTotalTransfers(),
-                mTitle,
-                statusObject.getTotalSize(),
-                statusObject.getTotalTransfers()
-        )
-        if (statusObject.getTotalTransfers() == 0) {
-            message = mContext.resources.getString(R.string.operation_success_description_zero)
-        }
-        if (statusObject.getDeletions() > 0) {
-            message += """
-                        
-                        ${
-                mContext.getString(
-                        R.string.operation_success_description_deletions_prefix,
-                        statusObject.getDeletions()
-                )
-            }
-                        """.trimIndent()
-        }
-        return message
-    }
-
-    private fun showFailNotification(notificationId: Int, content: String, wasCancelled: Boolean = false) {
-        var text = content
-        //Todo: check if we should also add errors on success
-        statusObject.printErrors()
-        val errors = statusObject.getAllErrorMessages()
-        if (errors.isNotEmpty()) {
-            text += """
-                        
-                        
-                        
-                        ${statusObject.getAllErrorMessages()}
-                        """.trimIndent()
-        }
-
-        var notifyTitle = mContext.getString(R.string.operation_failed)
-        if (wasCancelled) {
-            notifyTitle = mContext.getString(R.string.operation_failed_cancelled)
-        }
-        SyncLog.error(mContext, notifyTitle, "$mTitle: $text")
-        mNotificationManager.showFailedNotificationOrReport(
-            mTitle,
-            text,
-            notificationId,
-            mTask.id
-        )
-    }
-
-    private fun arePreconditionsMet(): Boolean {
-        val connection = WifiConnectivitiyUtil.dataConnection(this.applicationContext)
-        if (mTask.wifionly && connection === WifiConnectivitiyUtil.Connection.METERED) {
-            failureReason = FAILURE_REASON.NO_UNMETERED
-            return false
-        } else if (connection === WifiConnectivitiyUtil.Connection.DISCONNECTED || connection === WifiConnectivitiyUtil.Connection.NOT_AVAILABLE) {
-            failureReason = FAILURE_REASON.NO_CONNECTION
-            return false
-        }
-
-        return true
+    private fun networkAvailable(task: Task): Boolean {
+        val connection = WifiConnectivitiyUtil.dataConnection(mContext)
+        return connection != WifiConnectivitiyUtil.Connection.DISCONNECTED &&
+            connection != WifiConnectivitiyUtil.Connection.NOT_AVAILABLE &&
+            (!task.wifionly || connection != WifiConnectivitiyUtil.Connection.METERED)
     }
 
     private fun prepareNotifications() {
@@ -465,36 +323,5 @@ class SyncWorker (private var mContext: Context, workerParams: WorkerParameters)
     }
 
 
-    private fun log(message: String) {
-        FLog.e(TAG, "SyncWorker: $message")
-    }
-
-    private fun getString(@StringRes resId: Int): String {
-        return mContext.getString(resId)
-    }
-
-    private fun registerBroadcastReceivers() {
-        val intentFilter = IntentFilter()
-        intentFilter.addAction(WifiManager.SUPPLICANT_CONNECTION_CHANGE_ACTION)
-        mContext.registerReceiver(connectivityChangeBroadcastReceiver, intentFilter)
-    }
-
-    private val connectivityChangeBroadcastReceiver: BroadcastReceiver =
-        object : BroadcastReceiver() {
-            override fun onReceive(context: Context, intent: Intent) {
-                if(endNotificationAlreadyPosted){
-                    return
-                }
-                sConnectivityChanged = true
-                failureReason = FAILURE_REASON.CONNECTIVITY_CHANGED
-            }
-        }
-
-    private fun followupTask(followUpTaskID: Long?) {
-        if (followUpTaskID == null || followUpTaskID == -1L) {
-            return
-        }
-        Thread.sleep(1000)
-        SyncManager(mContext).queue(followUpTaskID)
-    }
+    private fun getString(@StringRes id: Int): String = mContext.getString(id)
 }

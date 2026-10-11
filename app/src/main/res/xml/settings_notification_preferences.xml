@@ -13,6 +13,11 @@
     </PreferenceCategory>
 
     <PreferenceCategory android:title="@string/preference_category_header_reports">
+        <SwitchPreferenceCompat
+            android:key="@string/pref_key_session_guardian"
+            android:defaultValue="false"
+            android:title="@string/session_guardian_opt_in_title"
+            app:summary="@string/session_guardian_opt_in_summary" />
 
         <SwitchPreferenceCompat
             android:defaultValue="false"

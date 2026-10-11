@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:orientation="vertical" android:padding="16dp">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/task_constraints_title" android:textAppearance="@style/TextAppearance.AppCompat.Title" />
+    <Switch android:id="@+id/task_charging_only" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="48dp" android:text="@string/task_charging_only" />
+    <Switch android:id="@+id/task_battery_not_low" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:minHeight="48dp" android:text="@string/task_battery_not_low" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/task_quiet_hours" android:textAppearance="@style/TextAppearance.AppCompat.Body2" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/task_quiet_start" android:labelFor="@id/task_quiet_start" />
+    <EditText android:id="@+id/task_quiet_start" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:inputType="time" android:minHeight="48dp" android:singleLine="true" android:autofillHints="" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="@string/task_quiet_end" android:labelFor="@id/task_quiet_end" />
+    <EditText android:id="@+id/task_quiet_end" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:inputType="time" android:minHeight="48dp" android:singleLine="true" android:autofillHints="" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/task_quiet_help" />
+    <TextView android:id="@+id/task_schedule_summary" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" android:accessibilityLiveRegion="polite" android:text="@string/schedule_none" />
+    <Button android:id="@+id/task_run_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_run" />
+    <Button android:id="@+id/task_schedule_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_schedule" />
+    <Button android:id="@+id/task_history_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_history" />
+    <Button android:id="@+id/task_cancel_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_cancel" />
+</LinearLayout>

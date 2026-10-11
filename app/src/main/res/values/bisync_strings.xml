@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="bisync_mode_label">Bisync: two-way sync</string>
+    <string name="bisync_title">Two-way synchronisation</string>
+    <string name="bisync_description">Changes flow in both directions. Simultaneous edits keep both versions. A saved baseline and valid checksums are required before scheduled runs can start.</string>
+    <string name="bisync_preference_label">Initialisation preference</string>
+    <string-array name="bisync_precedence_options">
+        <item>Prefer local files when contents differ</item>
+        <item>Prefer remote files when contents differ</item>
+    </string-array>
+    <string name="bisync_preference_help">Initialisation combines both folders. Files present on only one side are copied. When both sides contain different versions, the selected side overwrites the other. This is separate from normal conflict handling.</string>
+    <string name="bisync_delete_label">Maximum deletions, percent (0 to 100)</string>
+    <string name="bisync_delete_help">A normal run stops if a side exceeds this percentage of deletions. This does not limit overwrites during initialisation. Set up backups for important data.</string>
+    <string name="bisync_check_access">Require access markers in both folders</string>
+    <string name="bisync_check_access_help">Create a file named RCLONE_TEST in each folder before enabling this. A missing marker stops the run. Markers are never created or bypassed automatically.</string>
+    <string name="bisync_backup_local">Local backup folder (optional)</string>
+    <string name="bisync_backup_remote">Remote backup folder (optional)</string>
+    <string name="bisync_backup_help">Backup folders must be outside the synchronised folders. The remote backup must use the same remote, for example proton:Backups. Local backups contain readable file contents.</string>
+    <string name="bisync_flags_label">Advanced rclone options</string>
+    <string name="bisync_flags_help">Use one --flag or --flag=value per line. Spaces in values do not need quotes. Credentials belong in the remote editor. The bundled engine checks option names and values before running.</string>
+    <string name="bisync_flags_hint">--bwlimit=8M</string>
+    <string name="bisync_add_flag">Add an option</string>
+    <string name="bisync_engine_help">Show engine option help</string>
+    <string name="bisync_preview">Save and preview initialisation</string>
+    <string name="bisync_review">Review preview and initialise</string>
+    <string name="bisync_preview_help">Preview is a dry run and does not transfer or delete files. It may refresh login credentials. Approval expires after 30 minutes or when relevant settings change. A preview is not a snapshot of cloud contents.</string>
+    <string name="bisync_status_initial">Needs initialisation</string>
+    <string name="bisync_status_format">State: %1$s\n%2$s</string>
+    <string name="bisync_last_success">Last successful run: %1$s</string>
+    <string name="bisync_never_run">No successful baseline yet</string>
+    <string name="bisync_review_title">Approve initialisation</string>
+    <string name="bisync_review_warning">Check the preview below and your backups. Initialisation can overwrite differing files according to the selected preference. Remote contents may change after this preview.\n\n%1$s</string>
+    <string name="bisync_approve">Approve and initialise</string>
+    <string name="bisync_run">Save and run task</string>
+    <string name="bisync_schedule">Manage schedules</string>
+    <string name="bisync_history">Run history</string>
+    <string name="bisync_no_history">No completed runs have been recorded.</string>
+    <string name="bisync_cancel">Cancel queued or running task</string>
+    <string name="task_constraints_title">Background conditions</string>
+    <string name="task_charging_only">Run only while charging</string>
+    <string name="task_battery_not_low">Wait when battery is low</string>
+    <string name="task_quiet_hours">Quiet hours for automatic runs</string>
+    <string name="task_quiet_start">Quiet hours start (HH:mm)</string>
+    <string name="task_quiet_end">Quiet hours end (HH:mm)</string>
+    <string name="task_quiet_help">Leave both blank to disable. Times use the device timezone. Manual runs still respect network and battery conditions.</string>
+    <string name="task_unknown_mode">Unsupported task mode. Choose a supported mode explicitly to migrate this task.</string>
+    <string name="schedule_next_run">Next scheduled time: %1$s</string>
+    <string name="schedule_zone">Timezone (blank follows device)</string>
+    <string name="schedule_custom_interval">Interval in minutes (at least 15)</string>
+    <string name="schedule_platform_note">Android may defer execution for network, battery or system limits. Missed runs are combined into one pending task.</string>
+    <string name="schedule_add">Add schedule</string>
+    <string name="schedule_none">No schedules are saved for this task.</string>
+</resources>

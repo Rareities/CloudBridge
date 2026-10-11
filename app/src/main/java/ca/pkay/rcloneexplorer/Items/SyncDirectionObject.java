@@ -52,6 +52,7 @@ public class SyncDirectionObject {
             COPY_REMOTE_TO_LOCAL,      // 3
             SYNC_REMOTE_TO_REMOTE,     // 4
             COPY_REMOTE_TO_REMOTE,     // 5
+            SYNC_BIDIRECTIONAL         // 6: initialisation and recovery are separate actions
     };
 
     /**
@@ -60,25 +61,32 @@ public class SyncDirectionObject {
      */
     public static int directionForSpinnerPosition(int position) {
         if (position < 0 || position >= SPINNER_TO_DIRECTION.length) {
-            return SYNC_LOCAL_TO_REMOTE;
+            return -1;
         }
         return SPINNER_TO_DIRECTION[position];
     }
 
     /**
-     * Returns the spinner position for a direction constant, or {@code 0} if the direction is
-     * not in the array (e.g. bisync 5/6, which is commented out).
+     * Returns the spinner position or -1 for unsupported legacy modes.
      */
     public static int spinnerPositionForDirection(int direction) {
+        if (direction == SYNC_BIDIRECTIONAL_INITIAL) direction = SYNC_BIDIRECTIONAL;
         for (int i = 0; i < SPINNER_TO_DIRECTION.length; i++) {
             if (SPINNER_TO_DIRECTION[i] == direction) {
                 return i;
             }
         }
-        return 0;
+        return -1;
     }
 
     public static String[] getOptionsArray(Context context) {
-        return context.getResources().getStringArray(R.array.sync_direction_array);
+        // Build the list explicitly so older translated arrays cannot hide or remap a mode.
+        return new String[]{context.getString(R.string.sync_direction_local_remote),
+                context.getString(R.string.sync_direction_remote_local),
+                context.getString(R.string.sync_direction_copy_local_remote),
+                context.getString(R.string.sync_direction_copy_remote_local),
+                context.getString(R.string.sync_direction_remote_remote),
+                context.getString(R.string.sync_direction_copy_remote_remote),
+                context.getString(R.string.bisync_mode_label)};
     }
 }

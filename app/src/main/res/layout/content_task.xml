@@ -149,6 +149,8 @@
                         android:layout_margin="8dp"
                         android:text="@string/task_edit_transfers_hint" />
 
+                    <include layout="@layout/bisync_options" />
+
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
@@ -422,6 +424,8 @@
 
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
+
+            <include layout="@layout/task_controls" />
 
             <Space
                 android:layout_width="wrap_content"

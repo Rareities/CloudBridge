@@ -7,12 +7,11 @@ import android.os.PowerManager;
 import androidx.annotation.Nullable;
 
 /**
- * Keeps the CPU and Wi-Fi radio awake for the duration of a long-running rclone transfer.
+ * Requests CPU and Wi-Fi availability for an owned active rclone transfer.
  *
- * <p>A foreground service keeps the process ranked but does <b>not</b> prevent the device from
- * entering Doze with the screen off. Without these locks, large uploads/downloads stall until
- * the next Doze maintenance window, which destroys throughput. See the transmission-speed audit
- * (P0 item 2).
+ * <p>Locks do not bypass Doze, foreground-service timeouts or scheduler quotas.
+ * Callers release them when the owned operation ends; device measurements are
+ * required to assess their effect on throughput and energy use.
  */
 public final class TransferLocks {
 

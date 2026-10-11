@@ -4,6 +4,7 @@
     <string name="pref_key_theme" translatable="false">pref_key_theme</string>
     <string name="pref_key_wrap_filenames" translatable="false">pref_key_wrap_filenames</string>
     <string name="pref_key_app_updates" translatable="false">pref_key_app_updates</string>
+    <string name="pref_key_session_guardian" translatable="false">session_guardian_proactive_checks</string>
     <string name="pref_key_app_update_dismiss_current_update" translatable="false">app_update_dismiss_current_update</string>
     <string name="pref_key_app_updates_found_update_for_version" translatable="false">app_updates_found_update_for_version</string>
     <string name="pref_key_app_updates_changelog" translatable="false">app_updates_changelog</string>

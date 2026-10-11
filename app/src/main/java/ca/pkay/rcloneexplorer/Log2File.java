@@ -21,8 +21,8 @@ public class Log2File {
     }
 
     public void log(String message) {
-        File path = context.getExternalFilesDir("logs");
-        if (path == null) {
+        File path = new File(context.getFilesDir(), "logs");
+        if (!path.isDirectory() && !path.mkdirs()) {
             return;
         }
         File logFile = new File(path, "log.txt");
@@ -33,7 +33,7 @@ public class Log2File {
         SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         String currentDateTime = dateFormat.format(new Date());
 
-        String logMessage = currentDateTime + " - " + message + "\n";
+        String logMessage = currentDateTime + " - " + ca.pkay.rcloneexplorer.util.DiagnosticRedactor.redact(message) + "\n";
 
         new WriteToFile(logFile, logMessage).execute();
     }
