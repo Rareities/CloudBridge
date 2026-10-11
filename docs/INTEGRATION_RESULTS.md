@@ -1,3 +1,8 @@
+> Historical integration snapshot. Superseded by the tagged
+> [1.1.0-rc.1 validation](releases/v1.1.0-rc.1-validation.md) and the
+> [current fork changelog](FORK_CHANGELOG.md). Counts and draft status below
+> describe the earlier milestone, not the current release.
+
 # Integration results, 11 October 2026
 
 Status: tested development candidate, not a production release. This supersedes

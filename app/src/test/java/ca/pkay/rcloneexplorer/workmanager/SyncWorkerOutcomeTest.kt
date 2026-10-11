@@ -47,6 +47,10 @@ class SyncWorkerOutcomeTest {
     @Test fun transientNetworkDelayDoesNotClaimTerminalFailureOrSuccess() {
         val (task, worker) = offlineTask(1)
         assertTrue(worker.doWork() is ListenableWorker.Result.Retry)
-        assertEquals(0, RunHistory.read(context, task).length())
+        val history = RunHistory.read(context, task)
+        assertEquals(1, history.length())
+        assertEquals("WAITING", history.getJSONObject(0).getString("status"))
+        assertTrue(history.getJSONObject(0).isNull("finished"))
+        assertTrue(history.getJSONObject(0).getString("message").contains("network"))
     }
 }

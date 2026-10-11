@@ -133,7 +133,9 @@ class ScheduledRestartIntegrationTest {
             BisyncStateStore.READY, BisyncStateStore(BisyncPolicy.workdir(context, task)).read().getString("status"))
         assertEquals("Config identity changed before UI", fixture.getString("configIdentity"), configIdentityBefore)
         assertEquals("Task baseline fingerprint changed before UI; saved=${fixture.getJSONObject("task")}, loaded=${task.asJSON()}",
-            fixture.getString("fingerprint"), BisyncPolicy.fingerprint(task, emptyList(), configIdentityBefore))
+            fixture.getString("fingerprint"), BisyncPolicy.fingerprint(Task.fromString(task.asJSON().toString()).apply {
+                transfers = Rclone(context).taskTransfers(task)
+            }, emptyList(), configIdentityBefore))
         ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(75)
             var succeeded = false

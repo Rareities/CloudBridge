@@ -35,7 +35,7 @@ public final class ProtectedRcloneConfig {
     public static Process launch(Context context, String[] command, String[] environment) throws IOException {
         EngineProvenance.verify(context);
         Lock lock = ConfigurationExclusion.LOCK.writeLock();
-        lock.lock();
+        if (!lock.tryLock()) throw new IOException("Configuration is being prepared; retry after it finishes");
         NativeSessionGate.Lease session = null;
         try {
             requireRecoveredJournal(context);
@@ -47,6 +47,8 @@ public final class ProtectedRcloneConfig {
             String password;
             if (selected.equals(main)) password = configIndependent(command) ? null : ensure(context, command[0], environment);
             else password = NativeConfigEncryption.isEncrypted(selected) ? new ConfigPasswordStore(context).read() : null;
+            if (selected.equals(main) && NativeSessionGate.isConfigMutation(command))
+                ConfigurationGeneration.advance(context);
             Process child = Runtime.getRuntime().exec(command, NativeConfigEncryption.environment(environment, password));
             if (selected.equals(main)) children.add(child);
             if (session != null) { session.closeAfterExit(child); session = null; }

@@ -30,10 +30,10 @@ android {
         minSdkVersion 23
         compileSdk 36
         targetSdkVersion 36
-        // CI bumps these per beta via CB_VERSION_CODE / CB_VERSION_NAME env vars.
+        // Version and ABI-safe base code are promoted together in gradle.properties.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
-        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 100
-        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.1.0-rc.1'
+        versionCode project.property('de.schuelken.cloudbridge.versionCode').toInteger()
+        versionName project.property('de.schuelken.cloudbridge.versionName')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";

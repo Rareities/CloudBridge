@@ -188,7 +188,8 @@ public class RcloneRcd {
 
     /** Package-private seam for testing failures before native process creation. */
     void startRcdWithStartup(Runnable startup) {
-        ca.pkay.rcloneexplorer.util.ConfigurationExclusion.LOCK.writeLock().lock();
+        if (!ca.pkay.rcloneexplorer.util.ConfigurationExclusion.LOCK.writeLock().tryLock())
+            throw new RcdIOException(new IOException("Configuration is being prepared; retry after it finishes"));
         try {
             sessionGeneration = NativeSessionGate.GLOBAL.generation();
             try { startupSession.set(NativeSessionGate.GLOBAL.acquireRc(sessionGeneration)); }

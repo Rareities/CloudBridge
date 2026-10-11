@@ -40,9 +40,11 @@ import java.io.File
 import java.util.Random
 import java.util.TimeZone
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.TimeUnit
 
 class SyncWorker(private val mContext: Context, params: WorkerParameters) : Worker(mContext, params) {
     companion object {
+        const val PROGRESS_MESSAGE = "TASK_PROGRESS_MESSAGE"
         const val TASK_ID = "TASK_ID"
         const val TASK_EPHEMERAL = "TASK_EPHEMERAL"
         const val BISYNC_OPERATION = "BISYNC_OPERATION"
@@ -66,6 +68,9 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
     @Volatile private var cancelled = false
     private val diagnostics = StringBuilder()
     private var lastNotify = 0L
+    private var lastHeartbeat = 0L
+    private var phase = "Preparing task"
+    @Volatile private var lastEngineOutput = 0L
     private var exitCode: Int? = null
     private var completed = false
     private var allowFollowup = false
@@ -93,15 +98,15 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
         if (isStopped) return failBeforeStart(task, operation, "Cancelled before the task started", true)
         val automatic = inputData.getBoolean(SyncManager.AUTOMATIC, false)
         if (automatic && ScheduleCalculator.afterQuietHours(System.currentTimeMillis(), task.quietHoursStart,
-                task.quietHoursEnd, TimeZone.getDefault()) > System.currentTimeMillis()) return Result.retry()
-        if (!networkAvailable(task)) return if (runAttemptCount < 6) Result.retry()
+                task.quietHoursEnd, TimeZone.getDefault()) > System.currentTimeMillis()) return retryWaiting(task, operation, "Waiting until quiet hours end")
+        if (!networkAvailable(task)) return if (runAttemptCount < 6) retryWaiting(task, operation, "Waiting for the required network")
             else failBeforeStart(task, operation, "Required network remained unavailable. Review the task constraints before retrying.")
-        if (task.chargingOnly && !chargingAvailable()) return if (runAttemptCount < 6) Result.retry()
+        if (task.chargingOnly && !chargingAvailable()) return if (runAttemptCount < 6) retryWaiting(task, operation, "Waiting for charging")
             else failBeforeStart(task, operation, "Charging remained unavailable. This task did not start.")
-        if (ca.pkay.rcloneexplorer.util.NativeSessionGate.GLOBAL.isBusy()) return if (runAttemptCount < 8) Result.retry()
+        if (ca.pkay.rcloneexplorer.util.NativeSessionGate.GLOBAL.isBusy()) return if (runAttemptCount < 8) retryWaiting(task, operation, "Waiting for another native operation to finish")
             else failBeforeStart(task, operation, "Another native operation remained active. This task did not start.")
         val admission = try { BisyncPolicy.Admission.acquire(mContext) } catch (_: Exception) { null }
-        if (admission == null) return if (runAttemptCount < 8) Result.retry()
+        if (admission == null) return if (runAttemptCount < 8) retryWaiting(task, operation, "Waiting for another transfer to finish")
             else failBeforeStart(task, operation, "Another transfer remained active. This task did not start.")
         var transferLocks: TransferLocks? = null
         try {
@@ -119,21 +124,19 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             require(task.validationError == null) { task.validationError ?: "Invalid task" }
             require(task.direction in 1..8) { "Unsupported task mode; edit this task before running it" }
             require(BisyncPolicy.isBisync(task) || operation == BisyncStateStore.RUN) { "This task does not support bisync initialisation" }
-            val primaryAccount = mRclone.protonAccount(task.remoteId)
-            primaryAccount?.let { ProtonAccountState.requireReady(mContext, it.identity) }
-            if (task.direction == 7 || task.direction == 8) {
-                mRclone.protonAccount(task.remoteId2)?.let { ProtonAccountState.requireReady(mContext, it.identity) }
-                // A multi-backend failure cannot safely be attributed to one account from text alone.
-                accountIdentity = null
-            } else accountIdentity = primaryAccount?.identity
             RunHistory.record(mContext, task, id.toString(), operation, "IN_PROGRESS", startedAt, null,
                 "Task started; a terminal result has not yet been confirmed.")
             prepareNotifications()
             mNotificationManager.setCancelId(id)
             mNotificationManager.updateSyncNotification(mTitle, "Preparing task", ArrayList(), 0, ongoingNotificationID)?.let {
-                setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC)).get()
+                try {
+                    setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC)).get(30, TimeUnit.SECONDS)
+                } catch (e: java.util.concurrent.TimeoutException) {
+                    throw java.io.IOException("Android did not start the foreground service within 30 seconds. Check background restrictions and retry.", e)
+                }
             }
             if (isStopped) throw InterruptedException("Task was cancelled")
+            publishPhase("Checking task and remote settings")
             transferLocks = TransferLocks.acquire(mContext, "task")
             val filters = task.filterId?.takeIf { it >= 0 }?.let { filterId ->
                 requireNotNull(mDatabase.getFilter(filterId)) { "The selected filter no longer exists" }.getFilters()
@@ -166,6 +169,46 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             Result.failure(Data.Builder().putString("error", detail.take(1800)).build())
     }
 
+    private fun retryWaiting(task: Task, operation: String, message: String): Result {
+        // WorkManager removes progress on retry; keep the wait reason by request ID.
+        try { RunHistory.record(mContext, task, id.toString(), operation, "WAITING", startedAt, null, message) }
+        catch (e: Exception) { FLog.w(TAG, "Task waiting reason could not be recorded") }
+        publishProgress(message)
+        return Result.retry()
+    }
+
+    private fun publishProgress(message: String) {
+        try { setProgressAsync(Data.Builder().putString(PROGRESS_MESSAGE, message.take(800)).build()) }
+        catch (e: RuntimeException) { FLog.w(TAG, "Task progress could not be published") }
+    }
+
+    private fun publishPhaseNotification(message: String) {
+        try {
+            updateForegroundNotification(mNotificationManager.updateSyncNotification(
+                mTitle, message, ArrayList(), 0, ongoingNotificationID))
+        } catch (e: RuntimeException) { FLog.w(TAG, "Task notification could not be updated") }
+    }
+
+    private fun publishPhase(message: String) {
+        phase = message
+        lastHeartbeat = android.os.SystemClock.elapsedRealtime()
+        publishProgress(message)
+        publishPhaseNotification(message)
+    }
+
+    private fun heartbeat() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastHeartbeat < 5_000L) return
+        lastHeartbeat = now
+        val quietSeconds = (now - lastEngineOutput).coerceAtLeast(0) / 1000
+        val message = "$phase · ${(System.currentTimeMillis() - startedAt).coerceAtLeast(0) / 1000}s elapsed" +
+            if (quietSeconds >= 30) "; no engine output for ${quietSeconds}s. You can cancel below." else ""
+        publishProgress(message)
+        // Transfer statistics remain in the notification while the editor shows elapsed time.
+        if (quietSeconds >= 30 || statusObject.notificationContent.isEmpty())
+            publishPhaseNotification(message)
+    }
+
     private fun failBeforeStart(task: Task, operation: String, message: String, stopped: Boolean = false): Result {
         detail = message
         cancelled = stopped || isStopped
@@ -180,87 +223,121 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
     }
 
     private fun handleOneWay(task: Task, filters: ArrayList<FilterEntry>) {
-        val remote = requireNotNull(mRclone.getRemoteItemFromName(task.remoteId)) {
-            "The configured task remote is unavailable; reconnect or edit the task"
-        }
-        val cloudToCloud = task.direction == 7 || task.direction == 8
-        val child = if (cloudToCloud) mRclone.sync(remote, task.remotePath,
-            requireNotNull(mRclone.getRemoteItemFromName(task.remoteId2)) {
-                "The configured destination remote is unavailable; reconnect or edit the task"
-            }, task.remotePath2, task.direction,
-            task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
-        else mRclone.sync(remote, task.localPath, task.remotePath, task.direction,
-            task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
-        val outcome = execute(child, true)
-        completed = outcome.success()
-        if (completed) sendUploadFinishedBroadcast(if (cloudToCloud) task.remoteId2 else task.remoteId,
-            if (cloudToCloud) task.remotePath2 else task.remotePath)
+        val preparation = ca.pkay.rcloneexplorer.util.ConfigurationExclusion.prepare()
+        try {
+            mRclone.invalidateRemotesCache()
+            val primary = mRclone.protonAccount(task.remoteId)
+            primary?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+            if (task.direction == 7 || task.direction == 8) {
+                mRclone.protonAccount(task.remoteId2)?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+                accountIdentity = null
+            } else accountIdentity = primary?.identity
+            val remote = requireNotNull(mRclone.getRemoteItemFromName(task.remoteId)) {
+                "The configured task remote is unavailable; reconnect or edit the task"
+            }
+            val cloudToCloud = task.direction == 7 || task.direction == 8
+            val child = if (cloudToCloud) mRclone.sync(remote, task.remotePath,
+                requireNotNull(mRclone.getRemoteItemFromName(task.remoteId2)) {
+                    "The configured destination remote is unavailable; reconnect or edit the task"
+                }, task.remotePath2, task.direction,
+                task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
+            else mRclone.sync(remote, task.localPath, task.remotePath, task.direction,
+                task.md5sum, filters, task.deleteExcluded, task.transfers?.toString())
+            currentProcess = child
+            preparation.close()
+            publishPhase("Connecting and scanning files")
+            val outcome = execute(child, true)
+            completed = outcome.success()
+            if (completed) sendUploadFinishedBroadcast(if (cloudToCloud) task.remoteId2 else task.remoteId,
+                if (cloudToCloud) task.remotePath2 else task.remotePath)
+        } finally { preparation.close() }
     }
 
-    private fun handleBisync(task: Task, operation: String, filters: ArrayList<FilterEntry>) {
-        BisyncPolicy.validate(mContext, task)
-        val directory = BisyncPolicy.workdir(mContext, task)
-        val state = BisyncStateStore(directory)
-        val fingerprint = BisyncPolicy.fingerprint(task, filters, mRclone.configurationIdentity { isStopped || cancelled })
-        val advisory = operation == BisyncStateStore.PREVIEW && BisyncStateStore.isAdvisoryPreview(state.read(), fingerprint)
-        advisoryPreview = advisory
-        val engineOperation = if (advisory) "preview-existing" else operation
-        val childDirectory = when (operation) {
-            BisyncStateStore.PREVIEW -> File(directory, "previews/$id")
-            BisyncStateStore.INITIALISE -> File(directory, "baselines/$id")
-            BisyncStateStore.RUN -> {
-                val baseline = state.read().optString("baselineId")
-                require(java.util.UUID.fromString(baseline).toString() == baseline) { "The bisync baseline identity is invalid. Review initialisation again." }
-                File(directory, "baselines/$baseline").also {
-                    require(it.isDirectory) { "The saved bisync baseline is missing. Review recovery before continuing." }
+    private fun handleBisync(savedTask: Task, operation: String, filters: ArrayList<FilterEntry>) {
+        val preparation = ca.pkay.rcloneexplorer.util.ConfigurationExclusion.prepare()
+        try {
+            // Task.copy() only copies its constructor ID; serialize every option instead.
+            val task = BisyncPolicy.effectiveTask(savedTask, mRclone.taskTransfers(savedTask))
+            mRclone.invalidateRemotesCache()
+            val account = mRclone.protonAccount(task.remoteId)
+            accountIdentity = account?.identity
+            account?.let { ProtonAccountState.requireReady(mContext, it.identity) }
+            BisyncPolicy.validate(mContext, task)
+            val directory = BisyncPolicy.workdir(mContext, task)
+            val state = BisyncStateStore(directory)
+            val fingerprint = BisyncPolicy.fingerprint(task, filters, mRclone.configurationIdentity { isStopped || cancelled })
+            val advisory = operation == BisyncStateStore.PREVIEW && BisyncStateStore.isAdvisoryPreview(state.read(), fingerprint)
+            advisoryPreview = advisory
+            val engineOperation = if (advisory) "preview-existing" else operation
+            val childDirectory = when (operation) {
+                BisyncStateStore.PREVIEW -> File(directory, "previews/$id")
+                BisyncStateStore.INITIALISE -> File(directory, "baselines/$id")
+                BisyncStateStore.RUN -> {
+                    val baseline = BisyncStateStore.baselineForRun(state.read(), fingerprint)
+                    File(directory, "baselines/$baseline").also {
+                        require(it.isDirectory) { "The saved bisync baseline is missing. Review recovery before continuing." }
+                    }
+                }
+                else -> throw IllegalArgumentException("Unsupported bisync operation")
+            }
+            require(childDirectory.isDirectory || childDirectory.mkdirs()) { "Cannot create bisync working folder" }
+            if (advisory) {
+                val baseline = BisyncStateStore.baselineForRun(state.read(), fingerprint)
+                val source = File(directory, "baselines/$baseline")
+                require(source.isDirectory) { "The saved baseline is missing" }
+                // Dry-run may write temporary listings. Copy the listings and the
+                // engine's verified pair identity, never its live OS lock inodes.
+                val savedFiles = requireNotNull(source.listFiles()) { "Cannot read the saved baseline" }
+                val identities = savedFiles.filter {
+                    it.isFile && it.name.matches(Regex("bisync-identity-[0-9a-f]{64}\\.lck-guard"))
+                }
+                require(identities.size == 1 && identities.single().length() in 1..65536) {
+                    "The saved baseline has no unambiguous endpoint identity. Review initialisation again."
+                }
+                (savedFiles.filter { it.isFile && it.name.endsWith(".lst") } + identities).forEach {
+                    it.copyTo(File(childDirectory, it.name), overwrite = false)
                 }
             }
-            else -> throw IllegalArgumentException("Unsupported bisync operation")
-        }
-        require(childDirectory.isDirectory || childDirectory.mkdirs()) { "Cannot create bisync working folder" }
-        if (advisory) {
-            val baseline = state.read().getString("baselineId")
-            require(java.util.UUID.fromString(baseline).toString() == baseline) { "Invalid baseline identity" }
-            val source = File(directory, "baselines/$baseline")
-            require(source.isDirectory) { "The saved baseline is missing" }
-            // Dry-run may write temporary listings. Copy the listings and the
-            // engine's verified pair identity, never its live OS lock inodes.
-            val savedFiles = requireNotNull(source.listFiles()) { "Cannot read the saved baseline" }
-            val identities = savedFiles.filter {
-                it.isFile && it.name.matches(Regex("bisync-identity-[0-9a-f]{64}\\.lck-guard"))
+            // Parse every custom flag against the exact bundled engine before authentication or mutation.
+            publishPhase("Checking rclone flags")
+            val check = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, true), false)
+            require(check.success()) { detail.ifBlank { "The selected engine rejected a task option" } }
+            diagnostics.setLength(0)
+            exitCode = null
+            state.begin(operation, fingerprint, inputData.getString(BISYNC_APPROVAL), id.toString())
+            var success = false
+            try {
+                if (isStopped || cancelled) throw InterruptedException("Cancelled before bisync started")
+                val child = mRclone.bisync(task, childDirectory, engineOperation, filters, false)
+                currentProcess = child
+                // launch registered its native lease under the same lock, so configuration
+                // writers stay excluded after preparation releases its thread-bound lock.
+                preparation.close()
+                publishPhase(if (operation == BisyncStateStore.PREVIEW) "Preview: connecting and scanning files"
+                    else if (operation == BisyncStateStore.INITIALISE) "Initialising: connecting and scanning files"
+                    else "Bisync: connecting and scanning files")
+                val outcome = execute(child, true)
+                success = outcome.success() && !isStopped && !cancelled
+                completed = success
+                if (success && operation != BisyncStateStore.PREVIEW) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
+            } finally {
+                state.finish(operation, fingerprint, id.toString(), success && !isStopped && !cancelled,
+                    exitCode, detail, diagnosticText())
             }
-            require(identities.size == 1 && identities.single().length() in 1..65536) {
-                "The saved baseline has no unambiguous endpoint identity. Review initialisation again."
-            }
-            (savedFiles.filter { it.isFile && it.name.endsWith(".lst") } + identities).forEach {
-                it.copyTo(File(childDirectory, it.name), overwrite = false)
-            }
-        }
-        // Parse every custom flag against the exact bundled engine before authentication or mutation.
-        val check = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, true), false)
-        require(check.success()) { detail.ifBlank { "The selected engine rejected a task option" } }
-        diagnostics.setLength(0)
-        exitCode = null
-        state.begin(operation, fingerprint, inputData.getString(BISYNC_APPROVAL), id.toString())
-        var success = false
-        try {
-            if (isStopped || cancelled) throw InterruptedException("Cancelled before bisync started")
-            val outcome = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, false), true)
-            success = outcome.success() && !isStopped && !cancelled
-            completed = success
-            if (success && operation != BisyncStateStore.PREVIEW) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
-        } finally {
-            state.finish(operation, fingerprint, id.toString(), success && !isStopped && !cancelled,
-                exitCode, detail, diagnosticText())
-        }
+        } finally { preparation.close() }
     }
 
     private fun execute(child: Process?, progress: Boolean): ProcessRunner.Outcome {
         currentProcess = child
         currentRunner = ProcessRunner()
-        val outcome = currentRunner.run(child, { isStopped || cancelled },
-            { line -> if (!progress) appendDiagnostic(line) },
+        lastEngineOutput = android.os.SystemClock.elapsedRealtime()
+        val outcome = currentRunner.run(child, {
+            heartbeat()
+            isStopped || cancelled
+        },
+            { line -> lastEngineOutput = android.os.SystemClock.elapsedRealtime(); appendDiagnostic(line) },
             { line ->
+                lastEngineOutput = android.os.SystemClock.elapsedRealtime()
                 val safe = DiagnosticRedactor.redact(line)
                 val json = try { JSONObject(safe) } catch (_: Exception) { null }
                 val message = json?.optString("msg", safe) ?: safe
@@ -279,13 +356,15 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                             updateForegroundNotification(mNotificationManager.updateSyncNotification(
                                 mTitle, statusObject.notificationContent, statusObject.notificationBigText,
                                 statusObject.notificationPercent, ongoingNotificationID))
+                            publishProgress("$phase: " + statusObject.notificationContent.take(400))
                         }
                     } catch (_: Exception) { /* Progress is advisory; the exit result remains authoritative. */ }
                 }
-            })
+            }, if (progress) 0L else 30_000L)
         exitCode = outcome.exitCode
-        cancelled = cancelled || outcome.cancelled
+        cancelled = cancelled || (outcome.cancelled && !outcome.timedOut)
         detail = when {
+            outcome.timedOut -> "The local rclone flag check timed out. Cancel any remaining operation and retry; no bisync operation was started."
             cancelled -> "Cancelled. Bisync state may need recovery."
             !outcome.exited -> "The process did not confirm exit; another transfer remains blocked until it stops."
             outcome.streamFailure -> "Could not completely read the process output. Review the task before retrying."
@@ -295,7 +374,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
         }
         val account = accountIdentity
         val action = accountFailure
-        if (!outcome.success() && !cancelled && outcome.exited && account != null && action != null) {
+        if (!outcome.success() && !outcome.timedOut && !cancelled && outcome.exited && account != null && action != null) {
             ProtonAccountState.pause(mContext, account, action)
             needsUserAction = true
             allowFollowup = false

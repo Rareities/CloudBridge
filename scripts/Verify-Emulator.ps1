@@ -104,6 +104,7 @@ try {
     Run-Case 'constraints-cancellation' 'ca.pkay.rcloneexplorer.SystemJobIntegrationTest' 1
     Run-Case 'editor-native-workflow' 'ca.pkay.rcloneexplorer.TaskEditorDeviceIntegrationTest' 1
     foreach ($name in @('bisync-ready', 'advanced-options', 'schedule-and-actions')) { Export-EditorImage $name }
+    Run-Case 'restore-directory-durability' 'ca.pkay.rcloneexplorer.RestoreDirectoryDurabilityTest' 1
     Run-Case 'encrypted-crash-stage' 'ca.pkay.rcloneexplorer.EncryptedCrashRecoveryTest' 1 @('-e', 'recoveryPhase', 'stage')
     [void](Invoke-Adb @('shell', 'am', 'force-stop', $package))
     Run-Case 'encrypted-crash-restart' 'ca.pkay.rcloneexplorer.EncryptedCrashRecoveryTest' 1 @('-e', 'recoveryPhase', 'verify')

@@ -6,6 +6,46 @@ local directory. It retains ordinary copy, one-way sync, cloud-to-cloud copy/syn
 remote forms and Android document-provider integration. It is not a replacement
 transfer engine or a desktop application.
 
+## Main controls and optional tools
+
+The normal setup is **Save and preview → Review and initialise → Run**.
+Keep independent backups and review which side wins differing files during setup.
+
+| Control | What it does | Is it needed? |
+| --- | --- | --- |
+| Save and preview | Saves this task and performs a dry run showing proposed changes. Wait for successful completion. | Yes, before first initialization or changed baseline settings. |
+| Review and initialise | Checks that the completed preview still matches, displays the report, and asks for explicit approval before establishing the baseline. | Yes, once during setup/recovery. It can copy or overwrite files. |
+| View last preview | Opens the saved report without running a fresh scan. | Optional. |
+| Advanced settings | Reveals backups, access markers, flags and helper tools. Collapsing it does not remove saved options. | Optional; defaults work without custom flags. |
+| Build a flag (formerly Add an option) | Helps enter an option name and value into the flags field. | Optional; manual entry is supported. |
+| Choose performance preset (formerly Apply tuning template) | Copies a set of performance options into the task. | Optional; it is not required for Proton or bisync. |
+| View rclone command (formerly Review effective arguments) | Shows the arguments the app will use; does not start a transfer. | Optional troubleshooting. |
+| rclone flag reference (formerly Show engine option help) | Displays help from the exact bundled engine. | Optional reference. |
+| Proton login help (formerly Proton connection) | Reconnects and verifies a Proton account when login needs attention; an optional 2FA code is not saved. | Only for login problems. It does not initialize a sync baseline. |
+
+You can type flags manually, one per line, for example:
+
+```text
+--bwlimit=8M
+--checkers=2
+```
+
+Managed safety controls, credentials and commands cannot be overridden through
+this field. Change settings, then save and preview again.
+
+### When actions are unavailable
+
+Review becomes available after a successful, unexpired initialization preview.
+It remains unavailable before preview completes, after failure/expiry, or while
+work is queued/running. Opening Review rechecks the actual saved settings; it
+never bypasses initialization approval.
+
+If Preview is also disabled, inspect the queued/running message and use Cancel
+queued or running task before starting over. Android may be waiting for network,
+charging or background limits. A failure before the preview starts is shown as
+Last attempt, with details in Run history. Failed configuration verification is
+shown rather than silently leaving actions unavailable.
+
 ## Create and initialise a task
 
 1. Configure the remote through the existing remote editor. Use a disposable
@@ -190,3 +230,22 @@ Release builds require the usual keystore inputs plus `CB_SIGNING_CERT_SHA256`
 (or `certificateSha256` in git-ignored `keystore.properties`). The value is the
 expected signing certificate SHA-256, not a password. CI uses the repository
 variable of that name. A missing or mismatched identity fails the release build.
+
+## A notification appears but the task seems idle
+
+The editor now shows the current phase: checking settings, checking rclone flags,
+connecting/scanning, or transferring. During a quiet engine phase it shows elapsed
+time and, after 30 seconds without engine output, how long the engine has been
+quiet. Scanning may take time before any bytes transfer; silence alone does not
+establish a stalled process. Cancel remains available.
+
+Android foreground startup and the local flag check each have a 30-second
+limit. Stopping a timed-out child can add a cancellation grace period; another
+transfer remains blocked until its exit is confirmed. A timeout produces a failed
+attempt with an explanation. Actual cloud
+transfers have no added overall deadline. Queued attempts explain known waits
+for network, charging, quiet hours or another native operation; Android constraints
+can also postpone work before the worker starts.
+
+If a failure persists, include the app version, displayed phase, elapsed time and
+redacted last-attempt message in an issue. Do not post credentials or raw config.

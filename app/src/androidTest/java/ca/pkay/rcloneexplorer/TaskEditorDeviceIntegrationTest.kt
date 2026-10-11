@@ -100,7 +100,16 @@ class TaskEditorDeviceIntegrationTest {
         }
     }
 
+    private fun showAdvancedIfNeeded(editor: ActivityScenario<TaskActivity>, id: Int) {
+        if (id in setOf(R.id.bisync_command_button, R.id.bisync_preset_button, R.id.bisync_advanced_flags))
+            editor.onActivity {
+                if (it.findViewById<android.view.View>(R.id.bisync_advanced_panel).visibility != android.view.View.VISIBLE)
+                    it.findViewById<Button>(R.id.bisync_advanced_toggle).performClick()
+            }
+    }
+
     private fun press(editor: ActivityScenario<TaskActivity>, id: Int) {
+        showAdvancedIfNeeded(editor, id)
         editor.onActivity {
             val button = it.findViewById<Button>(id)
             assertTrue("Editor action must be enabled", button.isEnabled)
@@ -112,6 +121,11 @@ class TaskEditorDeviceIntegrationTest {
     }
 
     private fun capture(name: String, control: Int) {
+        if (control == R.id.bisync_advanced_flags) {
+            var expanded = false
+            onView(withId(R.id.bisync_advanced_panel)).check { view, _ -> expanded = view.visibility == android.view.View.VISIBLE }
+            if (!expanded) onView(withId(R.id.bisync_advanced_toggle)).perform(scrollTo(), click())
+        }
         onView(withId(control)).perform(scrollTo())
         instrumentation.waitForIdleSync()
         // Queue idleness alone can precede the rendered transition frame.

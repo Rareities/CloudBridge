@@ -21,11 +21,19 @@ public final class NativeSessionGate {
         return new Lease(false);
     }
 
-    public synchronized Lease acquireRc(long expectedGeneration) throws IOException {
-        if (commandActive || expectedGeneration != generation)
-            throw new IOException("The remote service configuration changed or another transfer is active. Reopen the folder and retry.");
-        rcUsers++;
-        return new Lease(true);
+    public Lease acquireRc(long expectedGeneration) throws IOException {
+        // Same lock order as CLI launch: configuration first, gate second.
+        // Even an idle daemon cannot admit a new job during approved preparation.
+        if (!ConfigurationExclusion.LOCK.writeLock().tryLock())
+            throw new IOException("Configuration is being prepared; reopen the folder and retry");
+        try {
+            synchronized (this) {
+                if (commandActive || expectedGeneration != generation)
+                    throw new IOException("The remote service configuration changed or another transfer is active. Reopen the folder and retry.");
+                rcUsers++;
+                return new Lease(true);
+            }
+        } finally { ConfigurationExclusion.LOCK.writeLock().unlock(); }
     }
 
     public synchronized boolean isCurrent(long expectedGeneration) {
@@ -72,6 +80,15 @@ public final class NativeSessionGate {
         if (verb == n - 1 && (last.equals("version") || last.equals("listremotes"))) return true;
         return verb == n - 2 && command[verb].equals("config") &&
                 (last.equals("dump") || last.equals("providers"));
+    }
+
+    /** Every manual config writer, including interactive OAuth/reconnect, retires approval. */
+    public static boolean isConfigMutation(String[] command) {
+        int verb = verbIndex(command);
+        if (verb >= command.length || !command[verb].equals("config") || isLocalMetadata(command)) return false;
+        if (verb + 1 == command.length) return true;
+        String sub = command[verb + 1];
+        return !(sub.equals("show") || sub.equals("file") || sub.equals("paths") || sub.equals("userinfo"));
     }
 
     public static boolean isDaemon(String[] command) {

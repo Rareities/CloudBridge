@@ -24,15 +24,19 @@ object BisyncPolicy {
 
     /** A one-way transfer may invalidate every previous two-way listing. */
     @JvmStatic fun identityForEdit(previous: Task?, direction: Int): String {
-        val old = previous?.bisyncUUID?.takeIf { it.isNotBlank() }
+        val old = previous?.bisyncUUID?.takeIf { isValidIdentity(it) }
         val crossedBisyncBoundary = previous?.let { isBisync(it) != (direction == 5 || direction == 6) } ?: false
         return if (old == null || crossedBisyncBoundary) {
             UUID.randomUUID().toString()
         } else old
     }
 
+    @JvmStatic fun isValidIdentity(value: String): Boolean = try {
+        UUID.fromString(value).toString() == value.lowercase(java.util.Locale.ROOT)
+    } catch (_: IllegalArgumentException) { false }
+
     @JvmStatic fun workdir(context: Context, task: Task): File {
-        require(UUID.fromString(task.bisyncUUID).toString() == task.bisyncUUID.lowercase()) {
+        require(isValidIdentity(task.bisyncUUID)) {
             "Missing bisync identity. Review and save the task."
         }
         val directory = File(context.filesDir, "bisync/${task.bisyncUUID}")
@@ -81,9 +85,15 @@ object BisyncPolicy {
             b.startsWith("$a\\") || a.startsWith("$b\\")
     }
 
+    /** Preserve every serialized option; data-class copy only copies the constructor ID. */
+    @JvmStatic fun effectiveTask(task: Task, transfers: Int): Task {
+        require(transfers > 0) { "Choose a positive transfer count" }
+        return Task.fromString(task.asJSON().toString()).apply { this.transfers = transfers }
+    }
+
     @JvmStatic fun fingerprint(task: Task, filters: List<FilterEntry>, configIdentity: String): String {
         val values = listOf(
-            "bisync-policy-v3", normalisedMode(task.direction), task.bisyncUUID,
+            "bisync-policy-v4", normalisedMode(task.direction), task.bisyncUUID,
             File(task.localPath).canonicalPath,
             task.remoteId, task.remotePath, task.remoteType.toString(), task.bisyncMaxDelete.toString(),
             task.bisyncResyncMode, task.bisyncCheckAccess.toString(), task.bisyncBackupDir1,

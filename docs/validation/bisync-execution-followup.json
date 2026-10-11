@@ -1,0 +1,53 @@
+{
+  "candidate": "1.1.1-rc.1",
+  "change": "Bisync editor simplification and startup/progress follow-up",
+  "hostTests": 176,
+  "hostSuites": 48,
+  "failures": 0,
+  "errors": 0,
+  "skips": 0,
+  "lint": "passed with existing baseline",
+  "assembleOssDebug": "passed (five APKs)",
+  "instrumentationCompilation": "passed",
+  "engineSource": "47048daf3c80e1de633ec9a1f09981f4c30f9a30",
+  "engineBuild": "Reused independently hash-verified published Android engines; native cross-compilation excluded",
+  "independentSourceReview": "passed",
+  "deviceExecution": "not run",
+  "liveAccountExecution": "not run",
+  "installedApkRootCause": "not established; fixes address confirmed source-level feedback and startup bounds",
+  "apks": [
+    {
+      "file": "cloudbridge_v1.1.1-rc.1-oss-arm64-v8a-debug.apk",
+      "nativeHashesMatchPinnedRelease": [
+        "arm64-v8a"
+      ]
+    },
+    {
+      "file": "cloudbridge_v1.1.1-rc.1-oss-armeabi-v7a-debug.apk",
+      "nativeHashesMatchPinnedRelease": [
+        "armeabi-v7a"
+      ]
+    },
+    {
+      "file": "cloudbridge_v1.1.1-rc.1-oss-universal-debug.apk",
+      "nativeHashesMatchPinnedRelease": [
+        "armeabi-v7a",
+        "arm64-v8a",
+        "x86",
+        "x86_64"
+      ]
+    },
+    {
+      "file": "cloudbridge_v1.1.1-rc.1-oss-x86-debug.apk",
+      "nativeHashesMatchPinnedRelease": [
+        "x86"
+      ]
+    },
+    {
+      "file": "cloudbridge_v1.1.1-rc.1-oss-x86_64-debug.apk",
+      "nativeHashesMatchPinnedRelease": [
+        "x86_64"
+      ]
+    }
+  ]
+}
