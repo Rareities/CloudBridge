@@ -84,6 +84,14 @@ Independent source review passed. Device execution remains unrun.
 
 ### Follow-up commits
 
+- [f59a257740](https://github.com/Rareities/CloudBridge/commit/f59a2577405c16a4ce3ac93cb1ebdf47a0fcb5f9) —
+  simpler bisync editor, actionable running/queued feedback, persisted waiting
+  reasons, foreground/local-check deadlines and validated regression coverage.
+- [dbbe9ee32f](https://github.com/Rareities/CloudBridge/commit/dbbe9ee32f912f7c3060ce617d792b3bf84ca4dc) —
+  first-run UUID fix documentation and validation.
+- [cbcda693b2](https://github.com/Rareities/CloudBridge/commit/cbcda693b2c924ebc0939fb0099ad02c47d2a28f) —
+  personal-fork README introduction and full commit-linked changelog.
+
 - [e8f2a5ad5a](https://github.com/Rareities/CloudBridge/commit/e8f2a5ad5aae553eca7a5fd5d014d413120d9316) —
   first-run initialization guidance and safe task/baseline UUID validation.
 
