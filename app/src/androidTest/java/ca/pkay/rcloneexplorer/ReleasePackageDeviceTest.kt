@@ -7,8 +7,6 @@ import androidx.preference.PreferenceManager
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
 import ca.pkay.rcloneexplorer.Activities.MainActivity
 import ca.pkay.rcloneexplorer.Activities.TaskActivity
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler
@@ -32,6 +30,30 @@ import java.util.concurrent.TimeUnit
 /** Runs against the actual minified, signed, non-debuggable release APK. */
 @RunWith(AndroidJUnit4::class)
 class ReleasePackageDeviceTest {
+    // Test-only Kotlin file extensions can be removed from a shrunk application.
+    // Use platform I/O so this fixture does not require changing release keep rules.
+    private fun write(file: File, text: String) {
+        val output = java.io.FileOutputStream(file)
+        try { output.write(text.toByteArray(java.nio.charset.StandardCharsets.UTF_8)) }
+        finally { output.close() }
+    }
+    private fun read(file: File): String {
+        val input = java.io.FileInputStream(file)
+        val output = java.io.ByteArrayOutputStream()
+        try {
+            val buffer = ByteArray(8192)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                output.write(buffer, 0, count)
+            }
+            return String(output.toByteArray(), java.nio.charset.StandardCharsets.UTF_8)
+        } finally { input.close(); output.close() }
+    }
+    private fun removeFixture(file: File): Boolean {
+        for (child in file.listFiles() ?: emptyArray()) if (!removeFixture(child)) return false
+        return file.delete()
+    }
     @Test(timeout = 150_000) fun signedReleaseLaunchesAndCompletesGuardedNativeBisync() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
@@ -42,8 +64,7 @@ class ReleasePackageDeviceTest {
         EngineProvenance.verify(context)
         val rclone = Rclone(context)
         val db = DatabaseHandler(context)
-        val work = WorkManager.getInstance(context)
-        val alias = "release_${UUID.randomUUID().toString().replace("-", "")}"
+        val alias = "release_${UUID.randomUUID()}"
         val root = File(context.filesDir, alias).apply { check(mkdirs()) }
         val left = File(root, "left").apply { check(mkdirs()) }
         val right = File(root, "right").apply { check(mkdirs()) }
@@ -63,14 +84,19 @@ class ReleasePackageDeviceTest {
                 { TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - start) > 25 }, null, null)
             assertTrue("Release native command failed: ${result.exitCode}", result.success())
         }
-        val completedWork = mutableSetOf<UUID>()
+        val completedWork = mutableSetOf<String>()
         fun finished(saved: Task) {
-            var found: UUID? = null
+            var found: String? = null
             await("Release worker did not finish: ${RunHistory.read(context, saved)}") {
-                val states = work.getWorkInfosForUniqueWork("task:${saved.id}").get(5, TimeUnit.SECONDS)
-                states.filter { it.id !in completedWork }.forEach {
-                    if (it.state == WorkInfo.State.FAILED) fail("Release worker failed: ${RunHistory.read(context, saved)}")
-                    if (it.state == WorkInfo.State.SUCCEEDED) found = it.id
+                val records = RunHistory.read(context, saved)
+                for (i in 0 until records.length()) {
+                    val record = records.getJSONObject(i)
+                    val run = record.getString("runId")
+                    if (run in completedWork) continue
+                    val outcome = record.getString("status")
+                    if (outcome != "IN_PROGRESS" && outcome != "SUCCESS")
+                        fail("Release worker failed: $record")
+                    if (outcome == "SUCCESS") found = run
                 }
                 found != null
             }
@@ -86,7 +112,7 @@ class ReleasePackageDeviceTest {
             assertTrue(NativeConfigEncryption.isEncrypted(File(context.filesDir, "rclone.conf")))
             createdAlias = true
             command(rclone.configCreateNoInteract(mutableListOf(alias, "alias", "remote", right.absolutePath)))
-            File(left, "initial.txt").writeText("release initial bytes")
+            write(File(left, "initial.txt"), "release initial bytes")
             val saved = db.createTask(Task(0).apply {
                 title = "Signed release acceptance"; direction = 6
                 localPath = left.absolutePath; remoteId = alias; remotePath = "//$alias"; wifionly = false
@@ -99,13 +125,13 @@ class ReleasePackageDeviceTest {
                 assertFalse(File(right, "initial.txt").exists())
                 manager.initialiseBisync(saved.id, state.read().getString("previewFingerprint"))
                 finished(saved)
-                assertEquals("release initial bytes", File(right, "initial.txt").readText())
-                File(left, "from-left.txt").writeText("L")
-                File(right, "from-right.txt").writeText("R")
+                assertEquals("release initial bytes", read(File(right, "initial.txt")))
+                write(File(left, "from-left.txt"), "L")
+                write(File(right, "from-right.txt"), "R")
                 manager.queue(saved.id)
                 finished(saved)
-                assertEquals("L", File(right, "from-left.txt").readText())
-                assertEquals("R", File(left, "from-right.txt").readText())
+                assertEquals("L", read(File(right, "from-left.txt")))
+                assertEquals("R", read(File(left, "from-right.txt")))
                 assertEquals(BisyncStateStore.READY, state.read().getString("status"))
             }
             ActivityScenario.launch<TaskActivity>(Intent(context, TaskActivity::class.java)
@@ -117,11 +143,11 @@ class ReleasePackageDeviceTest {
                 }
             }
         } finally {
-            task?.let { work.cancelUniqueWork("task:${it.id}").result.get(5, TimeUnit.SECONDS) }
+            task?.let { SyncManager(context).cancel(it.id.toString()) }
             await("Release fixture cleanup must wait for native exit") { !NativeSessionGate.GLOBAL.isBusy }
             if (createdAlias) command(rclone.config("delete", mutableListOf(alias)))
             task?.let { db.deleteTask(it.id) }
-            assertTrue(root.deleteRecursively())
+            assertTrue(removeFixture(root))
         }
     }
 }
