@@ -84,6 +84,13 @@ Independent source review passed. Device execution remains unrun.
 
 ### Follow-up commits
 
+- [d4521de6c1](https://github.com/Rareities/CloudBridge/commit/d4521de6c15a86ee85e8f485299ee0ac239fda9c) —
+  opt-in, independently reviewed debug-test prerelease publication from the
+  isolated test branch, with fail-fast uploads and no release signing secrets.
+- [eb41c11444](https://github.com/Rareities/CloudBridge/commit/eb41c11444ff4b8e2359b94d96ed307ea8bb428e) —
+  exact test-branch admission in the signed-release workflow and updated notes.
+  The existing environment deployment allowlist remains a required external gate.
+
 - [f59a257740](https://github.com/Rareities/CloudBridge/commit/f59a2577405c16a4ce3ac93cb1ebdf47a0fcb5f9) —
   simpler bisync editor, actionable running/queued feedback, persisted waiting
   reasons, foreground/local-check deadlines and validated regression coverage.
@@ -102,7 +109,13 @@ Independent source review passed. Device execution remains unrun.
   engine documentation clarifying credential locking and standalone account
   changes. The Android engine pin stays at the previously reviewed source.
 - The README and this changelog are maintained in the accompanying documentation
-  commit. These follow-up commits are local and unpublished until pushed.
+  commit. The full follow-up source history is published on
+  [`test/bisync-startup-1.1.1-rc.1`](https://github.com/Rareities/CloudBridge/tree/test/bisync-startup-1.1.1-rc.1),
+  leaving master unchanged. The rclone documentation follow-up is on
+  [`test/cloudbridge-1.1.1-rc.1`](https://github.com/Rareities/rclone/tree/test/cloudbridge-1.1.1-rc.1).
+  Debug test APKs use separate `test-bisync-startup-*` prerelease tags and a
+  separate application ID. They are not normal release upgrades. Normal release
+  signing still requires the branch to be admitted by the `fork-release` environment.
 
 ### Validation status
 
