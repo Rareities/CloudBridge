@@ -1,15 +1,15 @@
 # Windows Build Script for Session Guardian
-# Run from CloudBridge directory in PowerShell
+# Run from ProtonBridge directory in PowerShell
 
 Write-Host "=======================================" -ForegroundColor Cyan
-Write-Host "CloudBridge Build Script" -ForegroundColor Cyan
+Write-Host "ProtonBridge Build Script" -ForegroundColor Cyan
 Write-Host "Session Guardian Edition" -ForegroundColor Cyan
 Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Check if we're in the right directory
 if (-not (Test-Path ".\gradlew.bat")) {
-    Write-Host "ERROR: gradlew.bat not found. Run this script from CloudBridge directory." -ForegroundColor Red
+    Write-Host "ERROR: gradlew.bat not found. Run this script from ProtonBridge directory." -ForegroundColor Red
     exit 1
 }
 
@@ -77,7 +77,7 @@ switch ($choice) {
         Write-Host "APKs are in: app\build\outputs\apk\oss\debug\" -ForegroundColor White
         Write-Host ""
         Write-Host "For Pixel 9, install:" -ForegroundColor Cyan
-        Write-Host "  cloudbridge_v*-oss-arm64-v8a-debug.apk" -ForegroundColor White
+        Write-Host "  protonbridge_v*-oss-arm64-v8a-debug.apk" -ForegroundColor White
     }
 
     "2" {

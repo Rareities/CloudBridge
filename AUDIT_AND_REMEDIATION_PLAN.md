@@ -197,7 +197,7 @@ Pattern uniting most of these: **"no `return` after `finish()`"** + **null-deref
 - RC-3 (encryption at rest) gets a design/migration gate in Phase 2 and implementation before final release.
 
 #### Track 1C — Build/CI unblocking  · **effort: S** (items: RC-6, RC-7, RC-8)
-- `dependencies.yml`: fix grep prefix `de.felixnuesse.extract.*` → `de.schuelken.cloudbridge.*`; fix APK glob `roundsync_v*` → `cloudbridge_v*`.
+- `dependencies.yml`: fix grep prefix `de.felixnuesse.extract.*` → `io.github.rareities.protonbridge.*`; fix APK glob `roundsync_v*` → `cloudbridge_v*`.
 - Bump `compileSdk`/`targetSdk` 34 → 35 in `app/build.gradle` and `safdav/build.gradle`.
 - `gradle.properties:34`: pin `rCloneRef` to a concrete immutable ref instead of `master`. If using a tag, update `rclone/build.gradle` because it currently clones with `--no-tags`; fetch tags or the exact ref explicitly. If using a commit SHA, prefer a full 40-character SHA and ensure the fetch refspec can retrieve it. Record the resolved SHA in build output, or in a lockfile only if the build verifies it.
 - Build-007, 009, 010 (Glide ksp, SHA-pin actions, lint-baseline triage) deferred to Phase 2/3.

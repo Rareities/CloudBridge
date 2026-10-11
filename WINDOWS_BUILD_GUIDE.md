@@ -37,8 +37,8 @@
 
 ```bash
 cd C:\Projects
-git clone https://github.com/thies2005/CloudBridge.git
-cd CloudBridge
+git clone https://github.com/Rareities/ProtonBridge.git
+cd ProtonBridge
 git pull origin master
 ```
 
@@ -100,7 +100,7 @@ app/lib/arm64-v8a/librclone.so
 
 **APK output location:**
 ```
-app/build/outputs/apk/oss/debug/cloudbridge_v*-oss-arm64-v8a-debug.apk
+app/build/outputs/apk/oss/debug/protonbridge_v*-oss-arm64-v8a-debug.apk
 ```
 
 ### 6. Build All Architectures (Optional)
@@ -171,11 +171,11 @@ app/
 │       └── apk/
 │           └── oss/
 │               └── debug/
-│                   ├── cloudbridge_v*-oss-armeabi-v7a-debug.apk
-│                   ├── cloudbridge_v*-oss-arm64-v8a-debug.apk  <-- FOR PIXEL 9
-│                   ├── cloudbridge_v*-oss-x86-debug.apk
-│                   ├── cloudbridge_v*-oss-x86_64-debug.apk
-│                   └── cloudbridge_v*-oss-universal-debug.apk
+│                   ├── protonbridge_v*-oss-armeabi-v7a-debug.apk
+│                   ├── protonbridge_v*-oss-arm64-v8a-debug.apk  <-- FOR PIXEL 9
+│                   ├── protonbridge_v*-oss-x86-debug.apk
+│                   ├── protonbridge_v*-oss-x86_64-debug.apk
+│                   └── protonbridge_v*-oss-universal-debug.apk
 └── lib/
     ├── armeabi-v7a/librclone.so
     ├── arm64-v8a/librclone.so
@@ -186,7 +186,7 @@ app/
 ## Installing on Pixel 9
 
 1. Enable "Install from unknown sources" in Android settings
-2. Transfer `cloudbridge_v*-oss-arm64-v8a-debug.apk` to Pixel 9
+2. Transfer `protonbridge_v*-oss-arm64-v8a-debug.apk` to Pixel 9
 3. Install the APK
 4. Test Session Guardian features:
    - Configure an Internxt remote with 2FA

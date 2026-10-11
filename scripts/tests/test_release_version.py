@@ -18,11 +18,14 @@ class ReleaseVersionTest(unittest.TestCase):
         self.props(110)
     def tearDown(self): self.temp.cleanup()
     def props(self, code):
-        (self.root / 'gradle.properties').write_text(f'de.schuelken.cloudbridge.versionCode={code}\nde.schuelken.cloudbridge.versionName=1.1.1-rc.1\n')
+        (self.root / 'gradle.properties').write_text(f'io.github.rareities.protonbridge.versionCode={code}\nio.github.rareities.protonbridge.versionName=1.1.1-rc.1\n')
     def validate(self, tags, previous):
-        with patch.object(module.subprocess, 'check_output', return_value='\n'.join(tags)), patch.object(module.subprocess, 'run', return_value=SimpleNamespace(stdout=f'de.schuelken.cloudbridge.versionCode={previous}')):
+        with patch.object(module.subprocess, 'check_output', return_value='\n'.join(tags)), patch.object(module.subprocess, 'run', return_value=SimpleNamespace(stdout=f'io.github.rareities.protonbridge.versionCode={previous}')):
             return module.validate('v1.1.1-rc.1', self.root)
     def test_next_base_exceeds_old_split_apks(self): self.assertEqual(110,self.validate(['v1.1.0-rc.1'],100))
+    def test_legacy_cloudbridge_property_history_is_recognized(self):
+        with patch.object(module.subprocess, 'check_output', return_value='v1.1.0-rc.1'), patch.object(module.subprocess, 'run', return_value=SimpleNamespace(stdout='de.schuelken.cloudbridge.versionCode=100')):
+            self.assertEqual(110,module.validate('v1.1.1-rc.1',self.root))
     def test_reserved_abi_digit_cannot_be_used(self):
         self.props(109)
         with self.assertRaises(ValueError): self.validate([],100)

@@ -25,7 +25,7 @@
             android:title="@string/notification_reports_title"
             app:summary="@string/notification_reports" />
 
-        <de.schuelken.cloudbridge.settings.preferences.ButtonPreference
+        <io.github.rareities.protonbridge.settings.preferences.ButtonPreference
             android:key="TempKeyNotificationSettings"
             app:title="@string/open_notification_settings_title"
             app:summary="@string/open_notification_settings_summary" />

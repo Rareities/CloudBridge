@@ -1,0 +1,561 @@
+package io.github.rareities.protonbridge.Database
+
+import android.content.ContentValues
+import android.content.Context
+import android.database.Cursor
+import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.DATABASE_NAME
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.DATABASE_VERSION
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_CREATE_TABLES_TASKS
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_FILTERS
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_CREATE_TABLE_TRIGGER
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_DELETE_EXCLUDED
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_MD5
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_WIFI
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_FILTER_ID
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_FOLLOWUPS_FAIL
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_FOLLOWUPS_SUCCESS
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_TRANSFERS
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_ID2
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_TYPE2
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_REMOTE_PATH2
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_UUID
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_ADVANCED
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TASK_ADD_POLICY
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_ZONE
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_NEXT_DUE
+import io.github.rareities.protonbridge.Database.DatabaseInfo.Companion.SQL_UPDATE_TRIGGER_ADD_TYPE
+import io.github.rareities.protonbridge.Items.Filter
+import io.github.rareities.protonbridge.Items.Task
+import io.github.rareities.protonbridge.Items.Trigger
+import java.util.ArrayList
+
+class DatabaseHandler(context: Context?) :
+    SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+
+    override fun onConfigure(db: SQLiteDatabase) {
+        super.onConfigure(db)
+        // Restore retires its rollback marker only after a power-loss durable commit.
+        db.execSQL("PRAGMA synchronous=FULL")
+    }
+
+    override fun onCreate(sqLiteDatabase: SQLiteDatabase) {
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLES_TASKS)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_TRIGGER)
+        sqLiteDatabase.execSQL(SQL_CREATE_TABLE_FILTERS)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_MD5)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_WIFI)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_TYPE)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_FILTER_ID)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_DELETE_EXCLUDED)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_FOLLOWUPS_FAIL)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_FOLLOWUPS_SUCCESS)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_TRANSFERS)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_UUID)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_ADVANCED)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_POLICY)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_ZONE)
+        sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_NEXT_DUE)
+    }
+
+    override fun onUpgrade(sqLiteDatabase: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_TRIGGER)
+        }
+        if (oldVersion < 3) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_MD5)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_WIFI)
+        }
+        if (oldVersion < 4) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_TYPE)
+        }
+        if (oldVersion < 5) {
+            sqLiteDatabase.execSQL(SQL_CREATE_TABLE_FILTERS)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_FILTER_ID)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_DELETE_EXCLUDED)
+        }
+        if (oldVersion < 6) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_FOLLOWUPS_FAIL)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_FOLLOWUPS_SUCCESS)
+        }
+        if (oldVersion < 7) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_TRANSFERS)
+        }
+        if (oldVersion < 8) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_ID2)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_TYPE2)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_REMOTE_PATH2)
+        }
+        if (oldVersion < 9) {
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_UUID)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_ADVANCED)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_BISYNC_MAX_DELETE)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TASK_ADD_POLICY)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_ZONE)
+            sqLiteDatabase.execSQL(SQL_UPDATE_TRIGGER_ADD_NEXT_DUE)
+        }
+    }
+
+    /** All three collections come from one SQLite read transaction. */
+    fun exportSnapshot(): org.json.JSONObject {
+        val db = readableDatabase
+        db.beginTransaction()
+        try {
+            val result = org.json.JSONObject()
+            val tasks = org.json.JSONArray()
+            db.query(Task.TABLE_NAME, taskProjection, null, null, null, null, Task.COLUMN_NAME_ID + " ASC").use { cursor ->
+                while (cursor.moveToNext()) tasks.put(taskFromCursor(cursor).asJSON())
+            }
+            val filters = org.json.JSONArray()
+            db.query(Filter.TABLE_NAME, filterProjection, null, null, null, null, Filter.COLUMN_NAME_ID + " ASC").use { cursor ->
+                while (cursor.moveToNext()) filters.put(filterFromCursor(cursor).asJSON())
+            }
+            val triggers = org.json.JSONArray()
+            db.query(Trigger.TABLE_NAME, triggerProjection, null, null, null, null, Trigger.COLUMN_NAME_ID + " ASC").use { cursor ->
+                while (cursor.moveToNext()) triggers.put(triggerFromCursor(cursor).asJSON())
+            }
+            result.put("tasks", tasks).put("filters", filters).put("trigger", triggers)
+            db.setTransactionSuccessful()
+            return result
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
+    }
+
+    val allTasks: List<Task>
+        get() {
+            val db = readableDatabase
+            val selection = ""
+            val selectionArgs = arrayOf<String>()
+            val sortOrder = Task.COLUMN_NAME_ID + " ASC"
+            val cursor = db.query(
+                Task.TABLE_NAME,
+                taskProjection,
+                selection,
+                selectionArgs,
+                null,
+                null,
+                sortOrder
+            )
+            val results: MutableList<Task> = ArrayList()
+            while (cursor.moveToNext()) {
+                results.add(taskFromCursor(cursor))
+            }
+            cursor.close()
+            db.close()
+            return results
+        }
+
+    fun getTask(id: Long): Task? {
+        val db = readableDatabase
+        val selection = Task.COLUMN_NAME_ID + " LIKE ?"
+        val selectionArgs = arrayOf(id.toString())
+        val sortOrder = Task.COLUMN_NAME_ID + " ASC"
+        val cursor = db.query(
+            Task.TABLE_NAME,
+            taskProjection,
+            selection,
+            selectionArgs,
+            null,
+            null,
+            sortOrder
+        )
+        val results: MutableList<Task> = ArrayList()
+        while (cursor.moveToNext()) {
+            results.add(taskFromCursor(cursor))
+        }
+        cursor.close()
+        db.close()
+        return if (results.size == 0) {
+            null
+        } else results[0]
+    }
+
+    fun createTask(taskToStore: Task, withId: Boolean = false): Task {
+        val db = writableDatabase
+        if (taskToStore.bisyncUUID.isEmpty()) taskToStore.bisyncUUID = java.util.UUID.randomUUID().toString()
+        val newRowId = db.insertOrThrow(Task.TABLE_NAME, null, if(withId) getTaskContentValuesWithID(taskToStore) else getTaskContentValues(taskToStore))
+        db.close()
+        taskToStore.id = newRowId
+        return taskToStore
+    }
+
+    fun updateTask(taskToUpdate: Task) {
+        val db = writableDatabase
+        db.update(
+            Task.TABLE_NAME,
+            getTaskContentValues(taskToUpdate),
+            Task.COLUMN_NAME_ID + " = ?",
+            arrayOf(taskToUpdate.id.toString())
+        )
+        db.close()
+    }
+
+    private val taskProjection: Array<String>
+        get() = arrayOf(
+            Task.COLUMN_NAME_ID,
+            Task.COLUMN_NAME_TITLE,
+            Task.COLUMN_NAME_REMOTE_ID,
+            Task.COLUMN_NAME_REMOTE_TYPE,
+            Task.COLUMN_NAME_REMOTE_PATH,
+            Task.COLUMN_NAME_LOCAL_PATH,
+            Task.COLUMN_NAME_SYNC_DIRECTION,
+            Task.COLUMN_NAME_MD5SUM,
+            Task.COLUMN_NAME_WIFI_ONLY,
+            Task.COLUMN_NAME_FILTER_ID,
+            Task.COLUMN_NAME_DELETE_EXCLUDED,
+            Task.COLUMN_NAME_ONFAIL_FOLLOWUP,
+            Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP,
+            Task.COLUMN_NAME_TRANSFERS,
+            Task.COLUMN_NAME_REMOTE_ID2,
+            Task.COLUMN_NAME_REMOTE_TYPE2,
+            Task.COLUMN_NAME_REMOTE_PATH2,
+            Task.COLUMN_NAME_BISYNC_UUID,
+            Task.COLUMN_NAME_BISYNC_ADVANCED,
+            Task.COLUMN_NAME_BISYNC_MAX_DELETE,
+            Task.COLUMN_NAME_POLICY
+        )
+
+    private fun taskFromCursor(cursor: Cursor): Task {
+        val task = Task(cursor.getLong(0))
+        task.title = cursor.getString(1)
+        task.remoteId = cursor.getString(2)
+        task.remoteType = cursor.getInt(3)
+        task.remotePath = cursor.getString(4)
+        task.localPath = cursor.getString(5)
+        task.direction = cursor.getInt(6)
+        task.md5sum = getBoolean(cursor, 7)
+        task.wifionly = getBoolean(cursor, 8)
+        task.filterId = if (cursor.isNull(9)) null else cursor.getLong(9)
+        task.deleteExcluded = getBoolean(cursor, 10)
+        task.onFailFollowup = if (cursor.isNull(11)) null else cursor.getLong(11)
+        task.onSuccessFollowup = if (cursor.isNull(12)) null else cursor.getLong(12)
+        task.transfers = if (cursor.isNull(13)) null else cursor.getInt(13)
+        // Columns added in v8 are NULL for rows created under older schema versions; coalesce to defaults.
+        task.remoteId2 = cursor.getString(14) ?: ""
+        task.remoteType2 = cursor.getInt(15)
+        task.remotePath2 = cursor.getString(16) ?: ""
+        task.bisyncUUID = cursor.getString(17) ?: ""
+        task.bisyncAdvancedOptions = cursor.getString(18) ?: ""
+        task.bisyncMaxDelete = if (cursor.isNull(19)) 10 else cursor.getInt(19)
+        task.readPolicyJSON(cursor.getString(20))
+        return task
+    }
+
+    private fun getTaskContentValuesWithID(task: Task): ContentValues {
+        val values = getTaskContentValues(task)
+        values.put(Task.COLUMN_NAME_ID, task.id)
+        return values
+    }
+
+    fun deleteTask(id: Long): Int {
+        val db = writableDatabase
+        val selection = Task.COLUMN_NAME_ID + " LIKE ?"
+        val selectionArgs = arrayOf(id.toString())
+        val retcode = db.delete(Task.TABLE_NAME, selection, selectionArgs)
+        db.close()
+        return retcode
+    }
+
+    private fun getTaskContentValues(task: Task): ContentValues {
+        val values = ContentValues()
+        values.put(Task.COLUMN_NAME_TITLE, task.title)
+        values.put(Task.COLUMN_NAME_LOCAL_PATH, task.localPath)
+        values.put(Task.COLUMN_NAME_REMOTE_ID, task.remoteId)
+        values.put(Task.COLUMN_NAME_REMOTE_PATH, task.remotePath)
+        values.put(Task.COLUMN_NAME_REMOTE_TYPE, task.remoteType)
+        values.put(Task.COLUMN_NAME_SYNC_DIRECTION, task.direction)
+        values.put(Task.COLUMN_NAME_MD5SUM, task.md5sum)
+        values.put(Task.COLUMN_NAME_WIFI_ONLY, task.wifionly)
+        values.put(Task.COLUMN_NAME_FILTER_ID, task.filterId)
+        values.put(Task.COLUMN_NAME_DELETE_EXCLUDED, task.deleteExcluded)
+        values.put(Task.COLUMN_NAME_ONFAIL_FOLLOWUP, task.onFailFollowup)
+        values.put(Task.COLUMN_NAME_ONSUCCESS_FOLLOWUP, task.onSuccessFollowup)
+        values.put(Task.COLUMN_NAME_TRANSFERS, task.transfers)
+        values.put(Task.COLUMN_NAME_REMOTE_ID2, task.remoteId2)
+        values.put(Task.COLUMN_NAME_REMOTE_TYPE2, task.remoteType2)
+        values.put(Task.COLUMN_NAME_REMOTE_PATH2, task.remotePath2)
+        values.put(Task.COLUMN_NAME_BISYNC_UUID, task.bisyncUUID)
+        values.put(Task.COLUMN_NAME_BISYNC_ADVANCED, task.bisyncAdvancedOptions)
+        values.put(Task.COLUMN_NAME_BISYNC_MAX_DELETE, task.bisyncMaxDelete)
+        values.put(Task.COLUMN_NAME_POLICY, task.policyJSON())
+        return values
+    }
+
+    val allTrigger: List<Trigger>
+        get() {
+            val db = readableDatabase
+            val projection = triggerProjection
+            val selection = ""
+            val selectionArgs = arrayOf<String>()
+            val sortOrder = Trigger.COLUMN_NAME_ID + " ASC"
+            val cursor = db.query(
+                    Trigger.TABLE_NAME,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null,
+                    null,
+                    sortOrder
+            )
+            val results: MutableList<Trigger> = ArrayList()
+            while (cursor.moveToNext()) {
+                results.add(triggerFromCursor(cursor))
+            }
+            cursor.close()
+            db.close()
+            return results
+        }
+
+    fun getTrigger(id: Long): Trigger? {
+        val db = readableDatabase
+        val projection = triggerProjection
+        val selection = Trigger.COLUMN_NAME_ID + " LIKE ?"
+        val selectionArgs = arrayOf(id.toString())
+        val sortOrder = Trigger.COLUMN_NAME_ID + " ASC"
+        val cursor = db.query(
+                Trigger.TABLE_NAME,
+                projection,
+                selection,
+                selectionArgs,
+                null,
+                null,
+                sortOrder
+        )
+        val results: MutableList<Trigger> = ArrayList()
+        while (cursor.moveToNext()) {
+            results.add(triggerFromCursor(cursor))
+        }
+        cursor.close()
+        db.close()
+        return if (results.size == 0) {
+            null
+        } else results[0]
+    }
+
+    fun createTrigger(triggerToStore: Trigger, withId: Boolean = false): Trigger {
+        val db = writableDatabase
+        val newRowId = db.insertOrThrow(Trigger.TABLE_NAME, null, if(withId) getTriggerContentValuesWithID(triggerToStore) else getTriggerContentValues(triggerToStore))
+        db.close()
+        triggerToStore.id = newRowId
+        return triggerToStore
+    }
+
+    fun updateTrigger(triggerToUpdate: Trigger) {
+        val db = writableDatabase
+        db.update(
+                Trigger.TABLE_NAME,
+                getTriggerContentValuesWithID(triggerToUpdate),
+                Trigger.COLUMN_NAME_ID + " = ?",
+                arrayOf(triggerToUpdate.id.toString())
+        )
+        db.close()
+    }
+
+    fun deleteTrigger(id: Long): Int {
+        val db = writableDatabase
+        val selection = Trigger.COLUMN_NAME_ID + " LIKE ?"
+        val selectionArgs = arrayOf(id.toString())
+        val retcode = db.delete(Trigger.TABLE_NAME, selection, selectionArgs)
+        db.close()
+        return retcode
+    }
+
+    private fun getTriggerContentValuesWithID(t: Trigger): ContentValues {
+        val values = getTriggerContentValues(t)
+        values.put(Trigger.COLUMN_NAME_ID, t.id)
+        return values
+    }
+
+    private fun getTriggerContentValues(t: Trigger): ContentValues {
+        val values = ContentValues()
+        values.put(Trigger.COLUMN_NAME_TITLE, t.title)
+        values.put(Trigger.COLUMN_NAME_ENABLED, t.isEnabled)
+        values.put(Trigger.COLUMN_NAME_TIME, t.time)
+        values.put(Trigger.COLUMN_NAME_WEEKDAY, t.getWeekdays())
+        values.put(Trigger.COLUMN_NAME_TARGET, t.triggerTarget)
+        values.put(Trigger.COLUMN_NAME_TYPE, t.type)
+        values.put(Trigger.COLUMN_NAME_ZONE, t.zoneId)
+        values.put(Trigger.COLUMN_NAME_NEXT_DUE, t.nextDue)
+        return values
+    }
+
+    private val triggerProjection: Array<String>
+        private get() = arrayOf(
+                Trigger.COLUMN_NAME_ID,
+                Trigger.COLUMN_NAME_TITLE,
+                Trigger.COLUMN_NAME_ENABLED,
+                Trigger.COLUMN_NAME_TIME,
+                Trigger.COLUMN_NAME_WEEKDAY,
+                Trigger.COLUMN_NAME_TARGET,
+                Trigger.COLUMN_NAME_TYPE,
+                Trigger.COLUMN_NAME_ZONE,
+                Trigger.COLUMN_NAME_NEXT_DUE
+        )
+
+    private fun triggerFromCursor(cursor: Cursor): Trigger {
+        val trigger = Trigger(cursor.getLong(0))
+        trigger.title = cursor.getString(1)
+        trigger.isEnabled = cursor.getInt(2) == 1
+        trigger.time = cursor.getInt(3)
+        val weekdays = cursor.getInt(4)
+        trigger.setWeekdays(weekdays.toByte())
+        trigger.triggerTarget = cursor.getLong(5)
+        trigger.type = cursor.getInt(6)
+        trigger.zoneId = cursor.getString(7) ?: ""
+        trigger.nextDue = if (cursor.isNull(8)) 0 else cursor.getLong(8)
+        return trigger
+    }
+
+    val allFilters: List<Filter>
+        get() {
+            val db = readableDatabase
+            val projection = filterProjection
+            val selection = ""
+            val selectionArgs = arrayOf<String>()
+            val sortOrder = Filter.COLUMN_NAME_ID + " ASC"
+            val cursor = db.query(
+                    Filter.TABLE_NAME,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    null,
+                    null,
+                    sortOrder
+            )
+            val results: MutableList<Filter> = ArrayList()
+            while (cursor.moveToNext()) {
+                results.add(filterFromCursor(cursor))
+            }
+            cursor.close()
+            db.close()
+            return results
+        }
+
+    fun getFilter(id: Long): Filter? {
+        val db = readableDatabase
+        val projection = filterProjection
+        val selection = Filter.COLUMN_NAME_ID + " LIKE ?"
+        val selectionArgs = arrayOf(id.toString())
+        val sortOrder = Filter.COLUMN_NAME_ID + " ASC"
+        val cursor = db.query(
+                Filter.TABLE_NAME,
+                projection,
+                selection,
+                selectionArgs,
+                null,
+                null,
+                sortOrder
+        )
+        val results: MutableList<Filter> = ArrayList()
+        while (cursor.moveToNext()) {
+            results.add(filterFromCursor(cursor))
+        }
+        cursor.close()
+        db.close()
+        return if (results.size == 0) {
+            null
+        } else results[0]
+    }
+
+    fun createFilter(filterToStore: Filter, withId: Boolean = false): Filter {
+        val db = writableDatabase
+        val newRowId = db.insertOrThrow(Filter.TABLE_NAME, null, if(withId) getFilterContentValuesWithID(filterToStore) else getFilterContentValues(filterToStore))
+        db.close()
+        filterToStore.id = newRowId
+        return filterToStore
+    }
+
+    fun updateFilter(filterToUpdate: Filter) {
+        val db = writableDatabase
+        db.update(
+                Filter.TABLE_NAME,
+                getFilterContentValuesWithID(filterToUpdate),
+                Filter.COLUMN_NAME_ID + " = ?",
+                arrayOf(filterToUpdate.id.toString())
+        )
+        db.close()
+    }
+
+    fun deleteFilter(id: Long): Int {
+        val db = writableDatabase
+        val selection = Filter.COLUMN_NAME_ID + " LIKE ?"
+        val selectionArgs = arrayOf(id.toString())
+        val retcode = db.delete(Filter.TABLE_NAME, selection, selectionArgs)
+        db.close()
+        return retcode
+    }
+
+    private fun getFilterContentValuesWithID(t: Filter): ContentValues {
+        val values = getFilterContentValues(t)
+        values.put(Filter.COLUMN_NAME_ID, t.id)
+        return values
+    }
+
+    private fun getFilterContentValues(t: Filter): ContentValues {
+        val values = ContentValues()
+        values.put(Filter.COLUMN_NAME_TITLE, t.title)
+        values.put(Filter.COLUMN_NAME_FILTERS, t.getFiltersRaw())
+        return values
+    }
+
+    private val filterProjection: Array<String>
+        private get() = arrayOf(
+                Filter.COLUMN_NAME_ID,
+                Filter.COLUMN_NAME_TITLE,
+                Filter.COLUMN_NAME_FILTERS,
+        )
+
+    private fun filterFromCursor(cursor: Cursor): Filter {
+        val filter = Filter(cursor.getLong(0))
+        filter.title = cursor.getString(1)
+        filter.setFiltersRaw(cursor.getString(2))
+        return filter
+    }
+
+    fun deleteEveryting() {
+        for (trigger in allTrigger) {
+            deleteTrigger(trigger.id)
+        }
+        for (task in allTasks) {
+            deleteTask(task.id)
+        }
+        for (filter in allFilters) {
+            deleteFilter(filter.id)
+        }
+    }
+
+    /** A failed insert rolls back every delete and insert in the restore. */
+    fun replaceAll(tasks: List<Task>, filters: List<Filter>, triggers: List<Trigger>) {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            db.delete(Trigger.TABLE_NAME, null, null)
+            db.delete(Task.TABLE_NAME, null, null)
+            db.delete(Filter.TABLE_NAME, null, null)
+            for (filter in filters) db.insertOrThrow(Filter.TABLE_NAME, null, getFilterContentValuesWithID(filter))
+            for (task in tasks) db.insertOrThrow(Task.TABLE_NAME, null, getTaskContentValuesWithID(task))
+            for (trigger in triggers) db.insertOrThrow(Trigger.TABLE_NAME, null, getTriggerContentValuesWithID(trigger))
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+            db.close()
+        }
+    }
+
+    private fun getBoolean(cursor: Cursor, cursorid: Int): Boolean {
+        return when(cursor.getInt(cursorid)){
+            0 -> false
+            1 -> true
+            else -> true
+        }
+    }
+}

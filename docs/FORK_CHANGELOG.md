@@ -4,6 +4,31 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.1.2-rc.1 — ProtonBridge identity and listing performance
+
+Pin the reviewed [rclone performance fix](https://github.com/Rareities/rclone/commit/de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e)
+and increase versionName/base versionCode to 1.1.2-rc.1 / 120. Fresh Proton
+listings reuse the verified folder key for child attributes, avoiding repeated
+ancestor fetch/decrypt work per file while keeping authentication, collision
+checks and unknown-size handling. Tests include real signed/encrypted data,
+fresh second listings, corrupt metadata, cancellation and concurrent scans.
+
+A 20-file localhost fixture showed 42 → 2 ancestor GETs and 2.047 → 0.712 seconds
+per scan. This is not a measured Android or live-Proton speedup; small-file
+transfer overhead still needs profiling. Backend, bridge/authentication and
+bisync race tests passed, the host CLI built, and independent review passed.
+The signed pipeline validates Android engines, app tests/lint and APK identity.
+
+Rebrand this personal fork as ProtonBridge, with package/namespace
+`io.github.rareities.protonbridge`, new bridge/bisync icons, matching debug identity,
+updater/support links and startup/About fork purpose and disclaimer. Preserve
+upstream attribution and historical release/audit records. This is a separate
+installation from CloudBridge; permissions and task approval must be established
+in the new app. The release validator recognizes historical CloudBridge version
+properties when checking prior APK version codes.
+
+See [release notes](releases/v1.1.2-rc.1.md) for scope and validation limits.
+
 ## 1.1.1-rc.1 — safety and bisync follow-up
 
 

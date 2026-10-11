@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo CloudBridge Build Script
+echo ProtonBridge Build Script
 echo Session Guardian Edition
 echo ========================================
 echo.

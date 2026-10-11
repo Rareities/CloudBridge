@@ -18,7 +18,7 @@
         errorLine1="                return t1.getName().toLowerCase().compareTo(fileItem.getName().toLowerCase());"
         errorLine2="                                    ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="20"
             column="37"/>
     </issue>
@@ -29,7 +29,7 @@
         errorLine1="                return t1.getName().toLowerCase().compareTo(fileItem.getName().toLowerCase());"
         errorLine2="                                                                               ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="20"
             column="80"/>
     </issue>
@@ -40,7 +40,7 @@
         errorLine1="                return fileItem.getName().toLowerCase().compareTo(t1.getName().toLowerCase());"
         errorLine2="                                          ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="34"
             column="43"/>
     </issue>
@@ -51,7 +51,7 @@
         errorLine1="                return fileItem.getName().toLowerCase().compareTo(t1.getName().toLowerCase());"
         errorLine2="                                                                               ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="34"
             column="80"/>
     </issue>
@@ -62,7 +62,7 @@
         errorLine1="            return t1.getName().toLowerCase().compareTo(file.getName().toLowerCase());"
         errorLine2="                                ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="113"
             column="33"/>
     </issue>
@@ -73,7 +73,7 @@
         errorLine1="            return t1.getName().toLowerCase().compareTo(file.getName().toLowerCase());"
         errorLine2="                                                                       ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="113"
             column="72"/>
     </issue>
@@ -84,7 +84,7 @@
         errorLine1="            return o1.getName().toLowerCase().compareTo(o2.getName().toLowerCase());"
         errorLine2="                                ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="127"
             column="33"/>
     </issue>
@@ -95,7 +95,7 @@
         errorLine1="            return o1.getName().toLowerCase().compareTo(o2.getName().toLowerCase());"
         errorLine2="                                                                     ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="127"
             column="70"/>
     </issue>
@@ -106,7 +106,7 @@
         errorLine1="                return o1.getName().toLowerCase().compareTo(o2.getName().toLowerCase());"
         errorLine2="                                    ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="142"
             column="37"/>
     </issue>
@@ -117,7 +117,7 @@
         errorLine1="                return o1.getName().toLowerCase().compareTo(o2.getName().toLowerCase());"
         errorLine2="                                                                         ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="142"
             column="74"/>
     </issue>
@@ -128,7 +128,7 @@
         errorLine1="                return o1.getName().toLowerCase().compareTo(o2.getName().toLowerCase());"
         errorLine2="                                    ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="160"
             column="37"/>
     </issue>
@@ -139,7 +139,7 @@
         errorLine1="                return o1.getName().toLowerCase().compareTo(o2.getName().toLowerCase());"
         errorLine2="                                                                         ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FileComparators.java"
+            file="src/main/java/io/github/rareities/protonbridge/FileComparators.java"
             line="160"
             column="74"/>
     </issue>
@@ -150,7 +150,7 @@
         errorLine1="            String fileName = item.getName().toLowerCase();"
         errorLine2="                                             ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="883"
             column="46"/>
     </issue>
@@ -161,7 +161,7 @@
         errorLine1="            if (fileName.contains(search.toLowerCase())) {"
         errorLine2="                                         ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="884"
             column="42"/>
     </issue>
@@ -172,7 +172,7 @@
         errorLine1="            String fileName = item.getName().toLowerCase();"
         errorLine2="                                             ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="510"
             column="46"/>
     </issue>
@@ -183,7 +183,7 @@
         errorLine1="            if (fileName.contains(search.toLowerCase())) {"
         errorLine2="                                         ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="511"
             column="42"/>
     </issue>
@@ -194,7 +194,7 @@
         errorLine1="        return getDisplayName().toLowerCase().compareTo(remoteItem.getDisplayName().toLowerCase());"
         errorLine2="                                ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Items/RemoteItem.java"
+            file="src/main/java/io/github/rareities/protonbridge/Items/RemoteItem.java"
             line="419"
             column="33"/>
     </issue>
@@ -205,7 +205,7 @@
         errorLine1="        return getDisplayName().toLowerCase().compareTo(remoteItem.getDisplayName().toLowerCase());"
         errorLine2="                                                                                    ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Items/RemoteItem.java"
+            file="src/main/java/io/github/rareities/protonbridge/Items/RemoteItem.java"
             line="419"
             column="85"/>
     </issue>
@@ -216,7 +216,7 @@
         errorLine1="            String[] terms = search.toLowerCase().split(&quot; &quot;);"
         errorLine2="                                    ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/VirtualContentProvider.java"
+            file="src/main/java/io/github/rareities/protonbridge/VirtualContentProvider.java"
             line="1457"
             column="37"/>
     </issue>
@@ -227,7 +227,7 @@
         errorLine1="                    if (path.toLowerCase().contains(terms[i])) {"
         errorLine2="                             ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/VirtualContentProvider.java"
+            file="src/main/java/io/github/rareities/protonbridge/VirtualContentProvider.java"
             line="1466"
             column="30"/>
     </issue>
@@ -238,7 +238,7 @@
         errorLine1="            String normalizedSearch = searchTerm.toLowerCase().trim();"
         errorLine2="                                                 ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/VirtualContentProvider.java"
+            file="src/main/java/io/github/rareities/protonbridge/VirtualContentProvider.java"
             line="1521"
             column="50"/>
     </issue>
@@ -377,7 +377,7 @@
         errorLine1="            return Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)"
         errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="32"
             column="27"/>
     </issue>
@@ -388,7 +388,7 @@
         errorLine1="                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)"
         errorLine2="                          ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="34"
             column="27"/>
     </issue>
@@ -399,7 +399,7 @@
         errorLine1="        val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)"
         errorLine2="                            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="110"
             column="29"/>
     </issue>
@@ -410,7 +410,7 @@
         errorLine1="                NotificationManager.IMPORTANCE_LOW,"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Services/StreamingService.java"
+            file="src/main/java/io/github/rareities/protonbridge/Services/StreamingService.java"
             line="142"
             column="17"/>
     </issue>
@@ -421,7 +421,7 @@
         errorLine1="            setForegroundAsync(ForegroundInfo(ongoingNotificationID, it, FOREGROUND_SERVICE_TYPE_DATA_SYNC))"
         errorLine2="                                                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/workmanager/SyncWorker.kt"
+            file="src/main/java/io/github/rareities/protonbridge/workmanager/SyncWorker.kt"
             line="412"
             column="74"/>
     </issue>
@@ -432,7 +432,7 @@
         errorLine1="        appShortcutIds.remove(id);"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/AppShortcutsHelper.java"
+            file="src/main/java/io/github/rareities/protonbridge/AppShortcutsHelper.java"
             line="118"
             column="9"/>
     </issue>
@@ -443,7 +443,7 @@
         errorLine1="                renamed.remove(remote);"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="855"
             column="17"/>
     </issue>
@@ -454,7 +454,7 @@
         errorLine1="            renamedRemotes.add(id);"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="948"
             column="13"/>
     </issue>
@@ -465,7 +465,7 @@
         errorLine1="            pinnedRemotes.add(id);"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="949"
             column="13"/>
     </issue>
@@ -476,7 +476,7 @@
         errorLine1="            generatedRemotes.add(id);"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="950"
             column="13"/>
     </issue>
@@ -487,7 +487,7 @@
         errorLine1="            renamedRemotes.add(remoteItem.getName());"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemotesFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemotesFragment.java"
             line="503"
             column="13"/>
     </issue>
@@ -498,7 +498,7 @@
         errorLine1="                pinnedRemotes.remove(remoteItem.getName());"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemotesFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemotesFragment.java"
             line="555"
             column="17"/>
     </issue>
@@ -509,7 +509,7 @@
         errorLine1="                hiddenRemotes.remove(remoteItem.getName());"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemotesFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemotesFragment.java"
             line="562"
             column="17"/>
     </issue>
@@ -520,7 +520,7 @@
         errorLine1="                drawerPinnedRemote.remove(remoteItem.getName());"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemotesFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemotesFragment.java"
             line="571"
             column="17"/>
     </issue>
@@ -531,7 +531,7 @@
         errorLine1="            val finished = createProc.waitFor(1, java.util.concurrent.TimeUnit.MINUTES)"
         errorLine2="                                      ~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RemoteConfig/ConfigCreate.kt"
+            file="src/main/java/io/github/rareities/protonbridge/RemoteConfig/ConfigCreate.kt"
             line="118"
             column="39"/>
     </issue>
@@ -542,7 +542,7 @@
         errorLine1="            createProc.destroyForcibly()"
         errorLine2="                       ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RemoteConfig/ConfigCreate.kt"
+            file="src/main/java/io/github/rareities/protonbridge/RemoteConfig/ConfigCreate.kt"
             line="123"
             column="24"/>
     </issue>
@@ -553,7 +553,7 @@
         errorLine1="            val completed = proc.waitFor(5, java.util.concurrent.TimeUnit.MINUTES)"
         errorLine2="                                 ~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RemoteConfig/ConfigCreate.kt"
+            file="src/main/java/io/github/rareities/protonbridge/RemoteConfig/ConfigCreate.kt"
             line="216"
             column="34"/>
     </issue>
@@ -564,7 +564,7 @@
         errorLine1="                proc.destroyForcibly()"
         errorLine2="                     ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RemoteConfig/ConfigCreate.kt"
+            file="src/main/java/io/github/rareities/protonbridge/RemoteConfig/ConfigCreate.kt"
             line="222"
             column="22"/>
     </issue>
@@ -575,7 +575,7 @@
         errorLine1="            proc.destroyForcibly()"
         errorLine2="                 ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RemoteConfig/ConfigCreate.kt"
+            file="src/main/java/io/github/rareities/protonbridge/RemoteConfig/ConfigCreate.kt"
             line="231"
             column="18"/>
     </issue>
@@ -597,7 +597,7 @@
         errorLine1="            String timeFormattedFull = new SimpleDateFormat(&quot;dd.MM.yyyy - HH:mm:ss&quot;).format(df);"
         errorLine2="                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/LogRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/LogRecyclerViewAdapter.java"
             line="51"
             column="40"/>
     </issue>
@@ -608,7 +608,7 @@
         errorLine1="        SimpleDateFormat date = new SimpleDateFormat(&quot;yyyy-MM-dd_HHmmss&quot;);"
         errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="564"
             column="33"/>
     </issue>
@@ -619,7 +619,7 @@
         errorLine1="                mContext.getSystemService(Context.WIFI_SERVICE) as WifiManager? ?: return false"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/WifiConnectivitiyUtil.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/WifiConnectivitiyUtil.kt"
             line="27"
             column="17"/>
     </issue>
@@ -630,7 +630,7 @@
         errorLine1="            Context context = webView.getContext();"
         errorLine2="                              ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/MarkdownView.java"
+            file="src/main/java/io/github/rareities/protonbridge/util/MarkdownView.java"
             line="69"
             column="31"/>
     </issue>
@@ -641,7 +641,7 @@
         errorLine1="        conf.setLocale(locale);"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RuntimeConfiguration.java"
+            file="src/main/java/io/github/rareities/protonbridge/RuntimeConfiguration.java"
             line="57"
             column="9"/>
     </issue>
@@ -652,7 +652,7 @@
         errorLine1="        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)"
         errorLine2="                                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="116"
             column="38"/>
     </issue>
@@ -663,7 +663,7 @@
         errorLine1="        view = inflater.inflate(R.layout.dialog_file_properties, null);"
         errorLine2="                                                                 ~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/FilePropertiesDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/FilePropertiesDialog.java"
             line="65"
             column="66"/>
     </issue>
@@ -674,7 +674,7 @@
         errorLine1="        view = inflater.inflate(R.layout.dialog_open_as, null);"
         errorLine2="                                                         ~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/OpenAsDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/OpenAsDialog.java"
             line="45"
             column="58"/>
     </issue>
@@ -685,7 +685,7 @@
         errorLine1="        view = inflater.inflate(R.layout.dialog_remote_properties, null);"
         errorLine2="                                                                   ~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/RemotePropertiesDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/RemotePropertiesDialog.java"
             line="89"
             column="68"/>
     </issue>
@@ -696,7 +696,7 @@
         errorLine1="        view = layoutInflater.inflate(R.layout.dialog_sort, null);"
         errorLine2="                                                            ~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/SortDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/SortDialog.java"
             line="59"
             column="61"/>
     </issue>
@@ -718,7 +718,7 @@
         errorLine1="                case R.id.fab_add_folder:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="306"
             column="22"/>
     </issue>
@@ -729,7 +729,7 @@
         errorLine1="                case R.id.fab_upload:"
         errorLine2="                     ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="309"
             column="22"/>
     </issue>
@@ -740,7 +740,7 @@
         errorLine1="            case R.id.action_sort:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="636"
             column="18"/>
     </issue>
@@ -751,7 +751,7 @@
         errorLine1="            case R.id.action_select_all:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="639"
             column="18"/>
     </issue>
@@ -762,7 +762,7 @@
         errorLine1="            case R.id.action_serve:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="642"
             column="18"/>
     </issue>
@@ -773,7 +773,7 @@
         errorLine1="            case R.id.action_empty_trash:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="645"
             column="18"/>
     </issue>
@@ -784,7 +784,7 @@
         errorLine1="            case R.id.action_link:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="648"
             column="18"/>
     </issue>
@@ -795,7 +795,7 @@
         errorLine1="            case R.id.action_sync:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="651"
             column="18"/>
     </issue>
@@ -806,7 +806,7 @@
         errorLine1="            case R.id.action_go_to:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="654"
             column="18"/>
     </issue>
@@ -817,7 +817,7 @@
         errorLine1="            case R.id.radio_sort_name:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1002"
             column="18"/>
     </issue>
@@ -828,7 +828,7 @@
         errorLine1="            case R.id.radio_sort_date:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1011"
             column="18"/>
     </issue>
@@ -839,7 +839,7 @@
         errorLine1="            case R.id.radio_sort_size:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1020"
             column="18"/>
     </issue>
@@ -850,7 +850,7 @@
         errorLine1="                case R.id.action_file_properties:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1280"
             column="22"/>
     </issue>
@@ -861,7 +861,7 @@
         errorLine1="                case R.id.action_open_as:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1283"
             column="22"/>
     </issue>
@@ -872,7 +872,7 @@
         errorLine1="                case R.id.action_serve:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1286"
             column="22"/>
     </issue>
@@ -883,7 +883,7 @@
         errorLine1="                case R.id.action_download:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1314"
             column="22"/>
     </issue>
@@ -894,7 +894,7 @@
         errorLine1="                case R.id.action_move:"
         errorLine2="                     ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1319"
             column="22"/>
     </issue>
@@ -905,7 +905,7 @@
         errorLine1="                case R.id.action_rename:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1322"
             column="22"/>
     </issue>
@@ -916,7 +916,7 @@
         errorLine1="                case R.id.action_delete:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1326"
             column="22"/>
     </issue>
@@ -927,7 +927,7 @@
         errorLine1="                case R.id.action_link:"
         errorLine2="                     ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1329"
             column="22"/>
     </issue>
@@ -938,7 +938,7 @@
         errorLine1="                case R.id.action_sync:"
         errorLine2="                     ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/FileExplorerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/FileExplorerFragment.java"
             line="1332"
             column="22"/>
     </issue>
@@ -949,7 +949,7 @@
         errorLine1="            case R.id.action_select_all:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FilePicker.java"
+            file="src/main/java/io/github/rareities/protonbridge/FilePicker.java"
             line="210"
             column="18"/>
     </issue>
@@ -960,7 +960,7 @@
         errorLine1="            case R.id.action_sort:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FilePicker.java"
+            file="src/main/java/io/github/rareities/protonbridge/FilePicker.java"
             line="213"
             column="18"/>
     </issue>
@@ -971,7 +971,7 @@
         errorLine1="            case R.id.action_new_folder:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FilePicker.java"
+            file="src/main/java/io/github/rareities/protonbridge/FilePicker.java"
             line="216"
             column="18"/>
     </issue>
@@ -982,7 +982,7 @@
         errorLine1="            case R.id.action_storage:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FilePicker.java"
+            file="src/main/java/io/github/rareities/protonbridge/FilePicker.java"
             line="219"
             column="18"/>
     </issue>
@@ -993,7 +993,7 @@
         errorLine1="            case R.id.radio_sort_name:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FilePicker.java"
+            file="src/main/java/io/github/rareities/protonbridge/FilePicker.java"
             line="418"
             column="18"/>
     </issue>
@@ -1004,7 +1004,7 @@
         errorLine1="            case R.id.radio_sort_date:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FilePicker.java"
+            file="src/main/java/io/github/rareities/protonbridge/FilePicker.java"
             line="427"
             column="18"/>
     </issue>
@@ -1015,7 +1015,7 @@
         errorLine1="            case R.id.radio_sort_size:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/FilePicker.java"
+            file="src/main/java/io/github/rareities/protonbridge/FilePicker.java"
             line="436"
             column="18"/>
     </issue>
@@ -1026,7 +1026,7 @@
         errorLine1="            case R.id.nav_remotes:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="370"
             column="18"/>
     </issue>
@@ -1037,7 +1037,7 @@
         errorLine1="            case R.id.nav_import:"
         errorLine2="                 ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="377"
             column="18"/>
     </issue>
@@ -1048,7 +1048,7 @@
         errorLine1="            case R.id.nav_remotes:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="391"
             column="18"/>
     </issue>
@@ -1059,7 +1059,7 @@
         errorLine1="            case R.id.nav_tasks:"
         errorLine2="                 ~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="394"
             column="18"/>
     </issue>
@@ -1070,7 +1070,7 @@
         errorLine1="            case R.id.nav_trigger:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="397"
             column="18"/>
     </issue>
@@ -1081,7 +1081,7 @@
         errorLine1="            case R.id.nav_logs:"
         errorLine2="                 ~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="400"
             column="18"/>
     </issue>
@@ -1092,7 +1092,7 @@
         errorLine1="            case R.id.nav_permissions:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="403"
             column="18"/>
     </issue>
@@ -1103,7 +1103,7 @@
         errorLine1="            case R.id.action_search:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="404"
             column="18"/>
     </issue>
@@ -1114,7 +1114,7 @@
         errorLine1="            case R.id.action_sort:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="407"
             column="18"/>
     </issue>
@@ -1125,7 +1125,7 @@
         errorLine1="            case R.id.action_go_to:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="410"
             column="18"/>
     </issue>
@@ -1136,7 +1136,7 @@
         errorLine1="            case R.id.action_new_folder:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="413"
             column="18"/>
     </issue>
@@ -1147,7 +1147,7 @@
         errorLine1="            case R.id.radio_sort_name:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="575"
             column="18"/>
     </issue>
@@ -1158,7 +1158,7 @@
         errorLine1="            case R.id.radio_sort_date:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="584"
             column="18"/>
     </issue>
@@ -1169,7 +1169,7 @@
         errorLine1="            case R.id.radio_sort_size:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemoteFolderPickerFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemoteFolderPickerFragment.java"
             line="593"
             column="18"/>
     </issue>
@@ -1180,7 +1180,7 @@
         errorLine1="            case R.id.action_hidden_remotes:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/RemotesFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/RemotesFragment.java"
             line="200"
             column="18"/>
     </issue>
@@ -1191,7 +1191,7 @@
         errorLine1="            case R.id.radio_ftp:"
         errorLine2="                 ~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/ServeDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/ServeDialog.java"
             line="136"
             column="18"/>
     </issue>
@@ -1202,7 +1202,7 @@
         errorLine1="            case R.id.radio_dlna:"
         errorLine2="                 ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/ServeDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/ServeDialog.java"
             line="139"
             column="18"/>
     </issue>
@@ -1213,7 +1213,7 @@
         errorLine1="            case R.id.radio_webdav:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/ServeDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/ServeDialog.java"
             line="142"
             column="18"/>
     </issue>
@@ -1224,7 +1224,7 @@
         errorLine1="            case R.id.radio_http:"
         errorLine2="                 ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/ServeDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/ServeDialog.java"
             line="145"
             column="18"/>
     </issue>
@@ -1235,7 +1235,7 @@
         errorLine1="            case R.id.action_sort:"
         errorLine2="                 ~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/ShareFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/ShareFragment.java"
             line="195"
             column="18"/>
     </issue>
@@ -1246,7 +1246,7 @@
         errorLine1="            case R.id.radio_sort_name:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/ShareFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/ShareFragment.java"
             line="383"
             column="18"/>
     </issue>
@@ -1257,7 +1257,7 @@
         errorLine1="            case R.id.radio_sort_date:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/ShareFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/ShareFragment.java"
             line="392"
             column="18"/>
     </issue>
@@ -1268,7 +1268,7 @@
         errorLine1="            case R.id.radio_sort_size:"
         errorLine2="                 ~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/ShareFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/ShareFragment.java"
             line="401"
             column="18"/>
     </issue>
@@ -1279,7 +1279,7 @@
         errorLine1="                case R.id.action_start_task:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="172"
             column="22"/>
     </issue>
@@ -1290,7 +1290,7 @@
         errorLine1="                case R.id.action_edit_task:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="175"
             column="22"/>
     </issue>
@@ -1301,7 +1301,7 @@
         errorLine1="                case R.id.action_copy_task:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="178"
             column="22"/>
     </issue>
@@ -1312,7 +1312,7 @@
         errorLine1="                case R.id.action_delete_task:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="181"
             column="22"/>
     </issue>
@@ -1323,7 +1323,7 @@
         errorLine1="                case R.id.action_copy_id_task:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="186"
             column="22"/>
     </issue>
@@ -1334,7 +1334,7 @@
         errorLine1="                case R.id.action_add_to_home_screen:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="193"
             column="22"/>
     </issue>
@@ -1345,7 +1345,7 @@
         errorLine1="                case R.id.action_edit_trigger:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
             line="170"
             column="22"/>
     </issue>
@@ -1356,7 +1356,7 @@
         errorLine1="                case R.id.action_copy_trigger:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
             line="173"
             column="22"/>
     </issue>
@@ -1367,7 +1367,7 @@
         errorLine1="                case R.id.action_delete_trigger:"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
             line="176"
             column="22"/>
     </issue>
@@ -1378,7 +1378,7 @@
         errorLine1="        if (intent.resolveActivity(getPackageManager()) != null) {"
         errorLine2="                   ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/AboutLibsActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/AboutLibsActivity.java"
             line="142"
             column="20"/>
     </issue>
@@ -1389,7 +1389,7 @@
         errorLine1="            if (intent.resolveActivity(requireContext().packageManager) != null) {"
         errorLine2="                       ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/NotificationPreferencesFragment.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/NotificationPreferencesFragment.kt"
             line="44"
             column="24"/>
     </issue>
@@ -1411,7 +1411,7 @@
         errorLine1="    private Switch safEnabledSwitch;"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="49"
             column="5"/>
     </issue>
@@ -1422,7 +1422,7 @@
         errorLine1="    private Switch vcpEnabledSwitch;"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="51"
             column="5"/>
     </issue>
@@ -1433,7 +1433,7 @@
         errorLine1="    private Switch vcpDeclareLocalSwitch;"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="53"
             column="5"/>
     </issue>
@@ -1444,7 +1444,7 @@
         errorLine1="    private Switch refreshLaSwitch;"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="59"
             column="5"/>
     </issue>
@@ -1455,7 +1455,7 @@
         errorLine1="    private Switch vcpGrantAllSwitch;"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="62"
             column="5"/>
     </issue>
@@ -1466,7 +1466,7 @@
         errorLine1="    private lateinit var switchWifi: Switch"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/TaskActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/TaskActivity.kt"
             line="51"
             column="5"/>
     </issue>
@@ -1477,7 +1477,7 @@
         errorLine1="    private lateinit var switchMD5sum: Switch"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/TaskActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/TaskActivity.kt"
             line="52"
             column="5"/>
     </issue>
@@ -1488,7 +1488,7 @@
         errorLine1="    private lateinit var switchDeleteExcluded: Switch"
         errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/TaskActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/TaskActivity.kt"
             line="57"
             column="5"/>
     </issue>
@@ -1928,7 +1928,7 @@
         errorLine1="            ((FragmentActivity)context).setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_USER_PORTRAIT);"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Fragments/ShareFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Fragments/ShareFragment.java"
             line="177"
             column="13"/>
     </issue>
@@ -1961,7 +1961,7 @@
         errorLine1="        holder.ivIcon.setImageDrawable(view.getResources().getDrawable(icon));"
         errorLine2="                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/RemotesRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/RemotesRecyclerViewAdapter.java"
             line="54"
             column="40"/>
     </issue>
@@ -1972,7 +1972,7 @@
         errorLine1="        holder.ivIcon.setImageDrawable(view.getResources().getDrawable(icon));"
         errorLine2="                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/ShareRemotesRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/ShareRemotesRecyclerViewAdapter.java"
             line="46"
             column="40"/>
     </issue>
@@ -2222,7 +2222,7 @@
     <issue
         id="MissingTranslation"
         message="&quot;session_expired_notification_title&quot; is not translated in &quot;de&quot; (German), &quot;ca&quot; (Catalan), &quot;zh&quot; (Chinese)"
-        errorLine1="    &lt;string name=&quot;session_expired_notification_title&quot;>CloudBridge: Session expired&lt;/string>"
+        errorLine1="    &lt;string name=&quot;session_expired_notification_title&quot;>ProtonBridge: Session expired&lt;/string>"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
             file="src/main/res/values/strings.xml"
@@ -3671,7 +3671,7 @@
         errorLine1="            notifyDataSetChanged();"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="330"
             column="13"/>
     </issue>
@@ -3682,7 +3682,7 @@
         errorLine1="            notifyDataSetChanged();"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="338"
             column="13"/>
     </issue>
@@ -3693,7 +3693,7 @@
         errorLine1="            notifyDataSetChanged();"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/FileAccessSettingsFragment.java"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/FileAccessSettingsFragment.java"
             line="343"
             column="13"/>
     </issue>
@@ -3704,7 +3704,7 @@
         errorLine1="            notifyDataSetChanged();"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
             line="281"
             column="13"/>
     </issue>
@@ -3715,7 +3715,7 @@
         errorLine1="            notifyDataSetChanged();"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
             line="333"
             column="13"/>
     </issue>
@@ -3726,7 +3726,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
             line="340"
             column="9"/>
     </issue>
@@ -3737,7 +3737,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
             line="354"
             column="9"/>
     </issue>
@@ -3748,7 +3748,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
             line="416"
             column="9"/>
     </issue>
@@ -3759,7 +3759,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
             line="423"
             column="9"/>
     </issue>
@@ -3770,7 +3770,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FileExplorerRecyclerViewAdapter.java"
             line="449"
             column="9"/>
     </issue>
@@ -3781,7 +3781,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FilePickerAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FilePickerAdapter.java"
             line="153"
             column="9"/>
     </issue>
@@ -3792,7 +3792,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FilePickerAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FilePickerAdapter.java"
             line="159"
             column="9"/>
     </issue>
@@ -3803,7 +3803,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FilePickerAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FilePickerAdapter.java"
             line="168"
             column="9"/>
     </issue>
@@ -3814,7 +3814,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/FilePickerAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/FilePickerAdapter.java"
             line="179"
             column="9"/>
     </issue>
@@ -3825,7 +3825,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/LogRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/LogRecyclerViewAdapter.java"
             line="98"
             column="9"/>
     </issue>
@@ -3836,7 +3836,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/RemotesRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/RemotesRecyclerViewAdapter.java"
             line="73"
             column="9"/>
     </issue>
@@ -3847,7 +3847,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="130"
             column="9"/>
     </issue>
@@ -3858,7 +3858,7 @@
         errorLine1="                    notifyDataSetChanged();"
         errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TasksRecyclerViewAdapter.java"
             line="183"
             column="21"/>
     </issue>
@@ -3869,7 +3869,7 @@
         errorLine1="        notifyDataSetChanged();"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
+            file="src/main/java/io/github/rareities/protonbridge/RecyclerViewAdapters/TriggerRecyclerViewAdapter.java"
             line="140"
             column="9"/>
     </issue>
@@ -3880,7 +3880,7 @@
         errorLine1="            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
         errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/FlagsUtil.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/FlagsUtil.kt"
             line="11"
             column="24"/>
     </issue>
@@ -3891,7 +3891,7 @@
         errorLine1="            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
         errorLine2="                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/FlagsUtil.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/FlagsUtil.kt"
             line="19"
             column="24"/>
     </issue>
@@ -3902,7 +3902,7 @@
         errorLine1="        if (Build.VERSION.SDK_INT == 22 || Build.VERSION.SDK_INT == 23) {"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/MarkdownView.java"
+            file="src/main/java/io/github/rareities/protonbridge/util/MarkdownView.java"
             line="46"
             column="13"/>
     </issue>
@@ -3913,7 +3913,7 @@
         errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Services/RcdService.java"
+            file="src/main/java/io/github/rareities/protonbridge/Services/RcdService.java"
             line="82"
             column="13"/>
     </issue>
@@ -3924,7 +3924,7 @@
         errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Services/RcdService.java"
+            file="src/main/java/io/github/rareities/protonbridge/Services/RcdService.java"
             line="296"
             column="13"/>
     </issue>
@@ -3935,7 +3935,7 @@
         errorLine1="        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP"
         errorLine2="               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RuntimeConfiguration.java"
+            file="src/main/java/io/github/rareities/protonbridge/RuntimeConfiguration.java"
             line="65"
             column="16"/>
     </issue>
@@ -3946,7 +3946,7 @@
         errorLine1="        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Services/StreamingService.java"
+            file="src/main/java/io/github/rareities/protonbridge/Services/StreamingService.java"
             line="72"
             column="13"/>
     </issue>
@@ -3968,18 +3968,18 @@
         errorLine1="            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/WifiConnectivitiyUtil.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/WifiConnectivitiyUtil.kt"
             line="43"
             column="17"/>
     </issue>
 
     <issue
         id="StaticFieldLeak"
-        message="This `AsyncTask` class should be static or leaks might occur (ca.pkay.rcloneexplorer.Activities.MainActivity.RefreshLocalAliases)"
+        message="This `AsyncTask` class should be static or leaks might occur (io.github.rareities.protonbridge.Activities.MainActivity.RefreshLocalAliases)"
         errorLine1="    private class RefreshLocalAliases extends AsyncTask&lt;Void, Void, Boolean> {"
         errorLine2="                  ~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/MainActivity.java"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/MainActivity.java"
             line="783"
             column="19"/>
     </issue>
@@ -3990,7 +3990,7 @@
         errorLine1="        private final WebView webView;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/MarkdownView.java"
+            file="src/main/java/io/github/rareities/protonbridge/util/MarkdownView.java"
             line="60"
             column="9"/>
     </issue>
@@ -4001,7 +4001,7 @@
         errorLine1="        private Context context;"
         errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Dialogs/RemotePropertiesDialog.java"
+            file="src/main/java/io/github/rareities/protonbridge/Dialogs/RemotePropertiesDialog.java"
             line="200"
             column="9"/>
     </issue>
@@ -5082,7 +5082,7 @@
         errorLine1="            sharedPreferences.edit().putLong(getString(R.string.pref_key_thumbnail_size_limit), size1).apply()"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/GeneralPreferencesFragment.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/GeneralPreferencesFragment.kt"
             line="89"
             column="13"/>
     </issue>
@@ -5093,7 +5093,7 @@
         errorLine1="        val editor = sharedPreferences.edit()"
         errorLine2="                     ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/GeneralPreferencesFragment.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/GeneralPreferencesFragment.kt"
             line="185"
             column="22"/>
     </issue>
@@ -5104,7 +5104,7 @@
         errorLine1="            mPreferences.edit().putBoolean(getString(R.string.pref_key_app_updates), false).apply()"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/OnboardingActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/OnboardingActivity.kt"
             line="87"
             column="13"/>
     </issue>
@@ -5115,7 +5115,7 @@
         errorLine1="        PreferenceManager.getDefaultSharedPreferences(this)"
         errorLine2="        ^">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/OnboardingActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/OnboardingActivity.kt"
             line="210"
             column="9"/>
     </issue>
@@ -5126,7 +5126,7 @@
         errorLine1="                mPreferences.edit().putBoolean(getString(R.string.pref_key_app_updates), isChecked).apply()"
         errorLine2="                ~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/OnboardingActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/OnboardingActivity.kt"
             line="270"
             column="17"/>
     </issue>
@@ -5137,7 +5137,7 @@
         errorLine1="        intent.data = Uri.parse(&quot;package:&quot; + mContext.packageName)"
         errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="111"
             column="23"/>
     </issue>
@@ -5148,7 +5148,7 @@
         errorLine1="        intent.data = Uri.parse(&quot;package:&quot; + mContext.packageName)"
         errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="111"
             column="23"/>
     </issue>
@@ -5159,7 +5159,7 @@
         errorLine1="        intent.data = Uri.parse(&quot;package:&quot; + mContext.packageName)"
         errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="117"
             column="23"/>
     </issue>
@@ -5170,7 +5170,7 @@
         errorLine1="        intent.data = Uri.parse(&quot;package:&quot; + mContext.packageName)"
         errorLine2="                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/PermissionManager.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/PermissionManager.kt"
             line="117"
             column="23"/>
     </issue>
@@ -5181,7 +5181,7 @@
         errorLine1="        if(mSearchBar.visibility == View.VISIBLE) {"
         errorLine2="           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/RemoteConfig/RemoteConfig.kt"
+            file="src/main/java/io/github/rareities/protonbridge/RemoteConfig/RemoteConfig.kt"
             line="161"
             column="12"/>
     </issue>
@@ -5192,7 +5192,7 @@
         errorLine1="            val sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context).edit()"
         errorLine2="                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/util/SharedPreferencesUtil.kt"
+            file="src/main/java/io/github/rareities/protonbridge/util/SharedPreferencesUtil.kt"
             line="11"
             column="37"/>
     </issue>
@@ -5203,7 +5203,7 @@
         errorLine1="        for (i in 0 until menu.size()) {"
         errorLine2="                          ~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/TaskActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/TaskActivity.kt"
             line="443"
             column="27"/>
     </issue>
@@ -5214,7 +5214,7 @@
         errorLine1="            val menuItem = menu.getItem(i)"
         errorLine2="                           ~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Activities/TaskActivity.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Activities/TaskActivity.kt"
             line="444"
             column="28"/>
     </issue>
@@ -5225,7 +5225,7 @@
         errorLine1="            sharedPreferences.edit()"
         errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~">
         <location
-            file="src/main/java/ca/pkay/rcloneexplorer/Settings/ThemingPreferencesFragment.kt"
+            file="src/main/java/io/github/rareities/protonbridge/Settings/ThemingPreferencesFragment.kt"
             line="24"
             column="13"/>
     </issue>

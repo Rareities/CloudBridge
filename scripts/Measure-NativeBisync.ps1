@@ -4,7 +4,7 @@
 param(
     [Parameter(Mandatory)][string]$OldBinary,
     [Parameter(Mandatory)][string]$NewBinary,
-    [string]$Evidence = (Join-Path ([IO.Path]::GetTempPath()) ('cloudbridge-benchmark-' + [Guid]::NewGuid().ToString('N'))),
+    [string]$Evidence = (Join-Path ([IO.Path]::GetTempPath()) ('protonbridge-benchmark-' + [Guid]::NewGuid().ToString('N'))),
     [int]$Repetitions = 3
 )
 

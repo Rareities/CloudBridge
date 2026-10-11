@@ -2,7 +2,7 @@
 # Run with PowerShell 7+: ./scripts/Verify-NativeListeners.ps1 -Binary <host-rclone>
 param(
     [Parameter(Mandatory)][string] $Binary,
-    [string] $Evidence = (Join-Path ([IO.Path]::GetTempPath()) ('cloudbridge-native-security-' + [Guid]::NewGuid().ToString('N')))
+    [string] $Evidence = (Join-Path ([IO.Path]::GetTempPath()) ('protonbridge-native-security-' + [Guid]::NewGuid().ToString('N')))
 )
 
 $ErrorActionPreference = 'Stop'

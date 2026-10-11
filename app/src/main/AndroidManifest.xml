@@ -24,7 +24,7 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
-        android:name="ca.pkay.rcloneexplorer.CloudBridgeApp"
+        android:name="io.github.rareities.protonbridge.ProtonBridgeApp"
         android:allowBackup="false"
         android:enableOnBackInvokedCallback="false"
         android:icon="${appIcon}"
@@ -37,7 +37,7 @@
         tools:ignore="GoogleAppIndexingWarning,MissingTvBanner"
         tools:targetApi="33">
         <receiver
-            android:name="de.schuelken.cloudbridge.updates.UpdateUserchoiceReceiver"
+            android:name="io.github.rareities.protonbridge.updates.UpdateUserchoiceReceiver"
             android:enabled="true"
             android:exported="false" />
 
@@ -131,7 +131,7 @@
         </provider>
 
         <!-- Disable the default WorkManager initializer so that the custom Configuration
-             provided by CloudBridgeApp is used (lazy initialization on first access). -->
+             provided by ProtonBridgeApp is used (lazy initialization on first access). -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"

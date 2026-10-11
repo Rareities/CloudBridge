@@ -1,12 +1,12 @@
-CloudBridge is a cloud file manager for Android, powered by rclone. It helps you to manage your files, everywhere you go, on your local device or on most cloud providers.
+ProtonBridge is an unofficial, personal Android project focused on two-way folder sync (bisync) with Proton Drive. It builds with a pinned, reviewed rclone beta fork and incorporates Proton Drive patches originating from OSS Singularities’ Proton Drive Linux project.
 
-* <b>File Management:</b> You can list, view, download, upload, move, rename, delete files and folders
-* <b>Streaming:</b> Stream media files, serve files and directories over FTP, HTTP, WebDAV or DLNA
-* <b>Syncing:</b> You can create tasks to automatically schedule syncs of your files
-* <b>Encryption:</b> Keep your files private on any cloud provider with 256 bit crypt remotes
-* <b>Many cloud providers:</b> Access most cloud storage providers via rclone config import, including Internxt and Drime
-* <b>Material Design:</b> Supports automatic dark theme in the style of Material 3
-* <b>Access everything:</b> Supports Storage Access Framework (SAF) for SD card and USB device access, regular storage devices and of course any cloud compatible with rclone
-* <b>Always up to date:</b> CloudBridge is regularly updated to the newest rclone version, so new providers and fixes arrive quickly
+* Folder bisync with preview, explicit initialisation and scheduled runs
+* Rclone file management: browse, upload, download, move and rename files
+* Support for other rclone cloud providers and encrypted remotes
+* Android storage access and automatic dark theme
 
-CloudBridge is free and open source software (GPLv3). Questions, feedback or feature ideas? You are welcome to write me at 136268370+thies2005@users.noreply.github.com, or open an issue or pull request on GitHub: https://github.com/thies2005/CloudBridge
+<b>DISCLAIMER: HEAVILY VIBE CODED.</b> This project was developed with extensive AI assistance by a maintainer with limited Android development experience. Use at your own risk, keep independent backups, and review the sync preview before initialisation. This is a personal project; issues, pull requests and feedback are welcome.
+
+ProtonBridge is independent of and not affiliated with Proton AG. It is a fork of thies2005’s CloudBridge, which descends from Round Sync by Felix Nüsse, RCX by x0b and rcloneExplorer by patrykcoding. Original authors and GPLv3 licensing are credited in the repository.
+
+Documentation, full changelog and support: https://github.com/Rareities/ProtonBridge

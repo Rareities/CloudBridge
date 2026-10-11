@@ -22,23 +22,23 @@ android {
             }
         }
     }
-    ndkVersion project.properties['de.schuelken.cloudbridge.ndkVersion']
+    ndkVersion project.properties['io.github.rareities.protonbridge.ndkVersion']
     defaultConfig {
         generatedDensities = []
         vectorDrawables.generatedDensities = []
-        applicationId 'de.schuelken.cloudbridge'
+        applicationId 'io.github.rareities.protonbridge'
         minSdkVersion 23
         compileSdk 36
         targetSdkVersion 36
         // Version and ABI-safe base code are promoted together in gradle.properties.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
-        versionCode project.property('de.schuelken.cloudbridge.versionCode').toInteger()
-        versionName project.property('de.schuelken.cloudbridge.versionName')
+        versionCode project.property('io.github.rareities.protonbridge.versionCode').toInteger()
+        versionName project.property('io.github.rareities.protonbridge.versionName')
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";
-        buildConfigField "java.lang.String", "RCLONE_SOURCE_SHA", "\"" + project.properties['de.schuelken.cloudbridge.rCloneRef'] + "\""
-        setProperty("archivesBaseName",  "cloudbridge_v"+versionName)
+        buildConfigField "java.lang.String", "RCLONE_SOURCE_SHA", "\"" + project.properties['io.github.rareities.protonbridge.rCloneRef'] + "\""
+        setProperty("archivesBaseName",  "protonbridge_v"+versionName)
 
         externalNativeBuild {
             ndkBuild {
@@ -144,8 +144,8 @@ android {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-DEBUG"
             buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + defaultConfig.applicationId + ".debug.vcp\"";
-            resValue("string", "app_name", "CB Debug")
-            resValue("string", "app_short_name", "CB Debug")
+            resValue("string", "app_name", "ProtonBridge Debug")
+            resValue("string", "app_short_name", "ProtonBridge Debug")
         }
     }
 
@@ -161,7 +161,7 @@ android {
         tasks.matching { it.name.startsWith('merge') &&
                 (it.name.endsWith('NativeLibs') || it.name.endsWith('JniLibFolders')) }.configureEach {
             dependsOn(':rclone:buildAll')
-            inputs.property('approvedNativeCommit', project.properties['de.schuelken.cloudbridge.rCloneRef'])
+            inputs.property('approvedNativeCommit', project.properties['io.github.rareities.protonbridge.rCloneRef'])
             inputs.files(fileTree('lib').matching { include '**/librclone.so' })
                     .withPropertyName('generatedRcloneBinaries')
         }
@@ -194,7 +194,7 @@ android {
         }.configureEach { dependsOn(releaseSigningCheck) }
     }
 
-    namespace 'ca.pkay.rcloneexplorer'
+    namespace 'io.github.rareities.protonbridge'
     testOptions {
         unitTests.includeAndroidResources = true
     }
@@ -225,7 +225,7 @@ tasks.register('verifyDebugApkEngines') {
                 def provenance = zip.getInputStream(record).withCloseable {
                     new groovy.json.JsonSlurper().parse(it)
                 }
-                if (provenance.commit != project.properties['de.schuelken.cloudbridge.rCloneRef'])
+                if (provenance.commit != project.properties['io.github.rareities.protonbridge.rCloneRef'])
                     throw new GradleException('Packaged engine source differs from the approved pin')
                 def libraries = java.util.Collections.list(zip.entries()).findAll { it.name ==~ /lib\/[^\/]+\/librclone\.so/ }
                 if (!(libraries.size() in [1,4])) throw new GradleException('Incomplete native APK contents')

@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if (-not $ExpectedEngineCommit) {
     $properties = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'gradle.properties')
-    $ExpectedEngineCommit = ($properties | Where-Object { $_ -match '^de\.schuelken\.cloudbridge\.rCloneRef=' }).Split('=')[1]
+    $ExpectedEngineCommit = ($properties | Where-Object { $_ -match '^io\.github\.rareities\.protonbridge\.rCloneRef=' }).Split('=')[1]
 }
 if ($ExpectedEngineCommit -notmatch '^[0-9a-f]{40}$') { throw 'An immutable expected engine SHA is required' }
 if (-not $SdkDirectory) { throw 'Set ANDROID_HOME or pass -SdkDirectory' }
@@ -28,7 +28,7 @@ $results = @(foreach ($apk in $apks) {
         if (!(Test-Path -LiteralPath $aapt)) { $aapt = Join-Path $SdkDirectory "build-tools/$BuildToolsVersion/aapt2" }
         $badging = @(& $aapt dump badging $apk.FullName)
         if ($LASTEXITCODE -ne 0 -or $badging -match '^application-debuggable') { throw 'Release APK is invalid or debuggable' }
-        if (!($badging -match "^package: name='de\.schuelken\.cloudbridge'")) { throw 'Unexpected release application identity' }
+        if (!($badging -match "^package: name='io\.github\.rareities\.protonbridge'")) { throw 'Unexpected release application identity' }
     }
     $zip = [System.IO.Compression.ZipFile]::OpenRead($apk.FullName)
     try {

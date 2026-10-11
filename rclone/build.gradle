@@ -3,9 +3,9 @@ import groovy.json.JsonOutput
 import java.security.MessageDigest
 
 ext {
-    RCLONE_REPO_URL = project.properties['de.schuelken.cloudbridge.rCloneRepoUrl']
-    RCLONE_REF = project.properties['de.schuelken.cloudbridge.rCloneRef']
-    GO_REQ_VERSION = project.properties['de.schuelken.cloudbridge.goVersion']
+    RCLONE_REPO_URL = project.properties['io.github.rareities.protonbridge.rCloneRepoUrl']
+    RCLONE_REF = project.properties['io.github.rareities.protonbridge.rCloneRef']
+    GO_REQ_VERSION = project.properties['io.github.rareities.protonbridge.goVersion']
     CACHE_PATH = new File(projectDir, 'cache')
     SOURCE_PATH = new File(CACHE_PATH, 'rclone-src')
     OUTPUT_PATH = new File(rootProject.projectDir, 'app/lib')
@@ -46,8 +46,8 @@ def androidCompiler(String triple) {
     if (!sdk) throw new GradleException('Set ANDROID_HOME or sdk.dir before building the Android engine')
     def windows = System.getProperty('os.name').startsWith('Windows')
     def host = windows ? 'windows-x86_64' : System.getProperty('os.name').startsWith('Mac') ? 'darwin-x86_64' : 'linux-x86_64'
-    def ndk = project.properties['de.schuelken.cloudbridge.ndkVersion']
-    def api = project.properties['de.schuelken.cloudbridge.ndkToolchainVersion']
+    def ndk = project.properties['io.github.rareities.protonbridge.ndkVersion']
+    def api = project.properties['io.github.rareities.protonbridge.ndkToolchainVersion']
     if (api != '23') throw new GradleException('The engine minimum API must match the application minimum API 23')
     def compiler = new File(sdk, "ndk/${ndk}/toolchains/llvm/prebuilt/${host}/bin/clang${windows ? '.exe' : ''}")
     if (!compiler.isFile()) throw new GradleException("Install the pinned Android NDK: sdkmanager 'ndk;${ndk}'")
@@ -96,7 +96,7 @@ targets.each { abi, target ->
         inputs.property('engineCommit', RCLONE_REF)
         inputs.property('engineRepository', RCLONE_REPO_URL)
         inputs.property('goRequirement', GO_REQ_VERSION)
-        inputs.property('ndkVersion', project.properties['de.schuelken.cloudbridge.ndkVersion'])
+        inputs.property('ndkVersion', project.properties['io.github.rareities.protonbridge.ndkVersion'])
         inputs.property('nativePolicy', 'android-cgo-pie-api23-16k')
         outputs.file(new File(OUTPUT_PATH, "${abi}/librclone.so"))
         // Record outputs so Gradle invalidates its virtual filesystem snapshots
@@ -114,7 +114,7 @@ targets.each { abi, target ->
                 environment 'CC', androidCompiler(target.triple)
                 if (target.arm) environment 'GOARM', target.arm
                 commandLine 'go', 'build', '-mod=readonly', '-buildvcs=true', '-buildmode=pie', '-tags', 'noselfupdate',
-                        '-trimpath', '-ldflags', "-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384 -X github.com/rclone/rclone/fs.Version=${sourceVersion}-cloudbridge.${RCLONE_REF.take(12)}",
+                        '-trimpath', '-ldflags', "-s -w -linkmode=external -extldflags=-Wl,-z,max-page-size=16384 -X github.com/rclone/rclone/fs.Version=${sourceVersion}-protonbridge.${RCLONE_REF.take(12)}",
                         '-o', destination.absolutePath, '.'
             }
             byte[] header = new byte[20]
@@ -140,7 +140,7 @@ tasks.register('buildAll') {
         def provenance = [schemaVersion: 1, repository: RCLONE_REPO_URL, commit: RCLONE_REF,
             sourceVersion: new File(SOURCE_PATH, 'VERSION').text.trim(), goToolchain: capture(['go', 'version']),
             goos: 'android', cgoEnabled: true, buildMode: 'pie', androidApi: 23, maxPageSize: 16384,
-            ndkVersion: project.properties['de.schuelken.cloudbridge.ndkVersion'],
+            ndkVersion: project.properties['io.github.rareities.protonbridge.ndkVersion'],
             buildTags: ['noselfupdate'], artifacts: outputs]
         new File(PROVENANCE_PATH, 'engine-provenance.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(provenance))
         new File(PROVENANCE_PATH, 'engine-modules.txt').text = capture(['go', 'list', '-m', '-mod=readonly',

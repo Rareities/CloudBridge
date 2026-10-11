@@ -6,7 +6,7 @@ on:
       release_tag:
         description: 'Reviewed release candidate tag, with a matching docs/releases changelog'
         required: true
-        default: 'v1.1.1-rc.1'
+        default: 'v1.1.2-rc.1'
 
 permissions:
   contents: read
@@ -40,7 +40,7 @@ jobs:
           python3 scripts/validate-release-version.py "$RELEASE_TAG"
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "CB_VERSION_NAME=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
-          version="$(sed -n 's/^de\.schuelken\.cloudbridge\.goVersion=//p' gradle.properties)"
+          version="$(sed -n 's/^io\.github\.rareities\.protonbridge\.goVersion=//p' gradle.properties)"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           echo "GO_VERSION=$version" >> "$GITHUB_ENV"
       - uses: actions/setup-java@17f84c3641ba7b8f6deff6309fc4c864478f5d62
@@ -61,7 +61,7 @@ jobs:
           set -euo pipefail
           ./gradlew --console=plain :rclone:buildAll
           (cd rclone/cache/rclone-src && go build -mod=readonly -tags noselfupdate -o "$RUNNER_TEMP/rclone-host" .)
-          CLOUDBRIDGE_TEST_RCLONE="$RUNNER_TEMP/rclone-host" ./gradlew --console=plain testOssDebugUnitTest lint -x :rclone:buildAll
+          PROTONBRIDGE_TEST_RCLONE="$RUNNER_TEMP/rclone-host" ./gradlew --console=plain testOssDebugUnitTest lint -x :rclone:buildAll
       - name: Sign release APKs
         env:
           CB_KEYSTORE_BASE64: ${{ secrets.CB_KEYSTORE_BASE64 }}
@@ -74,13 +74,13 @@ jobs:
           set -euo pipefail
           umask 077
           test -n "$CB_KEYSTORE_BASE64"
-          printf '%s' "$CB_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cloudbridge-fork.p12"
-          export CB_STORE_FILE="$RUNNER_TEMP/cloudbridge-fork.p12"
+          printf '%s' "$CB_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/protonbridge-fork.p12"
+          export CB_STORE_FILE="$RUNNER_TEMP/protonbridge-fork.p12"
           ./gradlew --console=plain assembleOssRelease -x :rclone:buildAll
       - name: Remove temporary signing key
         if: always()
         shell: bash
-        run: rm -f -- "$RUNNER_TEMP/cloudbridge-fork.p12"
+        run: rm -f -- "$RUNNER_TEMP/protonbridge-fork.p12"
       - name: Verify release identity and construct distribution
         shell: pwsh
         env:
@@ -121,7 +121,7 @@ jobs:
           set -euo pipefail
           cd distribution
           sha256sum --check SHA256SUMS.txt
-          jq -n --arg tag "$RELEASE_TAG" --arg sha "$GITHUB_SHA" --rawfile body CHANGELOG.md '{tag_name:$tag,target_commitish:$sha,name:("CloudBridge "+$tag),body:$body,draft:true,prerelease:true,make_latest:"false"}' > "$RUNNER_TEMP/release.json"
+          jq -n --arg tag "$RELEASE_TAG" --arg sha "$GITHUB_SHA" --rawfile body CHANGELOG.md '{tag_name:$tag,target_commitish:$sha,name:("ProtonBridge "+$tag),body:$body,draft:true,prerelease:true,make_latest:"false"}' > "$RUNNER_TEMP/release.json"
           release_id="$(gh api --method POST "repos/$GH_REPO/releases" --input "$RUNNER_TEMP/release.json" --jq '.id')"
           gh release upload "$RELEASE_TAG" ./* --repo "$GH_REPO"
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false -F prerelease=true -f make_latest=false >/dev/null

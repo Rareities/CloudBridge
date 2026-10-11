@@ -1,14 +1,16 @@
-# About this personal fork
+# ProtonBridge — Rareities
 
-This is a fork of [CloudBridge](https://github.com/thies2005/CloudBridge), which
+![ProtonBridge icon](artwork/protonbridge-icon.png)
+
+ProtonBridge is a personal fork of [CloudBridge](https://github.com/thies2005/CloudBridge), which
 is a fork of [Round Sync](https://github.com/newhinton/Round-Sync), which comes
 from [RCX](https://github.com/x0b/rcx), originally a fork of
 [rcloneExplorer](https://github.com/patrykcoding/rcloneExplorer).
 
-The main goal is to build CloudBridge with a reviewed, pinned version of the
+The main goal is to build ProtonBridge with a reviewed, pinned version of the
 latest rclone beta/development code, bring in selected Proton Drive patches from
 [OSS-Singularity's rclone fork](https://oss-oo.io/OSS-Singularity/rclone) used by
-its Proton Drive Linux work, and implement bisync inside CloudBridge. My
+its Proton Drive Linux work, and implement bisync inside ProtonBridge. My
 [rclone fork](https://github.com/Rareities/rclone) contains the engine changes;
 this app pins an exact reviewed commit rather than following a moving branch.
 I have also made other improvements and fixes to both rclone and the app.
@@ -27,7 +29,21 @@ a personal project; if it benefits someone else, I will be happy. Issues, pull
 requests, comments and concerns are welcome. Published candidates and their
 validation limits are described in the changelog and release notes.
 
+ProtonBridge is unofficial and is not affiliated with Proton or the upstream app
+authors. It has its own icon and application ID: `io.github.rareities.protonbridge`
+(debug: `.debug`). It installs separately from CloudBridge/RCX. Use the app backup
+and restore tools to import configuration if needed; expect fresh storage permissions
+and bisync approval. Stop old schedules before enabling equivalent new tasks.
+
+[Download ProtonBridge](https://github.com/Rareities/ProtonBridge/releases) ·
+[Report an issue](https://github.com/Rareities/ProtonBridge/issues)
+
 ---
+
+## Upstream CloudBridge README (historical)
+
+The original project description is preserved below for attribution. ProtonBridge
+downloads and support are available from the links above.
 
 # CloudBridge - Rclone for Android
 [![license: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://github.com/thies2005/CloudBridge/blob/master/LICENSE) [![Latest Downloads](https://img.shields.io/github/downloads/thies2005/CloudBridge/latest/total)](https://github.com/thies2005/CloudBridge/releases) [![GitHub release](https://img.shields.io/github/v/release/thies2005/CloudBridge?include_prereleases)](https://github.com/thies2005/CloudBridge/releases/latest)

@@ -72,7 +72,7 @@
     <string name="task_edit_title">Edit task</string>
     <string name="task_remote_required">Select a configured remote before saving this task.</string>
     <string name="task_remote_unavailable">Remote %1$s is unavailable. Reconnect it or explicitly select another remote.</string>
-    <string name="task_invalid_remote_folder">Select a valid folder from this CloudBridge installation.</string>
+    <string name="task_invalid_remote_folder">Select a valid folder from this ProtonBridge installation.</string>
     <string name="task_unmetered_label">Use an unmetered network</string>
     <string name="task_unmetered_help">Wait for a network Android marks as unmetered, usually Wi-Fi or Ethernet. Metered Wi-Fi is excluded.</string>
     <string name="bisync_checksum_required">Checksums required for bisync</string>

@@ -7,7 +7,7 @@ param(
     [Parameter(Mandatory)][string] $AppApk,
     [Parameter(Mandatory)][string] $TestApk,
     [Parameter(Mandatory)][switch] $DisposableEmulator,
-    [string] $OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) ('cloudbridge-device-' + [guid]::NewGuid().ToString('N')))
+    [string] $OutputDirectory = (Join-Path ([IO.Path]::GetTempPath()) ('protonbridge-device-' + [guid]::NewGuid().ToString('N')))
 )
 $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion.Major -lt 7) { throw 'PowerShell 7 or later is required.' }
@@ -21,7 +21,7 @@ if ((Test-Path -LiteralPath $OutputDirectory) -and @(Get-ChildItem -LiteralPath 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
 $results = [Collections.Generic.List[object]]::new()
-$package = 'de.schuelken.cloudbridge.debug'
+$package = 'io.github.rareities.protonbridge.debug'
 $runner = "$package.test/androidx.test.runner.AndroidJUnitRunner"
 
 function Invoke-Adb([string[]] $Arguments, [int] $TimeoutSeconds = 45) {
@@ -93,21 +93,21 @@ try {
     Invoke-Adb @('install', '-r', $TestApk) 120 | Write-Output
     [void](Invoke-Adb @('shell', 'pm', 'grant', $package, 'android.permission.POST_NOTIFICATIONS'))
     [void](Invoke-Adb @('shell', 'appops', 'set', $package, 'MANAGE_EXTERNAL_STORAGE', 'allow'))
-    Run-Case 'native-workflow' 'ca.pkay.rcloneexplorer.BisyncDeviceIntegrationTest' 3
-    Run-Case 'schedule-stage' 'ca.pkay.rcloneexplorer.ScheduledRestartIntegrationTest#stageForRestart' 1
+    Run-Case 'native-workflow' 'io.github.rareities.protonbridge.BisyncDeviceIntegrationTest' 3
+    Run-Case 'schedule-stage' 'io.github.rareities.protonbridge.ScheduledRestartIntegrationTest#stageForRestart' 1
     [void](Invoke-Adb @('shell', 'am', 'force-stop', $package))
-    Run-Case 'schedule-restart' 'ca.pkay.rcloneexplorer.ScheduledRestartIntegrationTest#verifyRestartRunsOneRealScheduledBisync' 1
-    Run-Case 'rc-lifecycle' 'ca.pkay.rcloneexplorer.RcDeviceIntegrationTest' 1
-    Run-Case 'provider-workflow' 'ca.pkay.rcloneexplorer.ProviderDeviceIntegrationTest' 1
-    Run-Case 'ordinary-copy-sync' 'ca.pkay.rcloneexplorer.OrdinaryTaskDeviceIntegrationTest' 1
-    Run-Case 'remote-configuration' 'ca.pkay.rcloneexplorer.RemoteConfigurationDeviceTest' 1
-    Run-Case 'constraints-cancellation' 'ca.pkay.rcloneexplorer.SystemJobIntegrationTest' 1
-    Run-Case 'editor-native-workflow' 'ca.pkay.rcloneexplorer.TaskEditorDeviceIntegrationTest' 1
+    Run-Case 'schedule-restart' 'io.github.rareities.protonbridge.ScheduledRestartIntegrationTest#verifyRestartRunsOneRealScheduledBisync' 1
+    Run-Case 'rc-lifecycle' 'io.github.rareities.protonbridge.RcDeviceIntegrationTest' 1
+    Run-Case 'provider-workflow' 'io.github.rareities.protonbridge.ProviderDeviceIntegrationTest' 1
+    Run-Case 'ordinary-copy-sync' 'io.github.rareities.protonbridge.OrdinaryTaskDeviceIntegrationTest' 1
+    Run-Case 'remote-configuration' 'io.github.rareities.protonbridge.RemoteConfigurationDeviceTest' 1
+    Run-Case 'constraints-cancellation' 'io.github.rareities.protonbridge.SystemJobIntegrationTest' 1
+    Run-Case 'editor-native-workflow' 'io.github.rareities.protonbridge.TaskEditorDeviceIntegrationTest' 1
     foreach ($name in @('bisync-ready', 'advanced-options', 'schedule-and-actions')) { Export-EditorImage $name }
-    Run-Case 'restore-directory-durability' 'ca.pkay.rcloneexplorer.RestoreDirectoryDurabilityTest' 1
-    Run-Case 'encrypted-crash-stage' 'ca.pkay.rcloneexplorer.EncryptedCrashRecoveryTest' 1 @('-e', 'recoveryPhase', 'stage')
+    Run-Case 'restore-directory-durability' 'io.github.rareities.protonbridge.RestoreDirectoryDurabilityTest' 1
+    Run-Case 'encrypted-crash-stage' 'io.github.rareities.protonbridge.EncryptedCrashRecoveryTest' 1 @('-e', 'recoveryPhase', 'stage')
     [void](Invoke-Adb @('shell', 'am', 'force-stop', $package))
-    Run-Case 'encrypted-crash-restart' 'ca.pkay.rcloneexplorer.EncryptedCrashRecoveryTest' 1 @('-e', 'recoveryPhase', 'verify')
+    Run-Case 'encrypted-crash-restart' 'io.github.rareities.protonbridge.EncryptedCrashRecoveryTest' 1 @('-e', 'recoveryPhase', 'verify')
     [IO.File]::WriteAllText((Join-Path $OutputDirectory 'native-processes.txt'), (Invoke-Adb @('shell', 'ps', '-A')))
     [IO.File]::WriteAllText((Join-Path $OutputDirectory 'app-memory.txt'), (Invoke-Adb @('shell', 'dumpsys', 'meminfo', $package)))
 } finally {

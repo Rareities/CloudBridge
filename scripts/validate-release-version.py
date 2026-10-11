@@ -15,10 +15,10 @@ def validate(tag, root):
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+", tag):
         raise ValueError("Use a release candidate tag")
     props = properties((root / "gradle.properties").read_text())
-    code = int(props["de.schuelken.cloudbridge.versionCode"])
+    code = int(props["io.github.rareities.protonbridge.versionCode"])
     if code <= 0 or code % 10 or code + 9 > 2100000000:
         raise ValueError("Base versionCode must be positive, end in 0 and leave ABI room")
-    if tag != "v" + props["de.schuelken.cloudbridge.versionName"]:
+    if tag != "v" + props["io.github.rareities.protonbridge.versionName"]:
         raise ValueError("Tag must match the checked-in versionName")
     if not (root / "docs/releases" / (tag + ".md")).is_file():
         raise ValueError("Release changelog is missing")
@@ -30,7 +30,8 @@ def validate(tag, root):
             continue
         result = subprocess.run(["git", "show", old + ":gradle.properties"], cwd=root,
                                 text=True, capture_output=True, check=True)
-        previous = properties(result.stdout).get("de.schuelken.cloudbridge.versionCode")
+        old_props = properties(result.stdout)
+        previous = old_props.get("io.github.rareities.protonbridge.versionCode", old_props.get("de.schuelken.cloudbridge.versionCode"))
         if previous is None:
             legacy = subprocess.check_output(["git", "show", old + ":app/build.gradle"], cwd=root, text=True)
             match = re.search(r"versionCode[^\n]*:\s*(\d+)", legacy)

@@ -17,7 +17,7 @@
             app:key="@string/pref_key_show_thumbnails"
             app:title="@string/show_thumbnails" />
 
-        <de.schuelken.cloudbridge.settings.preferences.FilesizePreference
+        <io.github.rareities.protonbridge.settings.preferences.FilesizePreference
             android:defaultValue="1048576"
             android:key="@string/pref_key_thumbnail_size_limit"
             android:title="@string/pref_thumbnails_dlg_title"
@@ -73,7 +73,7 @@
             app:useSimpleSummaryProvider="true" />
 
 
-        <de.schuelken.cloudbridge.settings.preferences.EditIntPreference
+        <io.github.rareities.protonbridge.settings.preferences.EditIntPreference
             android:inputType="number"
             android:key="@string/pref_key_proxy_port"
             android:numeric="integer"

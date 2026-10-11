@@ -6,7 +6,7 @@ import android.util.AttributeSet
 import android.view.LayoutInflater
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import ca.pkay.rcloneexplorer.databinding.CustomuiBreadcrumbviewBinding
+import io.github.rareities.protonbridge.databinding.CustomuiBreadcrumbviewBinding
 
 class BreadcrumbView : HorizontalScrollView {
 

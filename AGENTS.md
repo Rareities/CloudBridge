@@ -1,4 +1,4 @@
-# CloudBridge Agent Guidelines
+# ProtonBridge Agent Guidelines
 
 Android cloud file manager wrapping [rclone](https://rclone.org). Fork of RCX / rcloneExplorer.
 
@@ -19,9 +19,9 @@ Android cloud file manager wrapping [rclone](https://rclone.org). Fork of RCX / 
 | `rclone` | Cross-compiles rclone (Go) into `librclone.so` per ABI |
 | `safdav` | SAF/WebDAV bridge library (`io.github.x0b.safdav`) |
 
-- Package namespace: `ca.pkay.rcloneexplorer` (legacy from rcloneExplorer fork).
-- Application ID: `de.schuelken.cloudbridge`.
-- Newer code lives under `de.schuelken.cloudbridge.*`.
+- Package namespace: `io.github.rareities.protonbridge` (unified fork namespace).
+- Application ID: `io.github.rareities.protonbridge`.
+- Java/Kotlin source and instrumentation tests use `io.github.rareities.protonbridge.*`.
 - `app/src/rcx/` is an additional source set for RCX-specific utilities.
 - Product flavors are `oss` and `rs` in the `edition` dimension. Most work should target `oss` unless the task says otherwise.
 
@@ -29,7 +29,7 @@ Android cloud file manager wrapping [rclone](https://rclone.org). Fork of RCX / 
 
 Keep this repository easy to upgrade from upstream rclone.
 
-- The rclone source is controlled by `de.schuelken.cloudbridge.rCloneRepoUrl` and `de.schuelken.cloudbridge.rCloneRef` in `gradle.properties`.
+- The rclone source is controlled by `io.github.rareities.protonbridge.rCloneRepoUrl` and `io.github.rareities.protonbridge.rCloneRef` in `gradle.properties`.
 - To upgrade rclone, prefer changing only `rCloneRef` (and `rCloneRepoUrl` only if switching forks), then rebuild.
 - Do not modify generated or fetched rclone source under `rclone/cache/`.
 - Do not reintroduce the deprecated `rclone/patches/` flow. The fork already contains project-specific rclone changes, including Internxt auto-token-renewal.

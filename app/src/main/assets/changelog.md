@@ -1,3 +1,21 @@
+# ProtonBridge 1.1.2-rc.1
+
+- New ProtonBridge name, icon and separate package identity.
+- Startup/About now explain this personal Proton Drive bisync fork, its upstream
+  ancestry and AI-development disclaimer.
+- Reviewed rclone listing fix reduces repeated ancestor fetching/decryption.
+  Host fixture results are not a measured device throughput guarantee.
+- New application ID means a separate installation. Import configuration if
+  needed, grant permissions and review/initialize bisync tasks. Stop equivalent
+  old schedules before enabling new ones.
+
+Full fork changes and commit history:
+https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md
+
+---
+
+## Historical upstream changelog
+
 ### 1.12.0
 * **New:** Support for accessing cloud files from other apps (SAF DocumentProvider)
 * **New:** Support for all DocumentProviders
@@ -168,7 +186,7 @@
 * First Release with non-conflicting package name
 * **New:** Update to Rclone v1.49.1
 * **New:** Support for devices with x86_64 cpu and new Android W^X policy
-* **New:** Import external config files automatically by placing them on external storage in ```Android/data/``````ca.pkay.rcloneexplorer.x0b``````/files/rclone.conf```
+* **New:** Import external config files automatically by placing them on external storage in ```Android/data/``````io.github.rareities.protonbridge.x0b``````/files/rclone.conf```
 * **New:** Fix files with mime type application/octet-stream if they have a playable extension
 * **Fix:** Crash when folder to large
 * **Fix:** Onedrive config has been removed from ui because it is no longer compatible with rclone

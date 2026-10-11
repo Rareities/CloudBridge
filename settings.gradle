@@ -1,1 +1,2 @@
+rootProject.name = 'ProtonBridge'
 include ':app', ':safdav', ':rclone'
