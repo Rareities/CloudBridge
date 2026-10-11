@@ -13,6 +13,11 @@ public final class AdvancedOptions {
 
     private static final Pattern NAME = Pattern.compile("--[a-z][a-z0-9-]*");
     private static final Set<String> REPEATABLE = new HashSet<>(Arrays.asList("include", "exclude", "filter"));
+    private static final Set<String> REQUIRES_VALUE = new HashSet<>(Arrays.asList(
+            "bwlimit", "tpslimit", "tpslimit-burst", "retries", "low-level-retries",
+            "timeout", "contimeout", "max-transfer", "max-duration", "min-size",
+            "max-size", "filter", "include", "exclude", "suffix", "modify-window"));
+    private static final Set<String> BOOLEAN = new HashSet<>(Arrays.asList("fast-list", "ignore-case"));
     private static final Set<String> OWNED = new HashSet<>(Arrays.asList(
             "resync", "resync-mode", "workdir", "config", "force", "max-delete", "max-delete-size",
             "compare", "checksum", "require-checksum", "ignore-checksum", "ignore-listing-checksum",
@@ -33,7 +38,8 @@ public final class AdvancedOptions {
     ));
 
     public static String restriction(String name) {
-        if (OWNED.contains(name) || name.startsWith("rc-") || name.startsWith("dump") ||
+        if (OWNED.contains(name) || (name.startsWith("no-") && OWNED.contains(name.substring(3))) ||
+                name.startsWith("rc-") || name.startsWith("dump") ||
                 name.startsWith("log-") || name.startsWith("stats-") || name.startsWith("header") ||
                 name.startsWith("use-server-modtime")) {
             return "Use the task controls for --" + name + "; this option affects managed state, output or safety.";
@@ -64,6 +70,36 @@ public final class AdvancedOptions {
             String name = key.substring(2);
             String reason = restriction(name);
             if (reason != null) throw new IllegalArgumentException(reason);
+            String value = equals < 0 ? null : line.substring(equals + 1);
+            if (value != null && (Pattern.compile("(?i)[a-z][a-z0-9+.-]*://[^/\\s]+@").matcher(value).find() ||
+                    Pattern.compile("(?i)(?:password|access_token|refresh_token|api_key|secret)=").matcher(value).find()))
+                throw new IllegalArgumentException("Credentials belong in the remote editor, not in task option values");
+            if (REQUIRES_VALUE.contains(name) && (value == null || value.isEmpty()))
+                throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " requires a value in --flag=value form");
+            if (BOOLEAN.contains(name) && value != null && !"true".equals(value) && !"false".equals(value))
+                throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " must be true or false");
+            if ("retries".equals(name) || "low-level-retries".equals(name)) {
+                try {
+                    if (Integer.parseInt(value) < 0) throw new NumberFormatException();
+                } catch (NumberFormatException invalid) {
+                    throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " must be a non-negative integer");
+                }
+            }
+            if ("tpslimit-burst".equals(name)) {
+                try {
+                    if (Integer.parseInt(value) < 0) throw new NumberFormatException();
+                } catch (NumberFormatException invalid) {
+                    throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " must be a non-negative integer");
+                }
+            }
+            if ("tpslimit".equals(name)) {
+                try {
+                    double number = Double.parseDouble(value);
+                    if (Double.isNaN(number) || Double.isInfinite(number) || number < 0) throw new NumberFormatException();
+                } catch (NumberFormatException invalid) {
+                    throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " must be a non-negative finite number");
+                }
+            }
             if (!seen.add(name) && !REPEATABLE.contains(name)) throw new IllegalArgumentException("Duplicate scalar option: --" + name);
             if (line.length() > 2048) throw new IllegalArgumentException("Flag too long on line " + (i + 1));
             result.add(line);

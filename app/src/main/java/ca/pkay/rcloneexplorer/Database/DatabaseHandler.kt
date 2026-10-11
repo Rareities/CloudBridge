@@ -371,9 +371,6 @@ class DatabaseHandler(context: Context?) :
 
     private fun getTriggerContentValues(t: Trigger): ContentValues {
         val values = ContentValues()
-        if(t.id != Trigger.TRIGGER_ID_DOESNTEXIST) {
-            values.put(Trigger.COLUMN_NAME_ID, t.id)
-        }
         values.put(Trigger.COLUMN_NAME_TITLE, t.title)
         values.put(Trigger.COLUMN_NAME_ENABLED, t.isEnabled)
         values.put(Trigger.COLUMN_NAME_TIME, t.time)

@@ -2,9 +2,9 @@ package ca.pkay.rcloneexplorer.Activities
 
 import android.content.Intent
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.text.Editable
 import android.text.TextWatcher
-import android.util.Log
 import android.view.MenuItem
 import android.view.View
 import android.widget.AdapterView
@@ -20,9 +20,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
+import androidx.annotation.VisibleForTesting
 import androidx.core.view.WindowCompat
 import androidx.fragment.app.Fragment
 import ca.pkay.rcloneexplorer.Database.DatabaseHandler
+import ca.pkay.rcloneexplorer.BuildConfig
 import ca.pkay.rcloneexplorer.FilePicker
 import ca.pkay.rcloneexplorer.Fragments.FolderSelectorCallback
 import ca.pkay.rcloneexplorer.Fragments.RemoteFolderPickerFragment
@@ -38,13 +40,13 @@ import ca.pkay.rcloneexplorer.util.ActivityHelper
 import ca.pkay.rcloneexplorer.util.BisyncPolicy
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import es.dmoral.toasty.Toasty
-import java.io.UnsupportedEncodingException
-import java.net.URLDecoder
 
 class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
 
     private lateinit var rcloneInstance: Rclone
+    private val editorRemotes: List<RemoteItem>
+        get() = editorRemotesForTests ?: rcloneInstance.remotes
     private lateinit var dbHandler: DatabaseHandler
 
     private lateinit var syncDescription: TextView
@@ -82,6 +84,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     private var existingTask: Task? = null
     private var remotePathHolder = ""
     private var remotePathHolder2 = ""
+    private var selectedRemoteName: String? = null
+    private var selectedRemoteName2: String? = null
     // Tracks which remote field the RemoteFolderPickerFragment is choosing a path for.
     private var pickingDestinationRemote = false
     private var selectedFilter: Filter? = null
@@ -97,28 +101,32 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
                 }
                 localPath.clearFocus()
             }
-            REQUEST_CODE_FP_REMOTE -> if (data != null) {
-                var path = data.data.toString()
+            REQUEST_CODE_FP_REMOTE -> if (resultCode == RESULT_OK && data?.data != null) {
+                val uri = data.data!!
                 try {
-                    path = URLDecoder.decode(path, "UTF-8")
-                } catch (e: UnsupportedEncodingException) {
-                }
-
-                // Todo: check if this provider is still valid; search other occurences
-                Log.e("TaskActivity provider", "recieved path: $path")
-                val provider = "content://io.github.x0b.rcx.vcp/tree/rclone/remotes/"
-                if (path.startsWith(provider)) {
-                    val parts = path.substring(provider.length).split(":").toTypedArray()
-                    remotePath.setText(parts[1])
-                    var i = 0
-                    for (remote in remoteItems) {
-                        if (remote == parts[0]) {
-                            remoteDropdown.setSelection(i)
-                        }
-                        i++
+                    require(uri.scheme == "content" && uri.authority == BuildConfig.VCP_AUTHORITY)
+                    val document = when (uri.pathSegments.firstOrNull()) {
+                        "tree" -> DocumentsContract.getTreeDocumentId(uri)
+                        "document" -> DocumentsContract.getDocumentId(uri)
+                        else -> throw IllegalArgumentException("Unsupported document URI")
                     }
-                } else {
-                    Toasty.error(this, "This Remote is not a RCX-Remote.").show()
+                    val prefix = "rclone/remotes/"
+                    require(document.startsWith(prefix))
+                    val selected = document.removePrefix(prefix)
+                    val separator = selected.indexOf(':')
+                    require(separator > 0)
+                    val name = selected.substring(0, separator)
+                    require(editorRemotes.any { it.name == name })
+                    val index = (0 until remoteDropdown.count).firstOrNull {
+                        remoteDropdown.getItemAtPosition(it).toString() == name
+                    } ?: throw IllegalArgumentException("Remote is unavailable")
+                    // The document ID is already decoded by DocumentsContract.
+                    // Selection callbacks must not erase the path returned by this picker.
+                    selectedRemoteName = name
+                    remoteDropdown.setSelection(index)
+                    remotePath.setText(selected.substring(separator + 1).ifEmpty { "//$name" })
+                } catch (_: IllegalArgumentException) {
+                    Toasty.error(this, getString(R.string.task_invalid_remote_folder)).show()
                 }
             }
             REQUEST_CODE_FILTER -> if (data != null) {
@@ -161,20 +169,14 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
         rcloneInstance = Rclone(this)
         dbHandler = DatabaseHandler(this)
-        val extras = intent.extras
-        val taskId: Long
-        if (extras != null) {
-            taskId = extras.getLong(ID_EXTRA)
-            if (taskId != 0L) {
-                existingTask = dbHandler.getTask(taskId)
-                if (existingTask == null) {
-                    Toasty.error(
-                        this,
-                        this.resources.getString(R.string.taskactivity_task_not_found)
-                    ).show()
-                    finish()
-                    return
-                }
+        val taskId = savedInstanceState?.takeIf { it.containsKey(ID_EXTRA) }?.getLong(ID_EXTRA)
+            ?: intent.getLongExtra(ID_EXTRA, 0L)
+        if (taskId != 0L) {
+            existingTask = dbHandler.getTask(taskId)
+            if (existingTask == null) {
+                Toasty.error(this, getString(R.string.taskactivity_task_not_found)).show()
+                finish()
+                return
             }
         }
         val fab = findViewById<FloatingActionButton>(R.id.saveButton)
@@ -198,6 +200,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         }
 
         findViewById<TextView>(R.id.task_title_textfield).text = existingTask?.title
+        if (existingTask != null) setTitle(R.string.task_edit_title)
+        switchWifi.setText(R.string.task_unmetered_label)
+        findViewById<TextView>(R.id.task_wifi_hint_cancel).setText(R.string.task_unmetered_help)
+        findViewById<TextView>(R.id.task_wifi_hint_ignore_defaults).visibility = View.GONE
         switchWifi.isChecked = existingTask?.wifionly ?: false
         switchMD5sum.isChecked = existingTask?.md5sum ?: false
         switchDeleteExcluded.isChecked = existingTask?.deleteExcluded ?: false
@@ -217,14 +223,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskControls.refresh()
     }
 
-    private val remoteItems: Array<String?>
-        get() {
-            val remotes = arrayOfNulls<String>(rcloneInstance.remotes.size)
-            for (i in rcloneInstance.remotes.indices) {
-                remotes[i] = rcloneInstance.remotes[i].name
-            }
-            return remotes
-        }
+    private val remoteItems: Array<String>
+        get() = (editorRemotes.map { it.name } +
+            listOfNotNull(existingTask?.remoteId, existingTask?.remoteId2).filter { it.isNotBlank() })
+            .distinct().toTypedArray()
 
     private val taskListWithNone: ArrayList<TaskNameIdPair>
         get() {
@@ -269,16 +271,16 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     private fun getTaskValues(id: Long): Task? {
         val taskToPopulate = Task(id)
         taskToPopulate.title = findViewById<EditText>(R.id.task_title_textfield).text.toString()
-        val remotename = remoteDropdown.selectedItem?.toString() ?: return null
+        val remotename = remoteDropdown.selectedItem?.toString()
+        if (remotename == null) { Toasty.error(this, getString(R.string.task_remote_required)).show(); return null }
+        val available = editorRemotes
+        val source = available.firstOrNull { it.name == remotename }
+        if (source == null) { Toasty.error(this, getString(R.string.task_remote_unavailable, remotename)).show(); return null }
         taskToPopulate.remoteId = remotename
         val direction = SyncDirectionObject.directionForSpinnerPosition(syncDirection.selectedItemPosition)
         if (direction < 0) { Toasty.error(this, getString(R.string.task_unknown_mode)).show(); return null }
         if (taskToPopulate.title.isBlank()) { Toasty.error(this, "Enter a task name").show(); return null }
-        for (ri in rcloneInstance.remotes) {
-            if (ri.name == taskToPopulate.remoteId) {
-                taskToPopulate.remoteType = ri.type
-            }
-        }
+        taskToPopulate.remoteType = source.type
         taskToPopulate.remotePath = remotePath.text.toString()
         taskToPopulate.localPath = localPath.text.toString()
         taskToPopulate.direction = direction
@@ -287,12 +289,12 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         // Destination remote is only meaningful for cloud-to-cloud directions (7/8).
         if (direction == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE
             || direction == SyncDirectionObject.COPY_REMOTE_TO_REMOTE) {
-            taskToPopulate.remoteId2 = remoteDropdown2.selectedItem?.toString() ?: return null
-            for (ri in rcloneInstance.remotes) {
-                if (ri.name == taskToPopulate.remoteId2) {
-                    taskToPopulate.remoteType2 = ri.type
-                }
-            }
+            val destinationName = remoteDropdown2.selectedItem?.toString()
+            if (destinationName == null) { Toasty.error(this, getString(R.string.task_remote_required)).show(); return null }
+            val destination = available.firstOrNull { it.name == destinationName }
+            if (destination == null) { Toasty.error(this, getString(R.string.task_remote_unavailable, destinationName)).show(); return null }
+            taskToPopulate.remoteId2 = destinationName
+            taskToPopulate.remoteType2 = destination.type
             taskToPopulate.remotePath2 = remotePath2.text.toString()
         }
 
@@ -302,6 +304,11 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskToPopulate.filterId = if(filterDropdown.selectedItemPosition == 0 || filterDropdown.selectedItemPosition == -1) null else filterItems[filterDropdown.selectedItemPosition - 1].id
         taskToPopulate.onFailFollowup = (onFailDropdown.selectedItem as TaskNameIdPair).id
         taskToPopulate.onSuccessFollowup = (onSuccessDropdown.selectedItem as TaskNameIdPair).id
+        if (taskToPopulate.onFailFollowup == id && id > 0 ||
+            taskToPopulate.onSuccessFollowup == id && id > 0) {
+            Toasty.error(this, "A task cannot queue itself as its own follow-up").show()
+            return null
+        }
         val transfersValue = resources.getStringArray(R.array.task_transfers_values)
             .getOrNull(transfersDropdown.selectedItemPosition)?.toIntOrNull() ?: -1
         taskToPopulate.transfers = if (transfersValue <= 0) null else transfersValue
@@ -437,6 +444,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     private fun prepareRemote() {
 
         remotePathHolder = existingTask?.remotePath ?: ""
+        remotePath.setText(remotePathHolder)
         remoteDropdown.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, remoteItems)
 
         if (existingTask != null) {
@@ -448,14 +456,13 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         }
 
         remoteDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
-                remotePath.setText("")
-                val remotename = remoteDropdown.selectedItem.toString()
-                if(existingTask?.remoteId.equals(remotename)) {
-                    remotePath.setText(remotePathHolder)
+            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View?, position: Int, id: Long) {
+                val remoteName = remoteDropdown.selectedItem?.toString() ?: return
+                if (selectedRemoteName != null && selectedRemoteName != remoteName) {
+                    remotePath.setText("")
                 }
+                selectedRemoteName = remoteName
                 taskControls.onDraftChanged()
-
             }
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
@@ -466,10 +473,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         remotePath.onFocusChangeListener = object : View.OnFocusChangeListener {
             override fun onFocusChange(p0: View?, p1: Boolean) {
                 if (!p1) return
-                if (remoteDropdown.selectedItem == null) return
-                startRemotePicker(
-                    rcloneInstance.getRemoteItemFromName(remoteDropdown.selectedItem.toString()), "/", false
-                )
+                val name = remoteDropdown.selectedItem?.toString() ?: return
+                val remote = editorRemotes.firstOrNull { it.name == name }
+                if (remote == null) { Toasty.error(this@TaskActivity, getString(R.string.task_remote_unavailable, name)).show(); return }
+                startRemotePicker(remote, "/", false)
                 remotePath.clearFocus()
             }
         }
@@ -477,6 +484,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
     private fun prepareRemote2() {
         remotePathHolder2 = existingTask?.remotePath2 ?: ""
+        remotePath2.setText(remotePathHolder2)
         remoteDropdown2.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, remoteItems)
 
         if (existingTask != null) {
@@ -488,12 +496,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         }
 
         remoteDropdown2.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
-                remotePath2.setText("")
-                val remotename = remoteDropdown2.selectedItem.toString()
-                if (existingTask?.remoteId2.equals(remotename)) {
-                    remotePath2.setText(remotePathHolder2)
-                }
+            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View?, position: Int, id: Long) {
+                val remoteName = remoteDropdown2.selectedItem?.toString() ?: return
+                if (selectedRemoteName2 != null && selectedRemoteName2 != remoteName) remotePath2.setText("")
+                selectedRemoteName2 = remoteName
                 taskControls.onDraftChanged()
             }
 
@@ -503,10 +509,10 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         remotePath2.onFocusChangeListener = object : View.OnFocusChangeListener {
             override fun onFocusChange(p0: View?, p1: Boolean) {
                 if (!p1) return
-                if (remoteDropdown.selectedItem == null) return
-                startRemotePicker(
-                    rcloneInstance.getRemoteItemFromName(remoteDropdown2.selectedItem.toString()), "/", true
-                )
+                val name = remoteDropdown2.selectedItem?.toString() ?: return
+                val remote = editorRemotes.firstOrNull { it.name == name }
+                if (remote == null) { Toasty.error(this@TaskActivity, getString(R.string.task_remote_unavailable, name)).show(); return }
+                startRemotePicker(remote, "/", true)
                 remotePath2.clearFocus()
             }
         }
@@ -520,6 +526,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskControls.mode(direction)
         val bisync = isBisyncDirection(direction)
         switchMD5sum.isEnabled = !bisync
+        switchMD5sum.setText(if (bisync) R.string.bisync_checksum_required else R.string.use_md5checksum)
+        findViewById<TextView>(R.id.task_md5_hint).setText(if (bisync) R.string.bisync_checksum_help else R.string.task_hint_md5checksum)
         switchDeleteExcluded.isEnabled = !bisync
         if (bisync) { switchMD5sum.isChecked = true; switchDeleteExcluded.isChecked = false }
     }
@@ -533,6 +541,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         try {
             if (existingTask == null) dbHandler.createTask(candidate) else dbHandler.updateTask(candidate)
             existingTask = candidate
+            setTitle(R.string.task_edit_title)
             return candidate
         } catch (e: Exception) {
             Toasty.error(this, "Could not save task settings", Toast.LENGTH_LONG, true).show()
@@ -543,6 +552,11 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     override fun onResume() {
         super.onResume()
         if (::taskControls.isInitialized) taskControls.refreshAfterResume()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        existingTask?.let { outState.putLong(ID_EXTRA, it.id) }
+        super.onSaveInstanceState(outState)
     }
 
     private fun prepareOnFailDropdown() {
@@ -558,10 +572,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         onFailDropdown.setSelection(found)
 
         onFailDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
-                val pair = parentView?.selectedItem as TaskNameIdPair
-                existingTask?.onFailFollowup = pair.id
-            }
+            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View?, position: Int, id: Long) {}
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
         }
@@ -581,10 +592,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
 
         onSuccessDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
-                val pair = parentView?.selectedItem as TaskNameIdPair
-                existingTask?.onSuccessFollowup = pair.id
-            }
+            override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View?, position: Int, id: Long) {}
 
             override fun onNothingSelected(parentView: AdapterView<*>?) {}
         }
@@ -619,7 +627,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
             }
 
             filterDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View, position: Int, id: Long) {
+                override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View?, position: Int, id: Long) {
                     selectedFilter = if (position > 0 && position < titles.size) filterItems[position - 1] else null
                     taskControls.onDraftChanged()
                 }
@@ -674,7 +682,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         syncDirection.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
                 parentView: AdapterView<*>?,
-                selectedItemView: View,
+                selectedItemView: View?,
                 position: Int,
                 id: Long
             ) {
@@ -729,6 +737,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     companion object {
+        @VisibleForTesting @JvmStatic var editorRemotesForTests: List<RemoteItem>? = null
         const val ID_EXTRA = "TASK_EDIT_ID"
         const val REQUEST_CODE_FP_LOCAL = 500
         const val REQUEST_CODE_FP_REMOTE = 444

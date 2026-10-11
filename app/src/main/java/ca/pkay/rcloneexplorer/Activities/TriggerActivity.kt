@@ -22,6 +22,7 @@ import ca.pkay.rcloneexplorer.R
 import ca.pkay.rcloneexplorer.Services.TriggerService
 import ca.pkay.rcloneexplorer.util.ActivityHelper
 import ca.pkay.rcloneexplorer.util.ScheduleCalculator
+import ca.pkay.rcloneexplorer.workmanager.ScheduleDispatchWorker
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import es.dmoral.toasty.Toasty
 import java.text.DateFormat
@@ -166,7 +167,14 @@ class TriggerActivity : AppCompatActivity() {
             val value = form(true)
             require(db.getTask(value.triggerTarget) != null) { "The selected task no longer exists" }
             if (original == null) db.createTrigger(value) else db.updateTrigger(value)
-            TriggerService(this).queueSingleTrigger(value)
+            try {
+                TriggerService(this).queueSingleTrigger(value)
+            } catch (error: Exception) {
+                // The schedule was saved to SQLite. Retry dispatch durably if
+                // AlarmManager was briefly unavailable after that commit.
+                ScheduleDispatchWorker.enqueue(this, value.id)
+                Toasty.info(this, "Schedule saved; Android will retry alarm registration").show()
+            }
             finish()
         } catch (e: Exception) { Toasty.error(this, e.message ?: "Could not save schedule").show() }
     }

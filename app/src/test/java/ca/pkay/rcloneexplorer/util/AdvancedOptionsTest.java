@@ -28,4 +28,14 @@ public class AdvancedOptionsTest {
             assertThrows(input, IllegalArgumentException.class, () -> AdvancedOptions.parse(input));
         }
     }
+
+    @Test public void requiresValuesAndValidatesKnownFlagTypes() {
+        for (String input : Arrays.asList("--bwlimit", "--bwlimit=", "--filter", "--retries=-1",
+                "--retries=oops", "--tpslimit=-1", "--tpslimit=NaN", "--fast-list=yes",
+                "--no-force=true", "--no-require-checksum=true")) {
+            assertThrows(input, IllegalArgumentException.class, () -> AdvancedOptions.parse(input));
+        }
+        assertEquals(Arrays.asList("--retries=3", "--fast-list=false", "--filter=+ A/**", "--filter=- B/**"),
+                AdvancedOptions.parse("--retries=3\n--fast-list=false\n--filter=+ A/**\n--filter=- B/**"));
+    }
 }

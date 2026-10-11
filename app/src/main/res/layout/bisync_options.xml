@@ -39,5 +39,6 @@
     <Button android:id="@+id/bisync_help_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_engine_help" />
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview_help" />
     <Button android:id="@+id/bisync_preview_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_preview" />
+    <Button android:id="@+id/bisync_preview_report_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_view_preview" android:enabled="false" />
     <Button android:id="@+id/bisync_initialize_button" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/bisync_review" android:enabled="false" />
 </LinearLayout>

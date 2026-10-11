@@ -30,7 +30,7 @@ class GenericSyncNotification(var mContext: Context) {
                 bigText.append("\n")
             }
         }
-        val foregroundIntent = Intent(mContext, cls)
+        val foregroundIntent = Intent(mContext, ca.pkay.rcloneexplorer.Activities.MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(mContext, 0, foregroundIntent, FLAG_IMMUTABLE)
 
 
@@ -45,6 +45,10 @@ class GenericSyncNotification(var mContext: Context) {
             .setStyle(NotificationCompat.BigTextStyle().bigText(bigText.toString()))
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPublicVersion(NotificationCompat.Builder(mContext, channelID)
+                .setSmallIcon(icon).setContentTitle(mContext.getString(R.string.app_name))
+                .setContentText("Transfer in progress").build())
             .setProgress(100, percent, false)
 
         if(cancelIntent != null) {
@@ -65,6 +69,7 @@ class GenericSyncNotification(var mContext: Context) {
             // the NotificationChannel class is new and not in the support library
             val channel = NotificationChannel(channelID, channelName, NotificationManager.IMPORTANCE_LOW)
             channel.description = description
+            channel.lockscreenVisibility = android.app.Notification.VISIBILITY_PRIVATE
             // Register the channel with the system
             val notificationManager = mContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannelGroup(NotificationChannelGroup(groupID, groupDescription))

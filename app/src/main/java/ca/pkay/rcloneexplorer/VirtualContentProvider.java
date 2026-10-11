@@ -134,13 +134,20 @@ public class VirtualContentProvider extends SingleRootProvider {
             FLog.d(TAG, "onServiceConnected: service connected");
             RcdService.RcdBinder binder = (RcdService.RcdBinder) service;
             rcdService = binder.getService();
-            rcd = rcdService.getLocalRcd();
+            rcdAvailable = false;
             RcdService connected = rcdService;
             CompletableFuture.runAsync(() -> {
-                boolean ready = connected.waitOnline(3000);
-                if (rcdService != connected) return;
-                rcdAvailable = ready;
-                if (ready) reloadRemotesIfRequired();
+                try {
+                    RcloneRcd daemon = connected.getLocalRcd();
+                    boolean ready = connected.waitOnline(3000);
+                    if (rcdService != connected) return;
+                    rcd = daemon;
+                    rcdAvailable = ready;
+                    if (ready) reloadRemotesIfRequired();
+                } catch (RuntimeException failure) {
+                    rcdAvailable = false;
+                    FLog.w(TAG, "Remote service startup deferred: %s", failure.getMessage());
+                }
             }, asyncExc);
         }
 
@@ -249,7 +256,9 @@ public class VirtualContentProvider extends SingleRootProvider {
     // Required for OPEN_DOCUMENT_TREE
     @Override
     public boolean isChildDocument(String parentDocumentId, @NonNull String documentId) {
-        return documentId.startsWith(parentDocumentId);
+        if (parentDocumentId == null || parentDocumentId.isEmpty()) return false;
+        String parent = parentDocumentId.endsWith("/") ? parentDocumentId.substring(0, parentDocumentId.length() - 1) : parentDocumentId;
+        return documentId.startsWith(parent + "/");
     }
 
     @Override
@@ -1421,6 +1430,8 @@ public class VirtualContentProvider extends SingleRootProvider {
                     transfer.cancel();
                     try { producer.closeWithError("Document read cancelled"); } catch (IOException ignored) { }
                 });
+                final CancellationSignal requestSignal = signal;
+                lease.setCancellation(requestSignal::cancel);
                 pipeTransfer.start();
                 return consumer;
             } catch (IOException e) {
@@ -1448,11 +1459,19 @@ public class VirtualContentProvider extends SingleRootProvider {
                 transfer.onExit(lease::processFinished);
                 PipeTransferThread pipeTransfer = new PipeTransferThread(
                         new ParcelFileDescriptor.AutoCloseInputStream(consumer),
-                        transfer.output(), signal, len, transfer, lease, null, true);
+                        transfer.output(), signal, len, transfer, lease, consumer, true);
+                final String writtenDocumentId = documentId;
+                pipeTransfer.onSuccess = () -> {
+                    fsCache.remove(writtenDocumentId);
+                    remoteState.remove(writtenDocumentId);
+                    notifyChange(writtenDocumentId);
+                };
                 signal.setOnCancelListener(() -> {
                     transfer.cancel();
                     try { consumer.close(); } catch (IOException ignored) { }
                 });
+                final CancellationSignal requestSignal = signal;
+                lease.setCancellation(requestSignal::cancel);
                 pipeTransfer.start();
                 return producer;
             } catch (IOException e) {
@@ -1491,14 +1510,18 @@ public class VirtualContentProvider extends SingleRootProvider {
 
     private static final class StreamLease implements AutoCloseable {
         private final RcPipeLifetime lifetime;
+        private final RcdService.DocumentLease serviceLease;
 
         StreamLease(ProviderAdmissionLease admission, RcdService.DocumentLease serviceLease) {
+            this.serviceLease = serviceLease;
             lifetime = new RcPipeLifetime(() -> {
                 try { serviceLease.close(); } finally { admission.close(); }
             });
         }
 
         void processFinished() { lifetime.processFinished(); }
+
+        void setCancellation(Runnable action) { serviceLease.setCancellation(action); }
 
         void pipeFinished() { lifetime.pipeFinished(); }
 
@@ -1670,7 +1693,7 @@ public class VirtualContentProvider extends SingleRootProvider {
      * items are always kept in memory.
      */
     static class FsState {
-        private final Map<String, FsStateNode> stickyMap = new HashMap<>();
+        private final Map<String, FsStateNode> stickyMap = new ConcurrentHashMap<>();
         private final FsCache fsCache = new FsCache(500 * 1024);
 
         public void put(String noRootId, ListItem item, int flags) {
@@ -1788,6 +1811,7 @@ public class VirtualContentProvider extends SingleRootProvider {
     }
 
     private static class PipeTransferThread extends Thread {
+        private Runnable onSuccess;
         private final InputStream is;
         private final OutputStream os;
         private final CancellationSignal cancellationSignal;
@@ -1869,7 +1893,7 @@ public class VirtualContentProvider extends SingleRootProvider {
                     FLog.e(TAG, "PipeTransferThread, cancelled=%s", cancellationSignal.isCanceled(), e);
                 }
             } finally {
-                try { is.close(); } catch (IOException ignored) { }
+                if (!upload) try { is.close(); } catch (IOException ignored) { }
                 if (nativeTransfer != null) {
                     if (failure != null || cancellationSignal.isCanceled()) nativeTransfer.cancel();
                     // rcat needs stdin closed to finish sending the last buffered bytes.
@@ -1885,6 +1909,11 @@ public class VirtualContentProvider extends SingleRootProvider {
                 if (failure != null && reliableProducer != null) {
                     try { reliableProducer.closeWithError(failure.getMessage()); } catch (IOException ignored) { }
                 }
+                if (failure == null && !cancellationSignal.isCanceled() && onSuccess != null) {
+                    try { onSuccess.run(); }
+                    catch (RuntimeException error) { FLog.e(TAG, "Transfer completed but document notification failed", error); }
+                }
+                if (upload) try { is.close(); } catch (IOException ignored) { }
                 if (!upload) try { os.close(); } catch (IOException ignored) { }
                 if (lease instanceof StreamLease) {
                     ((StreamLease) lease).pipeFinished();

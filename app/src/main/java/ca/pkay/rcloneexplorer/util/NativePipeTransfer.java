@@ -143,10 +143,6 @@ public final class NativePipeTransfer {
         try { child.exitValue(); return; }
         catch (IllegalThreadStateException running) { /* Actual child is still live. */ }
         if (!cancelled.compareAndSet(false, true)) return;
-        child.destroy();
-        closeQuietly(child.getOutputStream());
-        closeQuietly(child.getInputStream());
-        closeQuietly(child.getErrorStream());
         Thread escalation = new Thread(() -> {
             try { Thread.sleep(2000L); }
             catch (InterruptedException ignored) { Thread.currentThread().interrupt(); return; }
@@ -158,6 +154,16 @@ public final class NativePipeTransfer {
         }, "rclone-pipe-cancel");
         escalation.setDaemon(true);
         escalation.start();
+        // Stream close and even Process.destroy may wait on a pipe lock held by
+        // a blocked writer. Never perform them on the UI/cancellation caller.
+        Thread signal = new Thread(() -> {
+            child.destroy();
+            closeQuietly(child.getOutputStream());
+            closeQuietly(child.getInputStream());
+            closeQuietly(child.getErrorStream());
+        }, "rclone-pipe-signal");
+        signal.setDaemon(true);
+        signal.start();
     }
 
     /** Checks actual exit status, stream errors and cancellation. Call off the UI thread. */

@@ -24,6 +24,13 @@ transfer engine or a desktop application.
 6. After successful initialisation the task becomes ready for normal runs.
    Use **Run**, **Cancel**, **History** and **Schedules** in the task editor.
 
+For an already-ready task, **Save and preview** checks ordinary changes against
+a private copy of the current listings and their verified endpoint identity.
+It preserves the successful baseline and does not require another initialisation.
+Use **View last preview** to inspect the timestamped, bounded report, including
+affected filenames. A historical report is not approval and may no longer match
+current settings or cloud contents.
+
 Approval expires after 30 minutes and is bound to the task, ordered endpoints,
 filters, effective options, configuration identity and exact engine commit.
 Editing baseline settings or changing the engine requires a new review. Missing
@@ -89,6 +96,13 @@ stream failures and nonzero exits cannot trigger success follow-ups. A durable
 in-progress history entry without a terminal result is shown as **completion
 unconfirmed**, not success.
 
+The task saved by Preview, Run or Manage schedules retains its ID when the editor
+is recreated. An unavailable saved remote remains selected and blocks saving or
+running until it is reconnected or explicitly replaced. Folder selection uses
+this installation's document-provider authority and preserves encoded names.
+Editing a queued task invalidates the old request revision; it cannot silently
+run against newly selected locations.
+
 ## Security and resource behaviour
 
 Native configuration encryption, explicit encrypted credential backup and
@@ -108,14 +122,27 @@ retires after a 30-second idle grace when no requests, jobs or streams remain.
 This grace is an initial policy, not a measured optimum. Periodic session-health
 checks are opt-in and default off. No energy-saving percentage is claimed.
 
+Configuration sessions exclude incompatible CLI and RC work, including unknown
+outcomes after request timeouts. Native exit and lease cleanup are separate
+events; restart waits for the cleanup barrier. Loopback remains the serving
+default. Explicit LAN exposure requires authenticated HTTPS/HTTPS WebDAV with
+readable certificate/key files; FTP and DLNA remain limited to this device.
+
 ## Engine and validation boundaries
 
 The packaged engine is pinned to Rareities/rclone commit
-`789cfc5c4fde57ad301485a809e23a4aa84e5e31`, source label `v1.76.0` (development),
+`719ed66b9e7e6a76b9bfe3fe1ae194f89ea5ccc9`, source label `v1.76.0` (development),
 with the reviewed API and bridge dependencies. The APK includes an engine
 provenance manifest, per-ABI SHA-256 values and module versions. Engine fixes
 and upstream relationships are recorded in that repository's
 `docs/PROTON_BISYNC_PATCHES.md` and `third_party/proton-api-bridge/UPSTREAM.md`.
+
+The engine binds legacy-compatible listing filenames to the exact ordered
+endpoint pair. Different names that canonicalise to the same filename cannot
+silently reuse one another's baseline. Unbound older engine state requires
+explicit reviewed initialisation; the app already invalidates approval when its
+engine changes. Keep old baselines until recovery is understood, never delete
+them or add `--force` merely to clear an error.
 
 Automated local/fake-server tests cover session ownership, token adoption,
 modern-name ambiguity, metadata, upload cancellation, locks, strict checksum
@@ -127,7 +154,7 @@ separately from the following release gates:
 | --- | --- |
 | Live Proton compatibility | Disposable account tests, official-client read/overwrite, aliases and two-password accounts, long-lived rotation and multiple processes |
 | Crypto/service evolution | Maintainer-supported compatibility for new Proton models; invalid signatures must keep failing |
-| Android operation | Real-device native launch, permissions, reboot/Doze, force-stop/reopen, foreground timeout, SAF cancellation and Keystore recovery |
+| Android operation | Extend the passing API 35 disposable-emulator scenarios to physical devices, other advertised APIs/ABIs, real battery/Doze/quota conditions and third-party SAF clients |
 | Resource and battery budgets | Controlled cold/warm measurements of memory, CPU, wakeups, native child counts, network and energy |
 | Release distribution | Approved signing certificate, device gates and an explicit promotion decision |
 
@@ -147,6 +174,13 @@ Use JDK 17, the Android SDK and Go at least 1.26. The executable is CGO-disabled
 Debug application ID is `de.schuelken.cloudbridge.debug`. It can coexist with
 the release app and has separate storage and configuration. Debug APKs are
 test artifacts, not an in-place signed update of an existing release install.
+
+The reproducible acceptance driver is `scripts/Verify-Emulator.ps1`; it requires
+an explicitly acknowledged disposable API 35 emulator and the debug app/test
+APKs. It never permits a physical device target. Native listener checks and
+controlled host comparisons are in `scripts/Verify-NativeListeners.ps1` and
+`scripts/Measure-NativeBisync.ps1`. See [validation](BISYNC_VALIDATION.md) for exact
+commands, scope and remaining external acceptance gates.
 
 Release builds require the usual keystore inputs plus `CB_SIGNING_CERT_SHA256`
 (or `certificateSha256` in git-ignored `keystore.properties`). The value is the

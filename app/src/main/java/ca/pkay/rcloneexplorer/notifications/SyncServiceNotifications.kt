@@ -75,10 +75,7 @@ class SyncServiceNotifications(var mContext: Context) {
         notificationId: Int,
         taskid: Long
     ) {
-        val i = Intent(mContext, SyncRestartAction::class.java)
-        i.putExtra(EXTRA_TASK_ID, taskid)
-
-        val retryPendingIntent = PendingIntent.getBroadcast(mContext, taskid.toInt(), i, GenericSyncNotification.getFlags())
+        val retryPendingIntent = retryIntent(taskid)
         val builder = NotificationCompat.Builder(mContext, CHANNEL_FAIL_ID)
             .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
             .setContentTitle(mContext.getString(R.string.operation_failed))
@@ -120,10 +117,7 @@ class SyncServiceNotifications(var mContext: Context) {
         notificationId: Int,
         taskid: Long
     ) {
-        val i = Intent(mContext, SyncRestartAction::class.java)
-        i.putExtra(EXTRA_TASK_ID, taskid)
-
-        val retryPendingIntent = PendingIntent.getService(mContext, taskid.toInt(), i, GenericSyncNotification.getFlags())
+        val retryPendingIntent = retryIntent(taskid)
         val builder = NotificationCompat.Builder(mContext, CHANNEL_FAIL_ID)
             .setSmallIcon(R.drawable.ic_twotone_cloud_error_24)
             .setContentTitle(mContext.getString(R.string.operation_failed_cancelled))
@@ -234,5 +228,14 @@ class SyncServiceNotifications(var mContext: Context) {
     fun cancelSyncNotification(notificationId: Int) {
         val notificationManagerCompat = NotificationManagerCompat.from(mContext)
         notificationManagerCompat.cancel(notificationId)
+    }
+
+    private fun retryIntent(taskid: Long): PendingIntent {
+        val task = ca.pkay.rcloneexplorer.Database.DatabaseHandler(mContext).getTask(taskid)
+        val intent = Intent(mContext, SyncRestartAction::class.java)
+            .setData(android.net.Uri.parse("cloudbridge://retry/$taskid/${task?.bisyncUUID.orEmpty()}"))
+            .putExtra(EXTRA_TASK_ID, taskid)
+            .putExtra("TASK_UUID", task?.bisyncUUID)
+        return PendingIntent.getBroadcast(mContext, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
 }

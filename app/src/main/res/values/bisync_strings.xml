@@ -21,9 +21,11 @@
     <string name="bisync_flags_hint">--bwlimit=8M</string>
     <string name="bisync_add_flag">Add an option</string>
     <string name="bisync_engine_help">Show engine option help</string>
-    <string name="bisync_preview">Save and preview initialisation</string>
+    <string name="bisync_preview">Save and preview</string>
+    <string name="bisync_view_preview">View last preview</string>
+    <string name="bisync_saved_preview">Preview captured: %1$s\nThis is the saved advisory report, not a fresh scan or approval. Settings and remote contents may have changed.\n\n%2$s</string>
     <string name="bisync_review">Review preview and initialise</string>
-    <string name="bisync_preview_help">Preview is a dry run and does not transfer or delete files. It may refresh login credentials. Approval expires after 30 minutes or when relevant settings change. A preview is not a snapshot of cloud contents.</string>
+    <string name="bisync_preview_help">Preview is a dry run and does not transfer or delete files. Ready tasks preview normal changes without altering their baseline. New or changed tasks preview initialisation and require approval within 30 minutes. A preview may refresh credentials and is not a snapshot of cloud contents.</string>
     <string name="bisync_status_initial">Needs initialisation</string>
     <string name="bisync_status_format">State: %1$s\n%2$s</string>
     <string name="bisync_last_success">Last successful run: %1$s</string>
@@ -50,4 +52,12 @@
     <string name="schedule_platform_note">Android may defer execution for network, battery or system limits. Missed runs are combined into one pending task.</string>
     <string name="schedule_add">Add schedule</string>
     <string name="schedule_none">No schedules are saved for this task.</string>
+    <string name="task_edit_title">Edit task</string>
+    <string name="task_remote_required">Select a configured remote before saving this task.</string>
+    <string name="task_remote_unavailable">Remote %1$s is unavailable. Reconnect it or explicitly select another remote.</string>
+    <string name="task_invalid_remote_folder">Select a valid folder from this CloudBridge installation.</string>
+    <string name="task_unmetered_label">Use an unmetered network</string>
+    <string name="task_unmetered_help">Wait for a network Android marks as unmetered, usually Wi-Fi or Ethernet. Metered Wi-Fi is excluded.</string>
+    <string name="bisync_checksum_required">Checksums required for bisync</string>
+    <string name="bisync_checksum_help">Compares file size and a common checksum. Missing checksums stop the run rather than silently reducing protection.</string>
 </resources>

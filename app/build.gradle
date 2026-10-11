@@ -32,8 +32,8 @@ android {
         targetSdkVersion 36
         // CI bumps these per beta via CB_VERSION_CODE / CB_VERSION_NAME env vars.
         // versionCode must end in 0 (last digit reserved for ABI offsets).
-        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 30
-        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.2'
+        versionCode System.getenv('CB_VERSION_CODE') ? System.getenv('CB_VERSION_CODE').toInteger() : 40
+        versionName System.getenv('CB_VERSION_NAME') ? System.getenv('CB_VERSION_NAME') : '1.0.3'
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "java.lang.String", "CLI", System.getenv('RCX_BUILD_CLI') ? System.getenv('RCX_BUILD_CLI') : "\"c03129b6-b09f-9cb4-8fcd-7f143b8f94ef\""
         buildConfigField "java.lang.String", "VCP_AUTHORITY", "\"" + applicationId + ".vcp\"";
@@ -158,6 +158,13 @@ android {
 
     gradle.projectsEvaluated {
         preBuild.dependsOn(':rclone:buildAll')
+        tasks.matching { it.name.startsWith('merge') &&
+                (it.name.endsWith('NativeLibs') || it.name.endsWith('JniLibFolders')) }.configureEach {
+            dependsOn(':rclone:buildAll')
+            inputs.property('approvedNativeCommit', project.properties['de.schuelken.cloudbridge.rCloneRef'])
+            inputs.files(fileTree('lib').matching { include '**/librclone.so' })
+                    .withPropertyName('generatedRcloneBinaries')
+        }
         def releaseSigningCheck = tasks.register('verifyReleaseSigning') {
             doLast {
                 def signing = android.signingConfigs.release
@@ -200,6 +207,42 @@ android {
         includeInBundle = false
     }
 }
+
+// Verify packaged bytes, not just BuildConfig or a provenance label. This also
+// detects interrupted builds which left an old merged-native-libraries output.
+tasks.register('verifyDebugApkEngines') {
+    dependsOn 'packageOssDebug'
+    doLast {
+        def apks = fileTree("$buildDir/outputs/apk/oss/debug").matching { include '*.apk' }.files
+        if (apks.isEmpty()) throw new GradleException('No debug APKs were produced')
+        apks.each { apk ->
+            new java.util.zip.ZipFile(apk).withCloseable { zip ->
+                def record = zip.getEntry('assets/engine-provenance.json')
+                if (record == null || record.size > 65536) throw new GradleException('Missing packaged provenance')
+                def provenance = zip.getInputStream(record).withCloseable {
+                    new groovy.json.JsonSlurper().parse(it)
+                }
+                if (provenance.commit != project.properties['de.schuelken.cloudbridge.rCloneRef'])
+                    throw new GradleException('Packaged engine source differs from the approved pin')
+                def libraries = java.util.Collections.list(zip.entries()).findAll { it.name ==~ /lib\/[^\/]+\/librclone\.so/ }
+                if (!(libraries.size() in [1,4])) throw new GradleException('Incomplete native APK contents')
+                libraries.each { lib ->
+                    def abi = lib.name.split('/')[1]
+                    def expected = provenance.artifacts.find { it.abi == abi }
+                    def digest = java.security.MessageDigest.getInstance('SHA-256')
+                    zip.getInputStream(lib).withCloseable { input ->
+                        byte[] buffer = new byte[65536]; int count
+                        while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+                    }
+                    def actual = digest.digest().collect { String.format('%02x', it & 0xff) }.join('')
+                    if (expected == null || expected.bytes != lib.size || expected.sha256 != actual)
+                        throw new GradleException("Packaged engine hash mismatch: ${apk.name} / ${abi}")
+                }
+            }
+        }
+    }
+}
+tasks.matching { it.name == 'assembleOssDebug' }.configureEach { dependsOn 'verifyDebugApkEngines' }
 
 repositories {
     mavenCentral()
@@ -260,6 +303,8 @@ dependencies {
     testImplementation 'androidx.work:work-testing:2.10.5'
     androidTestImplementation 'androidx.test:runner:1.5.2'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
+    androidTestImplementation 'androidx.work:work-testing:2.10.5'
+    androidTestImplementation 'androidx.test.ext:junit:1.2.1'
 
     // Splash screen
     implementation("androidx.core:core-splashscreen:1.0.1")

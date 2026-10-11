@@ -1,5 +1,12 @@
 # Bisync implementation validation
 
+> Historical first-phase evidence below. The subsequent integration phase is
+> described in [INTEGRATION_RESULTS.md](INTEGRATION_RESULTS.md) and
+> [INTEGRATION_ACCEPTANCE.md](INTEGRATION_ACCEPTANCE.md); exact final
+> commit identities, executed counts, CI status and APK hashes are recorded in
+> the final delivery manifest and evidence directory. Do not apply the old
+> version/pin/counts below to a later APK.
+
 Date: 11 October 2026. This is a tested development candidate, not a production
 compatibility or battery-performance certification. No production Proton data
 was used and no release was merged or published by this implementation pass.

@@ -49,6 +49,9 @@ public class VirtualContentProviderTest {
     public void isChildDocumentId() {
         assertTrue(provider.isChildDocument(VirtualContentProvider.ROOT_DOC_PREFIX, VirtualContentProvider.ROOT_DOC_PREFIX + "sub/doc"));
         assertFalse(provider.isChildDocument(VirtualContentProvider.ROOT_DOC_PREFIX + "sub/doc", VirtualContentProvider.ROOT_DOC_PREFIX));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder2/secret"));
+        assertFalse(provider.isChildDocument("remotes/demo:/folder", "remotes/demo:/folder"));
+        assertTrue(provider.isChildDocument("remotes/demo:", "remotes/demo:/folder/file"));
     }
 
     @Test

@@ -14,6 +14,28 @@ import static org.junit.Assert.*;
 
 /** Pipes intentionally have small buffers to reproduce blocked native writers. */
 public class NativePipeTransferTest {
+    @Test(timeout = 7000) public void cancellationReturnsWhileNativeDestroyOrStreamCloseIsBlocked() throws Exception {
+        CountDownLatch block = new CountDownLatch(1);
+        CountDownLatch exit = new CountDownLatch(1);
+        Process child = new Process() {
+            public OutputStream getOutputStream() { return new ByteArrayOutputStream(); }
+            public InputStream getInputStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+            public InputStream getErrorStream() { return new java.io.ByteArrayInputStream(new byte[0]); }
+            public int waitFor() throws InterruptedException { exit.await(); return 143; }
+            public int exitValue() { if (exit.getCount() > 0) throw new IllegalThreadStateException(); return 143; }
+            public void destroy() { try { block.await(); } catch (InterruptedException ignored) { } }
+            public Process destroyForcibly() { exit.countDown(); block.countDown(); return this; }
+        };
+        NativePipeTransfer transfer = new NativePipeTransfer(child, true);
+        CountDownLatch returned = new CountDownLatch(1);
+        Thread caller = new Thread(() -> { transfer.cancel(); returned.countDown(); });
+        caller.setDaemon(true); caller.start();
+        try {
+            assertTrue("Cancellation blocked the caller", returned.await(500, TimeUnit.MILLISECONDS));
+            assertTrue("Force escalation never ran", exit.await(4, TimeUnit.SECONDS));
+            assertThrows(IOException.class, transfer::awaitSuccessfulExit);
+        } finally { block.countDown(); exit.countDown(); }
+    }
     @Test(timeout = 10000) public void downloadPreservesBytesAndReportsNativeFailureWithRedactedStderr() throws Exception {
         FakeProcess nativeChild = new FakeProcess(true);
         NativePipeTransfer transfer = new NativePipeTransfer(nativeChild, false);

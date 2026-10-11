@@ -189,11 +189,7 @@ public class Rclone {
             String user = pref.getString(context.getString(R.string.pref_key_proxy_username), "");
             String pass = pref.getString(context.getString(R.string.pref_key_proxy_password), "");
             int port = pref.getInt(context.getString(R.string.pref_key_proxy_port), 8080);
-            String auth = "";
-            if(!(user + pass).isEmpty()) {
-                auth = user+":"+pass+"@";
-            }
-            String url = protocol + "://" + auth + host + ":" + port;
+            String url = ca.pkay.rcloneexplorer.util.NetworkValues.proxy(protocol, host, port, user, pass);
             // per https://golang.org/pkg/net/http/#ProxyFromEnvironment
             environmentValues.add("http_proxy=" + url);
             environmentValues.add("https_proxy=" + url);
@@ -211,7 +207,7 @@ public class Rclone {
 
         // The pre-built linux rclone binaries do not know how to find the Android certificate store.
         // We set SSL_CERT_DIR to Android's native certificate store path.
-        environmentValues.add("SSL_CERT_DIR=/system/etc/security/cacerts");
+        environmentValues.add("SSL_CERT_DIR=/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts");
 
         environmentValues.add("RCLONE_DNS_SERVERS=" + getDnsServers());
 
@@ -226,7 +222,7 @@ public class Rclone {
     }
 
     private String getDnsServers() {
-        String fallback = "8.8.8.8:53,8.8.4.4:53";
+        String fallback = ""; // Do not silently send queries to a public third-party resolver.
         try {
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
             if (cm == null) return fallback;
@@ -237,7 +233,7 @@ public class Rclone {
             StringBuilder sb = new StringBuilder();
             for (InetAddress dns : lp.getDnsServers()) {
                 if (sb.length() > 0) sb.append(",");
-                sb.append(dns.getHostAddress()).append(":53");
+                sb.append(ca.pkay.rcloneexplorer.util.NetworkValues.dnsEndpoint(dns));
             }
             return sb.length() > 0 ? sb.toString() : fallback;
         } catch (Exception e) {
@@ -449,16 +445,17 @@ public class Rclone {
         Process process = null;
         try {
             process = getRuntimeProcess(command);
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                Toasty.error(context, context.getString(R.string.error_getting_remotes), Toast.LENGTH_SHORT, true).show();
-                logErrorOutput(process);
+            ca.pkay.rcloneexplorer.util.ProcessRunner runner = new ca.pkay.rcloneexplorer.util.ProcessRunner();
+            long started = android.os.SystemClock.elapsedRealtime();
+            java.util.concurrent.atomic.AtomicBoolean overflow = new java.util.concurrent.atomic.AtomicBoolean();
+            ca.pkay.rcloneexplorer.util.ProcessRunner.Outcome result = runner.run(process,
+                    () -> android.os.SystemClock.elapsedRealtime() - started > 30000L,
+                    line -> {
+                        if (output.length() + line.length() > 4 * 1024 * 1024) { overflow.set(true); runner.requestStop(); }
+                        else output.append(line);
+                    }, null);
+            if (!result.success() || overflow.get()) {
+                FLog.w(TAG, "Remote configuration could not be read safely");
                 return null;
             }
             JSONObject parsed = new JSONObject(output.toString());
@@ -468,7 +465,7 @@ public class Rclone {
                 cachedConfLength = length;
             }
             return parsed;
-        } catch (IOException | InterruptedException | JSONException e) {
+        } catch (IOException | JSONException e) {
             logErrorOutput(process);
             FLog.e(TAG, "getRemotes: error retrieving remotes", e);
             return null;
@@ -695,6 +692,11 @@ public class Rclone {
     public Process serve(int protocol, int port, boolean allowRemoteAccess, @Nullable String user,
                          @Nullable String password, @NonNull RemoteItem remote, @Nullable String servePath,
                          @Nullable String baseUrl) {
+        SharedPreferences listenerPreferences = PreferenceManager.getDefaultSharedPreferences(context);
+        String certificate = listenerPreferences.getString(ca.pkay.rcloneexplorer.util.ListenerPolicy.CERTIFICATE, "");
+        String privateKey = listenerPreferences.getString(ca.pkay.rcloneexplorer.util.ListenerPolicy.PRIVATE_KEY, "");
+        ca.pkay.rcloneexplorer.util.ListenerPolicy.validate(protocol, port, allowRemoteAccess, user, password, certificate, privateKey);
+        if (servePath == null || servePath.indexOf('\0') >= 0) throw new IllegalArgumentException("Select a valid folder to serve");
         String remoteName = remote.getName();
         String localRemotePath = (remote.isRemoteType(RemoteItem.LOCAL)) ? getLocalRemotePathPrefix(remote, context)  + "/" : "";
         String path = (servePath.compareTo("//" + remoteName) == 0) ? remoteName + ":" + localRemotePath : remoteName + ":" + localRemotePath + servePath;
@@ -715,10 +717,7 @@ public class Rclone {
                 commandProtocol = "webdav";
         }
 
-        if (allowRemoteAccess && (user == null || user.length() == 0 || password == null || password.length() == 0)) {
-            FLog.w(TAG, "serve: remote access requested without credentials, binding to localhost");
-            address = "127.0.0.1:" + String.valueOf(port);
-        } else if (allowRemoteAccess) {
+        if (allowRemoteAccess) {
             address = ":" + String.valueOf(port);
         } else {
             address = "127.0.0.1:" + String.valueOf(port);
@@ -743,14 +742,9 @@ public class Rclone {
         params.add("--dir-cache-time");
         params.add("5m");
 
-        if(null != user && user.length() > 0) {
-            params.add("--user");
-            params.add(user);
-        }
-
-        if(null != password && password.length() > 0) {
-            params.add("--pass");
-            params.add(password);
+        if (allowRemoteAccess) {
+            params.add("--cert=" + certificate);
+            params.add("--key=" + privateKey);
         }
 
         if(null != baseUrl && baseUrl.length() > 0) {
@@ -758,15 +752,10 @@ public class Rclone {
             params.add(baseUrl);
         }
 
-        SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context);
-        boolean isLoggingEnabled = sharedPreferences.getBoolean(context.getString(R.string.pref_key_logs), false);
-        if (isLoggingEnabled) {
-            File serveLog = new File(context.getExternalFilesDir("logs"), "serve.log");
-            params.add("--log-file");
-            params.add(serveLog.getAbsolutePath());
-        }
-
-        String[] env = getRcloneEnv();
+        // The native process owner drains diagnostics; no raw external log file
+        // or credential-bearing argument is created.
+        String[] env = protocol == SERVE_PROTOCOL_DLNA ? getRcloneEnv() :
+                getRcloneEnv("RCLONE_USER=" + (user == null ? "" : user), "RCLONE_PASS=" + (password == null ? "" : password));
         String[] command = params.toArray(new String[0]);
         try {
             return getRuntimeProcess(command, env);
@@ -853,10 +842,14 @@ public class Rclone {
     public Process bisync(ca.pkay.rcloneexplorer.Items.Task task, File privateWorkdir,
                           String operation, ArrayList<FilterEntry> filters, boolean validateOnly) throws IOException {
         java.util.List<String> advanced = ca.pkay.rcloneexplorer.util.AdvancedOptions.parse(task.getBisyncAdvancedOptions());
+        // The persisted legacy integer is the underlying backend type, not the
+        // alias/crypt/cache wrapper identity. Resolve the configured endpoint.
+        RemoteItem endpoint = getRemoteItemFromName(task.getRemoteId());
+        if (endpoint == null) throw new IOException("The configured task remote is unavailable; reconnect or edit the task");
         ArrayList<String> args = new ArrayList<>();
         Collections.addAll(args, rclone, "--config", rcloneConf,
                 "bisync", task.getLocalPath(),
-                buildRemoteSection(new RemoteItem(task.getRemoteId(), task.getRemoteType(), ""), task.getRemotePath(), context),
+                buildRemoteSection(endpoint, task.getRemotePath(), context),
                 "--workdir=" + privateWorkdir.getAbsolutePath(), "--max-delete=" + task.getBisyncMaxDelete(),
                 "--compare=size,checksum", "--checksum", "--require-checksum", "--conflict-resolve=none",
                 "--conflict-loser=num", "--check-sync=true", "--max-lock=0", "--create-empty-src-dirs",
@@ -864,10 +857,10 @@ public class Rclone {
                 "--stats=1s", "--stats-log-level=NOTICE", "--use-json-log", "--log-level=INFO",
                 "--protondrive-original-file-size=true", "--protondrive-replace-existing-draft=false",
                 "--protondrive-enable-caching=false");
-        if (!operation.equals("run")) {
+        if (!operation.equals("run") && !operation.equals("preview-existing")) {
             args.add("--resync-mode=" + task.getBisyncResyncMode());
         }
-        if (operation.equals("preview")) args.add("--dry-run");
+        if (operation.equals("preview") || operation.equals("preview-existing")) args.add("--dry-run");
         if (task.getBisyncCheckAccess()) args.add("--check-access");
         if (!task.getBisyncBackupDir1().isEmpty()) args.add("--backup-dir1=" + task.getBisyncBackupDir1());
         if (!task.getBisyncBackupDir2().isEmpty()) args.add("--backup-dir2=" + task.getBisyncBackupDir2());
@@ -1816,7 +1809,9 @@ public class Rclone {
      */
     public static String buildRemoteSection(RemoteItem remoteItem, String remotePath, Context context) {
         String remoteName = remoteItem.getName();
-        String localRemotePath = (remoteItem.isRemoteType(RemoteItem.LOCAL))
+        String localRemotePath = (remoteItem.isRemoteType(RemoteItem.LOCAL)
+                && !remoteItem.isAlias() && !remoteItem.isPathAlias()
+                && !remoteItem.isCrypt() && !remoteItem.isCache())
                 ? getLocalRemotePathPrefix(remoteItem, context) + "/" : "";
         if (("//" + remoteName).equals(remotePath)) {
             return remoteName + ":" + localRemotePath;

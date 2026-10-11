@@ -13,6 +13,7 @@ import ca.pkay.rcloneexplorer.Items.Task
 import ca.pkay.rcloneexplorer.Items.Trigger
 import ca.pkay.rcloneexplorer.util.BisyncStateStore
 import ca.pkay.rcloneexplorer.util.ScheduleCalculator
+import java.security.MessageDigest
 import java.util.Random
 import java.util.TimeZone
 import java.util.concurrent.TimeUnit
@@ -23,6 +24,22 @@ class SyncManager(private val mContext: Context) {
         const val CHAIN_TASKS = "CHAIN_TASKS"
         const val AUTOMATIC = "AUTOMATIC"
         const val MAX_CHAIN_LENGTH = 16
+        const val TASK_REVISION = "TASK_REVISION"
+
+        /** Captures what a queued action was authorised to execute. */
+        @JvmStatic fun taskRevision(context: Context, task: Task): String {
+            val filter = task.filterId?.takeIf { it >= 0 }?.let { id ->
+                requireNotNull(DatabaseHandler(context).getFilter(id)) { "The selected filter no longer exists" }
+                    .getFiltersRaw()
+            } ?: ""
+            val digest = MessageDigest.getInstance("SHA-256")
+            for (part in listOf(task.asJSON().toString(), filter)) {
+                val bytes = part.toByteArray(Charsets.UTF_8)
+                digest.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.size).array())
+                digest.update(bytes)
+            }
+            return digest.digest().joinToString("") { "%02x".format(it) }
+        }
     }
 
     fun queue(trigger: Trigger) { if (trigger.isEnabled) queueTask(trigger.triggerTarget, automatic = true) }
@@ -46,6 +63,7 @@ class SyncManager(private val mContext: Context) {
         val task = DatabaseHandler(mContext).getTask(taskID) ?: return
         val data = Data.Builder().putLong(SyncWorker.TASK_ID, taskID)
             .putString("TASK_UUID", task.bisyncUUID)
+            .putString(TASK_REVISION, taskRevision(mContext, task))
             .putString(SyncWorker.BISYNC_OPERATION, operation)
             .putString(SyncWorker.BISYNC_APPROVAL, approval)
             .putBoolean(AUTOMATIC, automatic)

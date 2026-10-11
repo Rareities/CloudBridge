@@ -73,6 +73,13 @@ def builds = []
 targets.each { abi, target ->
     builds.add(tasks.register('build-' + abi) {
         dependsOn 'checkoutRclone'
+        inputs.property('engineCommit', RCLONE_REF)
+        inputs.property('engineRepository', RCLONE_REPO_URL)
+        inputs.property('goRequirement', GO_REQ_VERSION)
+        outputs.file(new File(OUTPUT_PATH, "${abi}/librclone.so"))
+        // Record outputs so Gradle invalidates its virtual filesystem snapshots
+        // after Go writes the native executables outside Gradle's file APIs.
+        outputs.upToDateWhen { false }
         doLast {
             def destination = new File(OUTPUT_PATH, "${abi}/librclone.so")
             destination.parentFile.mkdirs()
@@ -99,6 +106,8 @@ targets.each { abi, target ->
 
 tasks.register('buildAll') {
     dependsOn builds
+    outputs.dir(PROVENANCE_PATH)
+    outputs.upToDateWhen { false }
     doLast {
         PROVENANCE_PATH.mkdirs()
         def outputs = targets.collect { abi, ignored ->

@@ -34,7 +34,7 @@ public final class ProcessRunner {
     public void requestStop() {
         cancel.set(true);
         Process child = process;
-        if (child != null && signalled.compareAndSet(false, true)) child.destroy();
+        if (child != null && signalled.compareAndSet(false, true)) signal(child, false);
     }
 
     public Process child() { return process; }
@@ -60,8 +60,7 @@ public final class ProcessRunner {
                     forced = true;
                     // Available on recent Android releases. A second signal is also
                     // understood by rclone when the older Process API lacks this method.
-                    try { Process.class.getMethod("destroyForcibly").invoke(child); }
-                    catch (ReflectiveOperationException ignored) { child.destroy(); }
+                    signal(child, true);
                 }
                 if (elapsed >= 15_000L) break;
             }
@@ -105,6 +104,18 @@ public final class ProcessRunner {
         thread.setDaemon(true);
         thread.start();
         return thread;
+    }
+
+    private static void signal(Process child, boolean force) {
+        Thread signal = new Thread(() -> {
+            if (force) {
+                try { Process.class.getMethod("destroyForcibly").invoke(child); return; }
+                catch (ReflectiveOperationException ignored) { }
+            }
+            child.destroy();
+        }, force ? "rclone-force-stop" : "rclone-request-stop");
+        signal.setDaemon(true);
+        signal.start();
     }
 
     private static void deliver(LineHandler handler, String line, AtomicBoolean failed) {

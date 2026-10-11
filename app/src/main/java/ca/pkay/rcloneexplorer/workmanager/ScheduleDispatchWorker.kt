@@ -2,6 +2,7 @@ package ca.pkay.rcloneexplorer.workmanager
 
 import android.content.Context
 import androidx.work.Data
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
@@ -24,21 +25,25 @@ class ScheduleDispatchWorker(context: Context, parameters: WorkerParameters) : W
             if (trigger < 0) scheduler.queueTrigger() else scheduler.receiveTrigger(trigger)
             return Result.success()
         } catch (_: Exception) {
-            return if (runAttemptCount < 3) Result.retry() else Result.failure()
+            // AlarmManager and restore locks can be temporarily unavailable.
+            // A finite retry budget silently strands schedules until the next boot.
+            return Result.retry()
         } finally { lock.unlock() }
     }
 
     companion object {
         @JvmStatic fun reconcileAfterRestore(context: Context) {
             val request = OneTimeWorkRequestBuilder<ScheduleDispatchWorker>()
-                .setInputData(Data.Builder().putLong(TriggerService.TRIGGER_ID, -1).build()).build()
+                .setInputData(Data.Builder().putLong(TriggerService.TRIGGER_ID, -1).build())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, java.util.concurrent.TimeUnit.SECONDS).build()
             WorkManager.getInstance(context).enqueueUniqueWork("schedule-restore-reconcile",
                 ExistingWorkPolicy.APPEND_OR_REPLACE, request)
         }
 
         @JvmStatic fun enqueue(context: Context, trigger: Long) {
             val request = OneTimeWorkRequestBuilder<ScheduleDispatchWorker>()
-                .setInputData(Data.Builder().putLong(TriggerService.TRIGGER_ID, trigger).build()).build()
+                .setInputData(Data.Builder().putLong(TriggerService.TRIGGER_ID, trigger).build())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, java.util.concurrent.TimeUnit.SECONDS).build()
             WorkManager.getInstance(context).enqueueUniqueWork("schedule-dispatch:$trigger", ExistingWorkPolicy.KEEP, request)
         }
     }

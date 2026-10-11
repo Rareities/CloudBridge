@@ -33,11 +33,15 @@ public final class ProtectedRcloneConfig {
     }
 
     public static Process launch(Context context, String[] command, String[] environment) throws IOException {
+        EngineProvenance.verify(context);
         Lock lock = ConfigurationExclusion.LOCK.writeLock();
         lock.lock();
+        NativeSessionGate.Lease session = null;
         try {
             requireRecoveredJournal(context);
             hasRunningProcess();
+            if (!NativeSessionGate.isLocalMetadata(command) && !NativeSessionGate.isDaemon(command))
+                session = NativeSessionGate.GLOBAL.acquireCommand();
             File main = new File(context.getFilesDir(), "rclone.conf");
             File selected = selectedConfig(command, main);
             String password;
@@ -45,8 +49,12 @@ public final class ProtectedRcloneConfig {
             else password = NativeConfigEncryption.isEncrypted(selected) ? new ConfigPasswordStore(context).read() : null;
             Process child = Runtime.getRuntime().exec(command, NativeConfigEncryption.environment(environment, password));
             if (selected.equals(main)) children.add(child);
+            if (session != null) { session.closeAfterExit(child); session = null; }
             return child;
-        } finally { lock.unlock(); }
+        } finally {
+            if (session != null) session.close();
+            lock.unlock();
+        }
     }
 
     /** Metadata/help commands do not read remotes and must never trigger migration. */
@@ -66,6 +74,7 @@ public final class ProtectedRcloneConfig {
 
     /** Initial migration runs off the UI thread before remotes/version checks become available. */
     public static void prepare(Context context, String executable, String[] environment) throws IOException {
+        EngineProvenance.verify(context);
         Lock lock = ConfigurationExclusion.LOCK.writeLock();
         lock.lock();
         try {

@@ -97,4 +97,36 @@ class BisyncStateTest {
         assertTrue(BisyncStateStore.isReady(store.read(), "first"))
         assertFalse(BisyncStateStore.isReady(store.read(), "edited"))
     }
+
+    @Test fun advisoryPreviewKeepsAnExistingBaselineAndDoesNotRequireResync() {
+        val store = store()
+        store.begin(BisyncStateStore.PREVIEW, "original", null, "preview-initial")
+        store.finish(BisyncStateStore.PREVIEW, "original", "preview-initial", true, 0, "ok")
+        store.begin(BisyncStateStore.INITIALISE, "original", "original", "initial")
+        store.finish(BisyncStateStore.INITIALISE, "original", "initial", true, 0, "ok")
+        val before = store.read()
+        assertTrue(BisyncStateStore.isAdvisoryPreview(before, "original"))
+        assertFalse(BisyncStateStore.isAdvisoryPreview(before, "edited"))
+        store.begin(BisyncStateStore.PREVIEW, "original", null, "advisory")
+        store.finish(BisyncStateStore.PREVIEW, "original", "advisory", true, 0, "no changes")
+        assertTrue(BisyncStateStore.isReady(store.read(), "original"))
+        assertEquals("initial", store.read().optString("baselineId"))
+        assertFalse(BisyncStateStore.isPreviewApproved(store.read(), "original"))
+        store.begin(BisyncStateStore.PREVIEW, "original", null, "advisory-failed")
+        store.finish(BisyncStateStore.PREVIEW, "original", "advisory-failed", false, 3, "connection lost")
+        assertTrue(BisyncStateStore.isReady(store.read(), "original"))
+    }
+
+    @Test fun changedOptionsAfterReadyRequireANewExplicitApproval() {
+        val store = store()
+        store.begin(BisyncStateStore.PREVIEW, "old", null, "p1")
+        store.finish(BisyncStateStore.PREVIEW, "old", "p1", true, 0, "ok")
+        store.begin(BisyncStateStore.INITIALISE, "old", "old", "baseline")
+        store.finish(BisyncStateStore.INITIALISE, "old", "baseline", true, 0, "ok")
+        store.begin(BisyncStateStore.PREVIEW, "edited", null, "p2")
+        store.finish(BisyncStateStore.PREVIEW, "edited", "p2", true, 0, "ok")
+        assertFalse(BisyncStateStore.isReady(store.read(), "old"))
+        assertTrue(BisyncStateStore.isPreviewApproved(store.read(), "edited"))
+        assertThrows(IllegalArgumentException::class.java) { store.begin(BisyncStateStore.RUN, "old", null, "run") }
+    }
 }

@@ -62,7 +62,9 @@ public class TriggerService extends Service {
             Trigger trigger = dbHandler.getTrigger(id);
             if (trigger == null || !trigger.isEnabled()) { cancelTrigger(id); return; }
             long now = System.currentTimeMillis();
-            if (trigger.getNextDue() > 0 && trigger.getNextDue() > now) {
+            // A stale AlarmManager delivery must never execute a newly edited
+            // or not-yet-scheduled task. Only a persisted, due occurrence runs.
+            if (trigger.getNextDue() <= 0 || trigger.getNextDue() > now) {
                 schedule(trigger, now);
                 return;
             }
@@ -85,9 +87,9 @@ public class TriggerService extends Service {
         AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (alarm == null) throw new IllegalStateException("AlarmManager is unavailable; retry schedule dispatch");
         PendingIntent pending = getIntent(trigger.getId());
-        alarm.cancel(pending);
-        cancelLegacyIntent(trigger.getId(), alarm);
         if (!trigger.isEnabled()) {
+            alarm.cancel(pending);
+            cancelLegacyIntent(trigger.getId(), alarm);
             trigger.setNextDue(0);
             dbHandler.updateTrigger(trigger);
             return;
@@ -103,6 +105,8 @@ public class TriggerService extends Service {
                 due = ScheduleCalculator.nextInterval(now, trigger.getTime(), trigger.getNextDue());
             } else throw new IllegalArgumentException("Unsupported schedule type");
         } catch (IllegalArgumentException invalid) {
+            alarm.cancel(pending);
+            cancelLegacyIntent(trigger.getId(), alarm);
             trigger.setEnabled(false);
             trigger.setNextDue(0);
             dbHandler.updateTrigger(trigger);
@@ -113,6 +117,8 @@ public class TriggerService extends Service {
         boolean idle = preferences.getBoolean(context.getString(R.string.shared_preferences_allow_sync_trigger_while_idle), false);
         boolean exact = trigger.getType() == Trigger.TRIGGER_TYPE_SCHEDULE &&
                 (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarm.canScheduleExactAlarms());
+        // Keep the existing alarm in place until the new schedule is known valid.
+        // AlarmManager replaces the same PendingIntent on successful set().
         try {
             if (exact && idle) alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, due, pending);
             else if (exact) alarm.setExact(AlarmManager.RTC_WAKEUP, due, pending);
@@ -122,6 +128,7 @@ public class TriggerService extends Service {
             // Permission can be revoked between checking and scheduling. Keep a deferrable fallback.
             alarm.set(AlarmManager.RTC_WAKEUP, due, pending);
         }
+        cancelLegacyIntent(trigger.getId(), alarm);
         // Only acknowledge the next occurrence once AlarmManager accepted it.
         // Platform failures propagate to ScheduleDispatchWorker so WorkManager can retry.
         trigger.setNextDue(due);

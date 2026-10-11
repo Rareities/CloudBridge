@@ -39,6 +39,7 @@ object RunHistory {
         }
         while (next.length() >= 40) next.remove(0)
         next.put(JSONObject().put("runId", runId).put("operation", operation).put("status", status)
+            .put("engineCommit", ca.pkay.rcloneexplorer.BuildConfig.RCLONE_SOURCE_SHA)
             .put("started", started).put("finished", if (status == "IN_PROGRESS") JSONObject.NULL else System.currentTimeMillis())
             .put("exitCode", exit ?: JSONObject.NULL)
             .put("message", DiagnosticRedactor.redact(message).take(2048)))

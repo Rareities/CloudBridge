@@ -21,6 +21,18 @@ import org.robolectric.annotation.Config
 class TaskPersistenceTest {
     private val context: Application get() = ApplicationProvider.getApplicationContext()
 
+    @Test fun newScheduleIdentityIsAllocatedUnlessExplicitlyRestoring() {
+        val db = DatabaseHandler(context)
+        val first = db.createTrigger(Trigger(0).apply { title = "First" })
+        val second = db.createTrigger(Trigger(0).apply { title = "Second" })
+        assertNotEquals(first.id, second.id)
+        val restored = db.createTrigger(Trigger(501).apply { title = "Restored" }, withId = true)
+        assertEquals(501L, restored.id)
+        restored.title = "Edited"
+        db.updateTrigger(restored)
+        assertEquals("Edited", db.getTrigger(501)!!.title)
+    }
+
     @Test fun policyAndNullableReferencesSurviveDatabaseRoundTrip() {
         val db = DatabaseHandler(context)
         val saved = db.createTask(Task(0).apply {

@@ -10,7 +10,9 @@ public class DiagnosticRedactorTest {
                 "{\"client_refresh_token\":\"CANARY\"}",
                 "{\"client_salted_key_pass\":\"CANARY\"}",
                 "password=CANARY", "Authorization: Bearer CANARY", "api-key='CANARY'",
-                "https://name:CANARY@proxy.example/", "totp_secret=CANARY"
+                "https://name:CANARY@proxy.example/", "totp_secret=CANARY",
+                "Authorization: Basic CANARY", "RCLONE_CONFIG_PASS=CANARY", "rc_pass=CANARY",
+                "{\"RCLONE_RC_PASS\":\"CANARY\"}", "Cookie: harmless=1; session=CANARY"
         }) assertFalse(input, DiagnosticRedactor.redact(input).contains("CANARY"));
     }
     @Test public void ordinaryFailureTextIsPreserved() {

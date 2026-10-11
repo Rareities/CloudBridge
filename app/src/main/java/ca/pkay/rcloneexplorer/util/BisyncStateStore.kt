@@ -21,6 +21,10 @@ class BisyncStateStore(private val directory: File) {
         @JvmStatic fun isReady(state: JSONObject, fingerprint: String): Boolean =
             state.optString("status") == READY && state.optString("fingerprint") == fingerprint
 
+        /** Use this before begin(PREVIEW) to select ordinary dry-run on saved listings. */
+        @JvmStatic fun isAdvisoryPreview(state: JSONObject, fingerprint: String): Boolean =
+            isReady(state, fingerprint) && state.optString("baselineId").isNotBlank()
+
         @JvmStatic fun isPreviewApproved(state: JSONObject, fingerprint: String, now: Long = System.currentTimeMillis()): Boolean {
             val age = now - state.optLong("previewAt")
             return state.optString("status") == PREVIEW_READY &&
@@ -66,7 +70,11 @@ class BisyncStateStore(private val directory: File) {
                     "Initialisation approval is missing, expired or no longer matches the task, configuration or engine. Run a new preview."
                 }
             }
-            PREVIEW -> Unit
+            PREVIEW -> {
+                // Advisory dry-runs against a matching, healthy baseline must not
+                // turn a normal task into a new initialisation requirement.
+                state.put("previewWasReady", isAdvisoryPreview(state, fingerprint))
+            }
             else -> throw IllegalArgumentException("Unknown bisync operation")
         }
         state.put("status", when (operation) {
@@ -89,20 +97,29 @@ class BisyncStateStore(private val directory: File) {
             .put("message", message.take(2048))
         when {
             operation == PREVIEW && success -> {
-                state.put("status", PREVIEW_READY)
+                val advisory = state.optBoolean("previewWasReady", false) &&
+                    state.optString("fingerprint") == fingerprint
+                state.put("status", if (advisory) READY else PREVIEW_READY)
                     .put("previewAt", System.currentTimeMillis())
-                    .put("previewFingerprint", fingerprint)
                     .put("preview", if (preview.length > 16000)
                         "[Earlier preview entries omitted; this is a bounded diagnostic summary.]\n" + preview.takeLast(16000)
                         else preview)
+                if (!advisory) state.put("previewFingerprint", fingerprint)
             }
             success -> {
                 state.put("status", READY).put("fingerprint", fingerprint)
                     .put("lastSuccessfulRun", System.currentTimeMillis())
                 if (operation == INITIALISE) state.put("baselineId", runId)
             }
+            operation == PREVIEW && state.optBoolean("previewWasReady", false) &&
+                state.optString("fingerprint") == fingerprint -> {
+                // A failed advisory dry-run does not modify the engine baseline.
+                // Preserve its identity and report the failure to the user.
+                state.put("status", READY)
+            }
             else -> state.put("status", NEEDS_RECOVERY)
         }
+        state.remove("previewWasReady")
         write(state)
     }
 

@@ -58,6 +58,7 @@ class TaskEditorControls(
     private val backupLocal = activity.findViewById<EditText>(R.id.bisync_backup_local)
     private val backupRemote = activity.findViewById<EditText>(R.id.bisync_backup_remote)
     private val preview = activity.findViewById<Button>(R.id.bisync_preview_button)
+    private val previewReport = activity.findViewById<Button>(R.id.bisync_preview_report_button)
     private val approve = activity.findViewById<Button>(R.id.bisync_initialize_button)
     private val charging = activity.findViewById<Switch>(R.id.task_charging_only)
     private val battery = activity.findViewById<Switch>(R.id.task_battery_not_low)
@@ -80,6 +81,7 @@ class TaskEditorControls(
             SyncManager(activity).previewBisync(task.id)
         }
         approve.setOnClickListener { review() }
+        previewReport.setOnClickListener { showLastPreview() }
         run.setOnClickListener {
             val task = persist() ?: return@setOnClickListener
             observe(task)
@@ -160,6 +162,7 @@ class TaskEditorControls(
         verifiedFingerprint = null
         run.isEnabled = false
         approve.isEnabled = false
+        previewReport.isEnabled = false
         if (panel.visibility == View.VISIBLE) refresh()
     }
 
@@ -215,12 +218,14 @@ class TaskEditorControls(
 
     fun refresh() {
         val task = taskProvider()
+        previewReport.isEnabled = false
         preview.isEnabled = !active
         run.isEnabled = !active && panel.visibility != View.VISIBLE
         approve.isEnabled = false
         if (task != null && BisyncPolicy.isBisync(task) && task.bisyncUUID.isNotEmpty()) {
             try {
                 val state = BisyncStateStore(BisyncPolicy.workdir(activity, task)).read()
+                previewReport.isEnabled = !active && state.optLong("previewAt") > 0 && state.optString("preview").isNotBlank()
                 val code = state.optString("status", BisyncStateStore.NEEDS_INITIALISATION)
                 val current = draftMatchesSaved(task)
                 val checkable = current && !active &&
@@ -294,6 +299,18 @@ class TaskEditorControls(
                     observe(task)
                 }.show()
         }
+    }
+
+    private fun showLastPreview() {
+        val task = taskProvider() ?: return
+        try {
+            val state = BisyncStateStore(BisyncPolicy.workdir(activity, task)).read()
+            val report = state.optString("preview")
+            if (report.isBlank()) { error("Run a preview first"); return }
+            val summary = activity.getString(R.string.bisync_saved_preview, date(state.optLong("previewAt")), report)
+            AlertDialog.Builder(activity).setTitle(R.string.bisync_view_preview)
+                .setView(selectableText(summary)).setPositiveButton(android.R.string.ok, null).show()
+        } catch (failure: Exception) { error(failure.message ?: "Could not read the saved preview") }
     }
 
     private fun schedules() {
