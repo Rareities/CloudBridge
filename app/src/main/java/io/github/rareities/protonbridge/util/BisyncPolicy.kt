@@ -78,6 +78,24 @@ object BisyncPolicy {
         return pieces.joinToString("/")
     }
 
+    /** Temporary preview listings are unnecessary after their native process exits. */
+    @JvmStatic fun retirePreview(directory: File, runId: String, confirmedExit: Boolean): Boolean {
+        if (!confirmedExit || !isValidIdentity(runId)) return false
+        return try {
+            val previews = File(directory, "previews")
+            val preview = File(previews, runId)
+            if (previews.canonicalFile != File(directory.canonicalFile, "previews").absoluteFile ||
+                preview.canonicalFile != File(previews.canonicalFile, runId).absoluteFile) return false
+            // Engine preview state is flat. Refuse nested/special entries and
+            // links outside this folder; never traverse a directory during cleanup.
+            val files = preview.listFiles() ?: return !preview.exists()
+            if (files.size > 128 || files.any { !it.isFile || it.canonicalFile.parentFile != preview.canonicalFile }) return false
+            for (file in files) if (!file.delete()) return false
+            preview.delete()
+        } catch (_: java.io.IOException) { false }
+        catch (_: SecurityException) { false }
+    }
+
     @JvmStatic fun overlaps(first: String, second: String): Boolean {
         val a = first.trimEnd('/', '\\')
         val b = second.trimEnd('/', '\\')
@@ -93,7 +111,7 @@ object BisyncPolicy {
 
     @JvmStatic fun fingerprint(task: Task, filters: List<FilterEntry>, configIdentity: String): String {
         val values = listOf(
-            "bisync-policy-v4", normalisedMode(task.direction), task.bisyncUUID,
+            "bisync-policy-v5", normalisedMode(task.direction), task.bisyncUUID,
             File(task.localPath).canonicalPath,
             task.remoteId, task.remotePath, task.remoteType.toString(), task.bisyncMaxDelete.toString(),
             task.bisyncResyncMode, task.bisyncCheckAccess.toString(), task.bisyncBackupDir1,

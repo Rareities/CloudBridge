@@ -78,6 +78,12 @@
                         android:textAppearance="@style/TextAppearance.AppCompat.Display1"
                         android:textSize="24sp" />
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_margin="8dp"
+                        android:text="@string/filter_pattern_help" />
+
                     <androidx.recyclerview.widget.RecyclerView
                         android:id="@+id/filter_filterlist"
                         android:layout_width="match_parent"

@@ -207,6 +207,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         switchWifi.isChecked = existingTask?.wifionly ?: false
         switchMD5sum.isChecked = existingTask?.md5sum ?: false
         switchDeleteExcluded.isChecked = existingTask?.deleteExcluded ?: false
+        filterDeletionAcknowledged = savedInstanceState?.getBoolean("filterDeletionAcknowledged") ?: ((existingTask?.filterPolicyVersion ?: 0) >= 1)
         taskControls = TaskEditorControls(this, rcloneInstance, { existingTask }, { persistWithoutExit() },
             { saved -> editorReady && draftMatchesSaved(saved) })
         taskControls.populate(existingTask)
@@ -241,10 +242,8 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
 
 
-    private val filterItems: List<Filter>
-        get() {
-            return dbHandler.allFilters
-        }
+    private var filterItems: List<Filter> = emptyList()
+    private var filterDeletionAcknowledged = false
 
 
     override fun onSupportNavigateUp(): Boolean {
@@ -301,7 +300,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
         taskToPopulate.wifionly = switchWifi.isChecked
         taskToPopulate.md5sum = switchMD5sum.isChecked
         taskToPopulate.deleteExcluded = switchDeleteExcluded.isChecked
-        taskToPopulate.filterId = if(filterDropdown.selectedItemPosition == 0 || filterDropdown.selectedItemPosition == -1) null else filterItems[filterDropdown.selectedItemPosition - 1].id
+        taskToPopulate.filterId = filterItems.getOrNull(filterDropdown.selectedItemPosition - 1)?.id
         taskToPopulate.onFailFollowup = (onFailDropdown.selectedItem as TaskNameIdPair).id
         taskToPopulate.onSuccessFollowup = (onSuccessDropdown.selectedItem as TaskNameIdPair).id
         if (taskToPopulate.onFailFollowup == id && id > 0 ||
@@ -359,6 +358,21 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
             Toasty.error(this, e.message ?: "Invalid task settings", Toast.LENGTH_LONG, true).show()
             return null
         }
+        val selectedRules = try {
+            taskToPopulate.filterId?.let { dbHandler.getFilter(it)?.getFilters() } ?: arrayListOf()
+        } catch (error: IllegalArgumentException) {
+            Toasty.error(this, error.message ?: "Invalid saved filter", Toast.LENGTH_LONG, true).show()
+            return null
+        }
+        if (taskToPopulate.deleteExcluded && selectedRules.any { it.filterType == io.github.rareities.protonbridge.Items.FilterEntry.FILTER_INCLUDE } && !filterDeletionAcknowledged) {
+            AlertDialog.Builder(this).setTitle("Review excluded-file deletion")
+                .setMessage("Include rules now limit the selected files. Delete excluded files can remove destination files outside that selection. Continue with this setting?")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok) { _, _ -> filterDeletionAcknowledged = true; fab.performClick() }
+                .show()
+            return null
+        }
+        taskToPopulate.filterPolicyVersion = 1
         return taskToPopulate
     }
 
@@ -555,6 +569,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("filterDeletionAcknowledged", filterDeletionAcknowledged)
         existingTask?.let { outState.putLong(ID_EXTRA, it.id) }
         super.onSaveInstanceState(outState)
     }
@@ -601,10 +616,15 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
 
     private fun prepareFilterDropdown() {
+        filterItems = dbHandler.allFilters
         val filterList = filterItems.toMutableList()
+        filterDropdown.onItemSelectedListener = null
 
         if(filterList.isEmpty()) {
             createNewFilterButton.visibility = View.VISIBLE
+            filterDropdown.adapter = FilterSpinnerAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf(getString(R.string.task_edit_filter_nofilter)))
+            filterDropdown.setSelection(0)
+            selectedFilter = null
             filterDropdown.visibility = View.INVISIBLE
         }
         else {
@@ -628,7 +648,7 @@ class TaskActivity : AppCompatActivity(), FolderSelectorCallback{
 
             filterDropdown.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parentView: AdapterView<*>?, selectedItemView: View?, position: Int, id: Long) {
-                    selectedFilter = if (position > 0 && position < titles.size) filterItems[position - 1] else null
+                    selectedFilter = filterItems.getOrNull(position - 1)
                     taskControls.onDraftChanged()
                 }
                 override fun onNothingSelected(parentView: AdapterView<*>?) {}

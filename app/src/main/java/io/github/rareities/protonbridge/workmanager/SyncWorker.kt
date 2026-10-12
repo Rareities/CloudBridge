@@ -139,6 +139,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             val filters = task.filterId?.takeIf { it >= 0 }?.let { filterId ->
                 requireNotNull(mDatabase.getFilter(filterId)) { "The selected filter no longer exists" }.getFilters()
             } ?: arrayListOf()
+            io.github.rareities.protonbridge.util.FilterRules.requireReviewedDeletion(task, filters)
             if (BisyncPolicy.isBisync(task)) handleBisync(task, operation, filters) else handleOneWay(task, filters)
         } catch (e: ProtonAccountState.NeedsUserAction) {
             needsUserAction = true
@@ -252,6 +253,8 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
     }
 
     private fun handleBisync(savedTask: Task, operation: String, filters: ArrayList<FilterEntry>) {
+        var previewRoot: File? = null
+        var previewProcessExited = false
         val preparation = io.github.rareities.protonbridge.util.ConfigurationExclusion.prepare()
         try {
             // Task.copy() only copies its constructor ID; serialize every option instead.
@@ -262,6 +265,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             account?.let { ProtonAccountState.requireReady(mContext, it.identity) }
             BisyncPolicy.validate(mContext, task)
             val directory = BisyncPolicy.workdir(mContext, task)
+            if (operation == BisyncStateStore.PREVIEW) previewRoot = directory
             val state = BisyncStateStore(directory)
             val fingerprint = BisyncPolicy.fingerprint(task, filters, mRclone.configurationIdentity { isStopped || cancelled })
             val advisory = operation == BisyncStateStore.PREVIEW && BisyncStateStore.isAdvisoryPreview(state.read(), fingerprint)
@@ -299,6 +303,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             // Parse every custom flag against the exact bundled engine before authentication or mutation.
             publishPhase("Checking rclone flags")
             val check = execute(mRclone.bisync(task, childDirectory, engineOperation, filters, true), false)
+            previewProcessExited = check.exited
             require(check.success()) { detail.ifBlank { "The selected engine rejected a task option" } }
             diagnostics.setLength(0)
             exitCode = null
@@ -306,6 +311,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             var success = false
             try {
                 if (isStopped || cancelled) throw InterruptedException("Cancelled before bisync started")
+                previewProcessExited = false
                 val child = mRclone.bisync(task, childDirectory, engineOperation, filters, false)
                 currentProcess = child
                 // launch registered its native lease under the same lock, so configuration
@@ -315,6 +321,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                     else if (operation == BisyncStateStore.INITIALISE) "Initialising: connecting and scanning files"
                     else "Bisync: connecting and scanning files")
                 val outcome = execute(child, true)
+                previewProcessExited = outcome.exited
                 success = outcome.success() && !isStopped && !cancelled
                 completed = success
                 if (success && operation != BisyncStateStore.PREVIEW) sendUploadFinishedBroadcast(task.remoteId, task.remotePath)
@@ -322,7 +329,10 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                 state.finish(operation, fingerprint, id.toString(), success && !isStopped && !cancelled,
                     exitCode, detail, diagnosticText())
             }
-        } finally { preparation.close() }
+        } finally {
+            try { previewRoot?.let { BisyncPolicy.retirePreview(it, id.toString(), previewProcessExited) } }
+            finally { preparation.close() }
+        }
     }
 
     private fun execute(child: Process?, progress: Boolean): ProcessRunner.Outcome {

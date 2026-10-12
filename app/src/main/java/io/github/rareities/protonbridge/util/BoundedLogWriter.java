@@ -25,9 +25,9 @@ public final class BoundedLogWriter {
     }
 
     public synchronized void append(File file, String message) {
-        String bounded = message == null ? "" : message;
+        String bounded = DiagnosticRedactor.redact(message);
         if (bounded.length() > MAX_RECORD_CHARS) bounded = bounded.substring(0, MAX_RECORD_CHARS) + " [truncated]";
-        byte[] bytes = (DiagnosticRedactor.redact(bounded) + "\n").getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = (bounded + "\n").getBytes(StandardCharsets.UTF_8);
         if (pending.size() == MAX_PENDING) { pending.removeFirst(); dropped++; }
         pending.addLast(new Entry(file, bytes));
         if (writer == null) {

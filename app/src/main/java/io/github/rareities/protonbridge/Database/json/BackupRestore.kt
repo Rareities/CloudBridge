@@ -116,10 +116,8 @@ object BackupRestore {
                     if (proxyPassword != null) io.github.rareities.protonbridge.util.SecretSettings.store(context,
                         context.getString(io.github.rareities.protonbridge.R.string.pref_key_proxy_password), proxyPassword)
                     syncInstalled(context)
-                    AtomicFile(File(journal, "pending")).delete()
-                    require(!File(journal, "pending").exists() && !File(journal, "pending.bak").exists()) { "Cannot finish restore journal" }
-                    io.github.rareities.protonbridge.util.DurableFiles.syncDirectory(journal)
-                    cleanup(journal)
+                    retirePending(journal)
+                    cleanupCommitted(journal)
                     rclone.invalidateRemotesCache()
                 } catch (failure: Exception) {
                     try { recoverLocked(context) } catch (rollback: Exception) { failure.addSuppressed(rollback) }
@@ -137,7 +135,7 @@ object BackupRestore {
 
     @JvmStatic @Throws(IOException::class)
     fun recoverIfNeeded(context: Context) = run {
-        if (!File(root(context), "pending").exists() && !File(root(context), "pending.bak").exists()) return@run
+        if (!ConfigurationExclusion.isRestoreRecoveryRequired() && !File(root(context), "pending").exists() && !File(root(context), "pending.bak").exists()) return@run
         val lock = ConfigurationExclusion.LOCK.writeLock()
         lock.lock()
         try {
@@ -153,7 +151,7 @@ object BackupRestore {
     private fun recoverLocked(context: Context) {
         val journal = root(context)
         val marker = File(journal, "pending")
-        if (!marker.exists() && !File(journal, "pending.bak").exists()) return
+        if (!ConfigurationExclusion.isRestoreRecoveryRequired() && !marker.exists() && !File(journal, "pending.bak").exists()) return
         val snapshotFile = File(journal, "previous.json")
         require(snapshotFile.length() <= 9 * 1024 * 1024) { "Restore journal is invalid" }
         val backup = JSONObject(AtomicFile(snapshotFile).openRead().bufferedReader().use { it.readText() })
@@ -182,10 +180,8 @@ object BackupRestore {
             io.github.rareities.protonbridge.util.SecretSettings.restoreSnapshot(context, it)
         }
         syncInstalled(context)
-        AtomicFile(marker).delete()
-        require(!marker.exists() && !File(journal, "pending.bak").exists()) { "Cannot finish rollback journal" }
-        io.github.rareities.protonbridge.util.DurableFiles.syncDirectory(journal)
-        cleanup(journal)
+        retirePending(journal)
+        cleanupCommitted(journal)
     }
 
     private fun syncInstalled(context: Context) {
@@ -203,12 +199,36 @@ object BackupRestore {
         }
     }
 
-    private fun cleanup(directory: File) {
-        // Only these app-owned journal files are removed. Engine baselines remain untouched.
-        AtomicFile(File(directory, "previous.json")).delete()
-        AtomicFile(File(directory, "previous.conf")).delete()
-        AtomicFile(File(directory, "previous.password")).delete()
-        io.github.rareities.protonbridge.util.DurableFiles.syncDirectory(directory)
+    private fun retirePending(journal: File) {
+        val pending = File(journal, "pending")
+        AtomicFile(pending).delete()
+        require(!pending.exists() && !File(journal, "pending.bak").exists()) { "Cannot retire restore journal" }
+        try {
+            io.github.rareities.protonbridge.util.DurableFiles.syncDirectory(journal)
+            ConfigurationExclusion.restoreRecovered()
+        } catch (failure: Exception) {
+            ConfigurationExclusion.requireRestoreRecovery()
+            // Keep native admission blocked while commit durability is uncertain.
+            try { write(pending, byteArrayOf(1)) }
+            catch (restore: Exception) { failure.addSuppressed(restore) }
+            throw failure
+        }
+    }
+
+    private fun cleanupCommitted(directory: File) {
+        // The pending-marker barrier has already committed the installed state.
+        // Cleanup cannot change that result or roll it back.
+        try {
+            for (name in listOf("previous.json", "previous.conf", "previous.password")) {
+                AtomicFile(File(directory, name)).delete()
+                require(!File(directory, name).exists() && !File(directory, "$name.bak").exists()) {
+                    "Obsolete restore journal remains"
+                }
+            }
+            io.github.rareities.protonbridge.util.DurableFiles.syncDirectory(directory)
+        } catch (_: Exception) {
+            android.util.Log.w("BackupRestore", "Restore committed; obsolete journal cleanup is deferred")
+        }
     }
 
     private fun write(file: File, content: ByteArray) {
@@ -217,5 +237,8 @@ object BackupRestore {
         try { stream.write(content); stream.fd.sync(); target.finishWrite(stream) }
         catch (e: Exception) { target.failWrite(stream); throw e }
         io.github.rareities.protonbridge.util.DurableFiles.syncDirectory(file.parentFile!!)
+        java.io.ByteArrayInputStream(content).use {
+            io.github.rareities.protonbridge.util.DurableFiles.verifyContents(target, it, content.size)
+        }
     }
 }

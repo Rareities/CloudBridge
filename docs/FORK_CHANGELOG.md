@@ -4,6 +4,107 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.1.8-rc.1 — consistent Proton checksums, working filters and fork cleanup
+
+### Proton revision consistency
+
+- Pin rclone to [`f1d1627e`](https://github.com/Rareities/rclone/commit/f1d1627e2e91867b5fed5eb6bb4d4e8d094924c8).
+  Resolve authenticated detailed metadata before bisync captures its listing and
+  pre-copy result records. Revision history can identify the correct revision
+  while supplying attributes that disagree with the subsequent detailed download
+  response. Previously, opening that download could change the object checksum
+  after bisync had recorded it, causing successful transfers to end with a
+  checksum-listing abort, including `.nomedia`.
+- Legacy listings select fresh canonical history identity, then use the existing
+  query-free detailed revision route. Explicit advertised signed metadata must
+  authenticate too; invalid metadata remains an error. Cached detailed metadata
+  is bounded, keyed to the canonical revision and reverified against current keys.
+  History metadata cannot seed the authoritative cache.
+- Downloads verify canonical identity and known size, SHA1 and modification time
+  before consuming content or changing the listed object. A changed or inconsistent
+  snapshot closes the response and fails safely. Unknown fields remain unknown.
+  Checksums, signatures and recovery requirements stay enabled.
+- Regressions reproduce the history/detail disagreement with signed fixtures
+  whose hashes are computed from actual content. A real bisync fixture reproduces
+  the pre-copy/post-open mismatch and verifies corrected Path2 initialisation and
+  subsequent sync with a 29-byte marker, an empty marker and unchanged companions.
+  This reproduces a mechanism consistent with the reported failure; there is no
+  live Proton account trace proving it is the only cause of that particular file.
+
+### Filters, flags and initialisation
+
+- Saved GUI patterns accept conventional signed lines and CRLF, remove accidental
+  surrounding spaces/quotes and reject blank, malformed or control-character
+  patterns. Task flags accept `--exclude /.nomedia`, quoted values and `--exclude=…`.
+  All flags and saved filters are composed through the same builder for **Save and
+  preview**, **Review and initialise**, and normal runs. Non-filter tuning flags
+  remain present in all three stages.
+- Basic exclusions take priority over basic includes; includes now restrict the
+  selection with an implicit final exclusion. Pure expert `--filter` rules retain
+  their order and pattern whitespace. Mixing a filter reset with saved/basic
+  restrictions is rejected. One-way tasks using the old unrestricted include
+  behavior with **Delete excluded files** must review and save that setting before
+  running, preventing a silently wider deletion scope.
+- Recycled filter rows detach old callbacks so editing one row cannot change another.
+  Preserve unfinished filter edits across recreation; use one dropdown snapshot
+  for displayed names and saved IDs, and reset empty filter lists correctly.
+- Editor help explains root `/.nomedia` versus all-depth `.nomedia` patterns.
+  Excluding a marker leaves it untouched and does not omit adjacent deck/media
+  files; do not exclude entire Anki media folders. Native-engine tests check both
+  pattern depths, nested included files, all three stages and retained source markers.
+- Bump the baseline fingerprint policy: repeat preview and review initialisation
+  for existing tasks. Initialisation is a real `--resync`; review what may be
+  overwritten, especially when preferring Proton/Path2. No automatic exclusion,
+  deletion, checksum bypass or resync is introduced.
+
+### Audit repairs and removed code
+
+- Redact diagnostic secrets before bounding lines; handle long or unterminated
+  JSON secret values without recursive regex stack overflow or truncated leaks.
+- Verify installed configuration and wrapped-password bytes after atomic writes,
+  synchronize files and directory entries, and retain rollback state on uncertain
+  restore-marker retirement. A double failure also blocks native preparation in
+  the current process until forced recovery. A committed restore remains successful
+  if only obsolete-journal cleanup fails. These barriers cannot guarantee recovery
+  after every physical storage failure or a process restart with no writable marker.
+- Preserve downloaded timestamps for newer/older conflict policies with a narrowly
+  scoped local-backend override; other operations retain existing timestamp behavior.
+- Retire disposable preview files only after confirmed native exit, with exact UUID
+  paths, flat-file bounds and symlink checks. Persistent baselines are never removed.
+- Remove unused revision API shim, obsolete global pure-Go DNS override and app DNS
+  formatter, unused Android scheduling service lifecycle/manifest registration, and
+  redundant post-restore scheduling reconciliation. Retain the actual scheduling
+  adapter, WorkManager dispatcher and useful Internxt authentication/retry changes.
+
+### Scope of the complete fork review
+
+- Reviewed all **30 prior application fork commits** against direct upstream
+  [`ece92754`](https://github.com/thies2005/CloudBridge/commit/ece9275441e448ec520a7cbc336c59bfe643b22c):
+  374 rename-aware file entries covering production Java/Kotlin, resources, host and
+  device tests, workflows, build scripts, branding and documentation. Rename-only
+  changes were separated from functional changes; all added production classes
+  have actual callers. The existing chronological commit ledger below remains the
+  detailed history.
+- Reviewed all **25 prior rclone fork commits** against
+  [`4f19e9cd`](https://github.com/rclone/rclone/commit/4f19e9cd6f442282d7fa8d5fdbd28ebb68be1131):
+  259 file entries including core listing guards, bisync/backend changes, Internxt
+  authentication, native builds and test/workflow changes. Compared every local
+  runtime delta of the Proton companions against their exact imported revisions:
+  bridge `6f7fc6530d4a77d33d08e36464e018600ae4b93d` and API
+  `9dcca00ba1dc779a8958c9d4988b79ce2f9f3233`.
+- Retained useful bisync approval/recovery, battery-aware scheduling, process
+  exclusion, encrypted credentials/configuration, backup recovery, private RC
+  access, Proton concurrency/cache limits, signed-release provenance and attribution.
+  No speculative cryptographic-format rewrite or broad removal of useful safety
+  mechanisms resulted from the review. Disposable fixtures validate local behavior;
+  device battery drain and live-account behavior still need installed-app testing.
+- Validation completed before the application commit: independent code review;
+  engine/companion regressions, race checks and vet; **201 Android host/unit tests
+  with no failures or skips**, including real local-engine filter/config tests;
+  lint; all four native ABI builds and APK engine/provenance checks. The signed
+  publication workflow additionally verifies package, increasing version codes
+  and the existing signing certificate before publishing.
+
 ## 1.1.7-rc.1 — fix Proton preview revision lookup
 
 - Pin the rclone engine to [`b8c5405e`](https://github.com/Rareities/rclone/commit/b8c5405e236da9f2b3a549ea199adabd0ab5ff0d).
@@ -587,7 +688,7 @@ provenance pins this release's exact engine source.
 
 Authors below are git metadata. Merge rows represent integration, not an extra independent feature implementation. Official upstream release-tooling commits d03990188 and 4f19e9cd6 are upstream intake, not credited as fork inventions.
 
-### CloudBridge
+### ProtonBridge
 
 | Commit | Author | Change |
 |---|---|---|
@@ -598,6 +699,29 @@ Authors below are git metadata. Merge rows represent integration, not an extra i
 | [a50c7a0784](https://github.com/Rareities/ProtonBridge/commit/a50c7a078448d2edfdd80989e46a8c847c7f0327) | ChatGPT | test: validate signed release without test-only shrunk helper calls |
 | [e18a057f1c](https://github.com/Rareities/ProtonBridge/commit/e18a057f1c925510af6dd08d90f697a5ed9307b0) | ChatGPT | fix: complete remote setup lifecycle and preserve queued task actions |
 | [a6589372cb](https://github.com/Rareities/ProtonBridge/commit/a6589372cbf86e0b72fb374b500ff81ac87cc7a6) | Rareities | Merge verified Proton bisync, privacy and signed release candidate |
+| [f5b8f5fc3e](https://github.com/Rareities/ProtonBridge/commit/f5b8f5fc3e282116ad1ecfd7eabc1e6c6ce247db) | ChatGPT | fix: bind approvals to configuration changes and durable restore state |
+| [cbcda693b2](https://github.com/Rareities/ProtonBridge/commit/cbcda693b2c924ebc0939fb0099ad02c47d2a28f) | ChatGPT | docs: explain personal fork and record full commit-linked changelog |
+| [e8f2a5ad5a](https://github.com/Rareities/ProtonBridge/commit/e8f2a5ad5aae553eca7a5fd5d014d413120d9316) | ChatGPT | fix: explain missing bisync initialization before resolving baseline UUID |
+| [dbbe9ee32f](https://github.com/Rareities/ProtonBridge/commit/dbbe9ee32f912f7c3060ce617d792b3bf84ca4dc) | ChatGPT | docs: record first-run bisync UUID fix and validation |
+| [f59a257740](https://github.com/Rareities/ProtonBridge/commit/f59a2577405c16a4ce3ac93cb1ebdf47a0fcb5f9) | Mahant | fix: simplify bisync setup and report task startup and waiting phases |
+| [307e8772f8](https://github.com/Rareities/ProtonBridge/commit/307e8772f8c3574cf9374410f2160f47a0328c1b) | Mahant | docs: link bisync execution fixes and verification in fork changelog |
+| [eb41c11444](https://github.com/Rareities/ProtonBridge/commit/eb41c11444ff4b8e2359b94d96ed307ea8bb428e) | Mahant | ci: allow isolated bisync test prerelease on reviewed branch |
+| [d4521de6c1](https://github.com/Rareities/ProtonBridge/commit/d4521de6c15a86ee85e8f485299ee0ac239fda9c) | Mahant | ci: publish verified debug APK prereleases from isolated test branch |
+| [42988641a5](https://github.com/Rareities/ProtonBridge/commit/42988641a5848c4560c6aedb85be1a1859849349) | Mahant | docs: record test branches and prerelease distribution gates |
+| [461d911d63](https://github.com/Rareities/ProtonBridge/commit/461d911d63eef19a60449931ff9a2e8686393ee9) | Mahant | chore: retire temporary test publishing and prepare signed promotion |
+| [fe23bd52d9](https://github.com/Rareities/ProtonBridge/commit/fe23bd52d90e46ca63384db4b174bc50b4a3cc05) | Mahant | Merge audited bisync fixes, fork documentation and release cleanup |
+| [ad272aaa52](https://github.com/Rareities/ProtonBridge/commit/ad272aaa5254c80799552a27adcbc57a6e5467e1) | Mahant | docs: record signed promotion audit and repository cleanup |
+| [7227ad5d12](https://github.com/Rareities/ProtonBridge/commit/7227ad5d12416e1efda1581704e811b36d7cd474) | Mahant | feat: rebrand fork as ProtonBridge and improve Proton listings |
+| [8c002e3de8](https://github.com/Rareities/ProtonBridge/commit/8c002e3de84e37f5edc07f56dcc22b2f4decdb40) | Mahant | docs: clarify ProtonBridge and upstream maintainer attribution |
+| [62a282181f](https://github.com/Rareities/ProtonBridge/commit/62a282181ff6d1c6ebcf19243e2fc25b44f2b89a) | Mahant | docs: record signed ProtonBridge release verification |
+| [96d0f0d2f6](https://github.com/Rareities/ProtonBridge/commit/96d0f0d2f6208da08251b3832d89f844b3040d8a) | Mahant | perf: reduce battery overhead and harden background privacy |
+| [e1595bcd07](https://github.com/Rareities/ProtonBridge/commit/e1595bcd07c468a134829d7608c8df1c61d9dd19) | Mahant | docs: record battery and privacy release verification |
+| [ed23293844](https://github.com/Rareities/ProtonBridge/commit/ed232938441169c37bee15a4a292d81bd95d663a) | Mahant | fix: simplify flag editing and support conflict resolution |
+| [c0113618d1](https://github.com/Rareities/ProtonBridge/commit/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d) | Mahant | docs: record flag editor release verification |
+| [28b96c9701](https://github.com/Rareities/ProtonBridge/commit/28b96c9701566c2563bd79ad5ee959425a9e6a46) | Mahant | docs: consolidate ProtonBridge documentation and release notes |
+| [76b711c035](https://github.com/Rareities/ProtonBridge/commit/76b711c035944afa7b8677172d907ed545df2270) | Mahant | fix: pin consistent Proton revision metadata and explain checksum failures |
+| [5047b4c387](https://github.com/Rareities/ProtonBridge/commit/5047b4c387f1dd185bb2790f58e97c052493bcce) | Mahant | fix: pin verified legacy Proton revision metadata resolution |
+| [691ebb7b1c](https://github.com/Rareities/ProtonBridge/commit/691ebb7b1c8bb9fec2ccb32d481042eff6cc9ba5) | Mahant | fix: update Proton revision lookup for preview and downloads |
 
 ### rclone
 
@@ -621,6 +745,14 @@ Authors below are git metadata. Merge rows represent integration, not an extra i
 | [76f218c559](https://github.com/Rareities/rclone/commit/76f218c559a5be7c423eba7a381e71df260c7b89) | ChatGPT | Merge reviewed official rclone master release tooling |
 | [6a9f0fc48c](https://github.com/Rareities/rclone/commit/6a9f0fc48ca23660022fe24615bf5e988710d418) | ChatGPT | build: check known vulnerabilities and preserve executable archive modes |
 | [47048daf3c](https://github.com/Rareities/rclone/commit/47048daf3c80e1de633ec9a1f09981f4c30f9a30) | Rareities | Merge reviewed Proton bisync and verified fork release |
+| [852525046b](https://github.com/Rareities/rclone/commit/852525046bf0856349eee51b814d11057f2effb5) | ChatGPT | docs: clarify Proton persistence and account-change baseline limits |
+| [63bf067cab](https://github.com/Rareities/rclone/commit/63bf067cab7ceeddd330aaff45b0f8ffa9e51855) | Mahant | Merge reviewed Proton persistence and baseline-limit documentation |
+| [de1b01ca4c](https://github.com/Rareities/rclone/commit/de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e) | Mahant | protondrive: reuse verified parent keys in fresh listings |
+| [18a0cc7dd5](https://github.com/Rareities/rclone/commit/18a0cc7dd5449cbfa797f2023faf82dc5df5ffe8) | Mahant | ci: exercise fresh Proton listing regression and race checks |
+| [3eed9a27ea](https://github.com/Rareities/rclone/commit/3eed9a27eaeafafc4974d4480c84d0af0a580482) | Mahant | protondrive: keep authenticated revision metadata consistent |
+| [8627faf6c0](https://github.com/Rareities/rclone/commit/8627faf6c0d8725f4ea8203de325939a874ea841) | Mahant | protondrive: resolve legacy listings from authenticated revision metadata |
+| [b8c5405e23](https://github.com/Rareities/rclone/commit/b8c5405e236da9f2b3a549ea199adabd0ab5ff0d) | Mahant | protondrive: fix legacy preview metadata lookup and stale revision hints |
+| [f1d1627e2e](https://github.com/Rareities/rclone/commit/f1d1627e2e91867b5fed5eb6bb4d4e8d094924c8) | Mahant | protondrive: keep resync metadata stable before copying and retire obsolete DNS override |
 
 
 ## Current usage and operating limits

@@ -1,7 +1,5 @@
 package io.github.rareities.protonbridge.util;
 
-import java.net.Inet6Address;
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -9,10 +7,6 @@ import java.nio.charset.StandardCharsets;
 /** Shared native network argument encoding. Values are never written to diagnostics. */
 public final class NetworkValues {
     private NetworkValues() {}
-    public static String dnsEndpoint(InetAddress address) {
-        String host = address.getHostAddress();
-        return (address instanceof Inet6Address ? "[" + host + "]" : host) + ":53";
-    }
     public static String proxy(String scheme, String host, int port, String user, String password) {
         if (!("http".equals(scheme) || "https".equals(scheme) || "socks5".equals(scheme) || "socks5h".equals(scheme)) ||
                 port < 1 || port > 65535) throw new IllegalArgumentException("Invalid proxy protocol or port");

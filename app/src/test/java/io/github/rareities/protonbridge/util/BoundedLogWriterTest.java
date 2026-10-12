@@ -30,6 +30,18 @@ public class BoundedLogWriterTest {
         assertTrue(new String(Files.readAllBytes(log.toPath()), StandardCharsets.UTF_8).endsWith("final outcome\n"));
     }
 
+    @Test public void longJsonSecretsAreRedactedBeforeTruncation() throws Exception {
+        BoundedLogWriter writer = new BoundedLogWriter();
+        File log = new File(folder.getRoot(), "long-json/log");
+        String secret = "CANARY-LONG-JSON-" + new String(new char[10000]).replace('\0', 's');
+        writer.append(log, "{\"password\":\"" + secret + "\",\"msg\":\"outcome\"}");
+        assertTrue(writer.awaitIdle(5000));
+        String saved = new String(Files.readAllBytes(log.toPath()), StandardCharsets.UTF_8);
+        assertFalse(saved.contains("CANARY-LONG-JSON"));
+        assertTrue(saved.contains("[redacted]"));
+        assertTrue(saved.contains("outcome"));
+    }
+
     @Test public void unwritableDestinationDoesNotStrandOtherLogs() throws Exception {
         BoundedLogWriter writer = new BoundedLogWriter();
         File blocked = folder.newFile("not-a-directory");

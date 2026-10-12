@@ -77,6 +77,13 @@ interpretation. The reference explains the bundled engine's flags; credentials
 and app-managed safety options remain controlled by the remote/task editor.
 See [usage, security, battery guidance and full change history](docs/FORK_CHANGELOG.md).
 
+Saved filters and task flags apply to preview, initialisation and regular sync.
+In the filter editor, choose Exclude and enter `.nomedia` to skip only these
+Android media-scanner markers at every depth; `/.nomedia` matches only the sync
+root. `**/.nomedia` matches nested markers but misses the root marker. In the task flag editor, the equivalent is `--exclude .nomedia`.
+Basic excludes take priority; basic includes restrict all other files. After
+changing filters, save and preview again before reviewing initialisation.
+
 ## External task requests
 
 Package: `io.github.rareities.protonbridge`.

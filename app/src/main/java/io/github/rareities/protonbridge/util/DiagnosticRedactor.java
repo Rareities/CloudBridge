@@ -10,7 +10,7 @@ public final class DiagnosticRedactor {
     private static final Pattern BEARER = Pattern.compile("(?i)((?:Bearer|Basic)\\s+)[A-Za-z0-9._~+/=-]+");
     private static final Pattern HEADER = Pattern.compile("(?im)((?:proxy-)?authorization|(?:set-)?cookie)\\s*:\\s*[^\\r\\n]*");
     private static final String KEYS = "(?:[a-z0-9_-]*(?:password|passwd|pass|token|secret|private_key|api_key)|authorization|cookie|set-cookie|api-key)";
-    private static final Pattern JSON_SECRET = Pattern.compile("(?i)(\"" + KEYS + "\"\\s*:\\s*)\"(?:\\\\.|[^\"\\\\])*\"");
+    private static final Pattern JSON_SECRET = Pattern.compile("(?i)(\"" + KEYS + "\"\\s*:\\s*)\"(?:\\\\.|[^\"\\\\])*+\"?");
     private static final Pattern SECRET = Pattern.compile("(?i)(?<![a-z0-9_\"])(" + KEYS + "\\s*[=:]\\s*)(?:\"[^\"]*\"|'[^']*'|[^,\\s}]+)");
     public static String redact(String value) {
         if (value == null) return "";

@@ -70,7 +70,7 @@ public final class ProtectedRcloneConfig {
     /** A partially restored configuration must be rolled back before launching rclone. */
     private static void requireRecoveredJournal(Context context) throws IOException {
         File journal = new File(context.getFilesDir(), "restore-journal");
-        if (new File(journal, "pending").exists() || new File(journal, "pending.bak").exists())
+        if (ConfigurationExclusion.isRestoreRecoveryRequired() || new File(journal, "pending").exists() || new File(journal, "pending.bak").exists())
             throw new IOException("Configuration restoration was interrupted; restart the app to recover before using rclone");
     }
 
@@ -289,8 +289,13 @@ public final class ProtectedRcloneConfig {
         FileOutputStream output = atomic.startWrite();
         try (InputStream input = new FileInputStream(staged)) {
             transfer(input, output);
+            output.getFD().sync();
             atomic.finishWrite(output);
         } catch (IOException error) { atomic.failWrite(output); throw error; }
+        DurableFiles.syncDirectory(destination.getParentFile());
+        try (InputStream expected = new FileInputStream(staged)) {
+            DurableFiles.verifyContents(atomic, expected, MAX_CONFIG_BYTES);
+        }
     }
 
     public static void transfer(InputStream input, java.io.OutputStream output) throws IOException {

@@ -85,10 +85,6 @@
             android:name=".Services.ThumbnailsLoadingService"
             android:foregroundServiceType="dataSync" />
         <service
-            android:name=".Services.TriggerService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-        <service
             android:name=".Services.RcdService"
             android:foregroundServiceType="dataSync" /> <!-- Used to expose tasks to other apps, no other functionality -->
         <service

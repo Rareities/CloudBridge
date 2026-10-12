@@ -46,10 +46,39 @@ public class RestoreDurabilityTest {
         };
         assertThrows(IOException.class, () -> BackupRestore.recoverIfNeeded(context));
         assertTrue(new File(journal,"previous.json").exists());
+        assertTrue("uncertain retirement must block native admission", new File(journal,"pending").exists());
         // Model the marker reappearing after power loss; rollback still has its snapshot.
         Files.write(new File(journal,"pending").toPath(),new byte[]{1});
         DurableFiles.directorySync = directory -> {};
         BackupRestore.recoverIfNeeded(context);
         assertFalse(new File(journal,"pending").exists());
+    }
+    @Test public void committedRollbackCleanupFailureDoesNotReportFailure() throws Exception {
+        Application context = ApplicationProvider.getApplicationContext(); File journal=journal(context);
+        DurableFiles.directorySync = directory -> {
+            if (directory.equals(journal) && !new File(journal,"pending").exists() &&
+                    !new File(journal,"previous.json").exists())
+                throw new IOException("obsolete journal cleanup barrier failed");
+        };
+        BackupRestore.recoverIfNeeded(context);
+        assertFalse(new File(journal,"pending").exists());
+    }
+    @Test public void doubleMarkerFailureBlocksNativePreparationUntilForcedRecovery() throws Exception {
+        Application context=ApplicationProvider.getApplicationContext(); File journal=journal(context);
+        DurableFiles.directorySync=directory -> {
+            if (directory.equals(journal)) {
+                new File(journal,"pending").delete();
+                throw new IOException("journal remains unavailable");
+            }
+        };
+        assertThrows(IOException.class, () -> BackupRestore.recoverIfNeeded(context));
+        assertFalse(new File(journal,"pending").exists());
+        assertTrue(ConfigurationExclusion.isRestoreRecoveryRequired());
+        assertThrows(IOException.class, ConfigurationExclusion::prepare);
+        assertFalse(ConfigurationExclusion.LOCK.isWriteLockedByCurrentThread());
+        DurableFiles.directorySync=directory -> {};
+        BackupRestore.recoverIfNeeded(context);
+        assertFalse(ConfigurationExclusion.isRestoreRecoveryRequired());
+        try (ConfigurationExclusion.Preparation ready=ConfigurationExclusion.prepare()) { }
     }
 }

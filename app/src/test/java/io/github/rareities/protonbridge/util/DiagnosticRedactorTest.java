@@ -22,4 +22,9 @@ public class DiagnosticRedactorTest {
         assertEquals("Checksum not equal: .nomedia password=[redacted]",
                 DiagnosticRedactor.redact("\u001b[35mChecksum not equal: .nomedia\u001b[0m password=\u001b[31mCANARY\u001b[0m"));
     }
+    @Test public void truncatedJsonAndLongEscapedValuesDoNotExposeSecretPrefixes() {
+        assertFalse(DiagnosticRedactor.redact("{\"password\":\"CANARY-unterminated").contains("CANARY"));
+        String secret="CANARY-" + new String(new char[10000]).replace("\0", "\\x");
+        assertFalse(DiagnosticRedactor.redact("{\"password\":\""+secret+"\"}").contains("CANARY"));
+    }
 }

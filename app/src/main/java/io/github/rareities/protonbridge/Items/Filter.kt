@@ -39,27 +39,22 @@ data class Filter(var id: Long) {
     {
         return filters;
     }
-    fun getFilters(): ArrayList<FilterEntry>
-    {
-        val filters = ArrayList<FilterEntry>()
-        val f = this.filters.split(System.lineSeparator())
-        for (filter in f) {
-            if (filter == "") continue
-            val filterType = if(filter.substring(0, 1) == "+") FilterEntry.FILTER_INCLUDE else FilterEntry.FILTER_EXCLUDE
-            val filterText = filter.substring(1)
-            filters.add(FilterEntry(filterType, filterText))
+    fun getFilters(): ArrayList<FilterEntry> {
+        val result = arrayListOf<FilterEntry>()
+        for (raw in filters.lineSequence()) {
+            val line = raw.trim()
+            if (line.isEmpty()) continue
+            require(line.startsWith("+") || line.startsWith("-")) { "Each saved filter must start with + or -" }
+            val type = if (line.startsWith("+")) FilterEntry.FILTER_INCLUDE else FilterEntry.FILTER_EXCLUDE
+            result.add(FilterEntry(type, io.github.rareities.protonbridge.util.FilterRules.pattern(line.substring(1))))
         }
-        return filters;
+        return result
     }
-    fun setFilters(filterEntries: List<FilterEntry>)
-    {
-        var filters = ""
 
-        for (filter in filterEntries) {
-            filters += if(filter.filterType == FilterEntry.FILTER_INCLUDE) "+" else "-"
-            filters += filter.filter
-            filters += System.lineSeparator()
+    fun setFilters(filterEntries: List<FilterEntry>) {
+        filters = filterEntries.joinToString("\n") {
+            (if (it.filterType == FilterEntry.FILTER_INCLUDE) "+" else "-") +
+                io.github.rareities.protonbridge.util.FilterRules.savedPattern(it)
         }
-        this.filters = filters
     }
 }

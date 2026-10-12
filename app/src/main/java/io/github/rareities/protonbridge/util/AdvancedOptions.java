@@ -26,7 +26,7 @@ public final class AdvancedOptions {
             "delete-excluded", "delete-before", "delete-during", "delete-after", "delete-only",
             "conflict-loser", "check-sync", "no-slow-hash", "slow-hash-sync-only",
             "download-hash", "max-lock", "recover", "remove-empty-dirs", "local-no-check-updated",
-            "no-check-certificate", "insecure", "use-json-log", "help", "version", "bind", "addr",
+            "local-no-set-modtime", "no-check-certificate", "insecure", "use-json-log", "help", "version", "bind", "addr",
             "backup-dir", "backup-dir1", "backup-dir2", "suffix", "suffix-keep-extension",
             "config-dir", "cache-dir", "cache-chunk-path", "cache-db-path", "temp-dir",
             "files-from", "files-from-raw", "include-from", "exclude-from", "filter-from", "filters-file",

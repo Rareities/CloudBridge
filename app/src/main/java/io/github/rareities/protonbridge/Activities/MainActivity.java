@@ -867,7 +867,6 @@ public class MainActivity extends AppCompatActivity
                     io.github.rareities.protonbridge.Database.json.BackupRestore.restore(context, rclone, uris[0], suppliedPassword);
                     importedConfigLocked = rclone.isConfigEncrypted();
                     statusCode = SUCCESS_IMPORT;
-                    new io.github.rareities.protonbridge.Services.TriggerService(context).queueTrigger();
                     return true;
                 } catch (Exception e) {
                     statusCode = FAILURE_ZIP_INVALID_JSON;

@@ -26,6 +26,7 @@ class BisyncConflictArgumentsTest {
         task.bisyncAdvancedOptions = "--conflict-resolve newer"
         val args = rclone.bisyncArguments(task, File(context.filesDir, "baseline"), "run", arrayListOf(), false).toList()
         assertTrue(args.contains("--compare=size,modtime,checksum"))
+        assertTrue(args.contains("--local-no-set-modtime=false"))
         assertEquals(listOf("--conflict-resolve=newer"), args.filter { it.startsWith("--conflict-resolve=") })
         assertTrue(args.contains("--conflict-loser=num"))
         assertTrue(args.contains("--require-checksum"))

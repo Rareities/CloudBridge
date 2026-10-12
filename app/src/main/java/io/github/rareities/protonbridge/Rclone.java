@@ -869,10 +869,7 @@ public class Rclone {
         if (deleteExcluded) {
             defaultParameter.add("--delete-excluded");
         }
-        for (FilterEntry filter : filters) {
-            defaultParameter.add("--filter");
-            defaultParameter.add((filter.filterType == FilterEntry.FILTER_INCLUDE ? "+ " : "- ") + filter.filter);
-        }
+        defaultParameter.addAll(io.github.rareities.protonbridge.util.FilterRules.arguments(filters, java.util.Collections.emptyList()));
 
         ArrayList<String> directionParameter = new ArrayList<>();
         Collections.addAll(directionParameter, op, srcSection, dstSection);
@@ -929,6 +926,7 @@ public class Rclone {
                 "--stats=5s", "--stats-log-level=NOTICE", "--use-json-log", "--log-level=INFO",
                 "--protondrive-original-file-size=true", "--protondrive-replace-existing-draft=false",
                 "--protondrive-enable-caching=false");
+        if (compareModtime) args.add("--local-no-set-modtime=false");
         if (!operation.equals("run") && !operation.equals("preview-existing")) {
             args.add("--resync-mode=" + task.getBisyncResyncMode());
         }
@@ -936,11 +934,8 @@ public class Rclone {
         if (task.getBisyncCheckAccess()) args.add("--check-access");
         if (!task.getBisyncBackupDir1().isEmpty()) args.add("--backup-dir1=" + task.getBisyncBackupDir1());
         if (!task.getBisyncBackupDir2().isEmpty()) args.add("--backup-dir2=" + task.getBisyncBackupDir2());
-        for (FilterEntry filter : filters) {
-            args.add("--filter=" + (filter.filterType == FilterEntry.FILTER_INCLUDE ? "+ " : "- ") + filter.filter);
-        }
         if (!customConflict) args.add("--conflict-resolve=none");
-        args.addAll(advanced);
+        args.addAll(io.github.rareities.protonbridge.util.FilterRules.arguments(filters, advanced));
         // Cobra parses flag names and values before its help path, without opening a remote.
         if (validateOnly) args.add("--help");
         return args.toArray(new String[0]);
@@ -1038,10 +1033,7 @@ public class Rclone {
             defaultParameter.add("--delete-excluded");
         }
 
-        for (FilterEntry filter : filters) {
-            defaultParameter.add("--filter");
-            defaultParameter.add((filter.filterType == FilterEntry.FILTER_INCLUDE ? "+ " : "- ") + filter.filter);
-        }
+        defaultParameter.addAll(io.github.rareities.protonbridge.util.FilterRules.arguments(filters, java.util.Collections.emptyList()));
 
         if (syncDirection == SyncDirectionObject.SYNC_LOCAL_TO_REMOTE) {
             Collections.addAll(directionParameter, "sync", localPath, remoteSection);

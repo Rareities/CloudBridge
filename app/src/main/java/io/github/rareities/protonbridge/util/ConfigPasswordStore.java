@@ -128,7 +128,11 @@ public final class ConfigPasswordStore {
 
     public synchronized void installRecord(byte[] record) throws IOException {
         FileOutputStream output = file.startWrite();
-        try { output.write(record); file.finishWrite(output); }
+        try { output.write(record); output.getFD().sync(); file.finishWrite(output); }
         catch (IOException error) { file.failWrite(output); throw error; }
+        DurableFiles.syncDirectory(file.getBaseFile().getParentFile());
+        try (java.io.ByteArrayInputStream expected = new java.io.ByteArrayInputStream(record)) {
+            DurableFiles.verifyContents(file, expected, 32768);
+        }
     }
 }

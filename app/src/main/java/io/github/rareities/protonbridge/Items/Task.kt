@@ -23,6 +23,7 @@ data class Task(var id: Long) {
     var wifionly = TASK_WIFIONLY_DEFAULT
     var filterId: Long? = null
     var deleteExcluded = false
+    var filterPolicyVersion = 0
     var onFailFollowup: Long? = null
     var onSuccessFollowup: Long? = null
     var transfers: Int? = null
@@ -90,6 +91,7 @@ data class Task(var id: Long) {
         put("batteryNotLow", batteryNotLow)
         put("quietStart", quietHoursStart)
         put("quietEnd", quietHoursEnd)
+        put("filterPolicyVersion", filterPolicyVersion)
     }.toString()
 
     fun readPolicyJSON(value: String?) {
@@ -105,6 +107,8 @@ data class Task(var id: Long) {
             batteryNotLow = json.getBoolean("batteryNotLow")
             quietHoursStart = json.getInt("quietStart")
             quietHoursEnd = json.getInt("quietEnd")
+            filterPolicyVersion = json.optInt("filterPolicyVersion", 0)
+            require(filterPolicyVersion in 0..1) { "Unsupported filter policy version" }
         } catch (_: Exception) {
             validationError = "Task settings are invalid or from an unsupported version. Review this task before running it."
         }

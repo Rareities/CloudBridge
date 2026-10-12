@@ -1,8 +1,6 @@
 package io.github.rareities.protonbridge.Items;
 
-import android.content.Context;
 
-import io.github.rareities.protonbridge.R;
 
 public class FilterEntry {
 

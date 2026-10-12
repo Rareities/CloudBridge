@@ -25,7 +25,6 @@ import io.github.rareities.protonbridge.R;
 
 public class FilterEntryRecyclerViewAdapter extends RecyclerView.Adapter<FilterEntryRecyclerViewAdapter.ViewHolder> {
     private List<FilterEntry> filterEntries;
-    private View view;
     private final Context context;
 
 
@@ -37,25 +36,28 @@ public class FilterEntryRecyclerViewAdapter extends RecyclerView.Adapter<FilterE
     @NonNull
     @Override
     public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        view = LayoutInflater.from(parent.getContext()).inflate(R.layout.fragment_filter_item, parent, false);
-        return new ViewHolder(view);
+        return new ViewHolder(LayoutInflater.from(parent.getContext()).inflate(R.layout.fragment_filter_item, parent, false));
     }
 
     @Override
     public void onBindViewHolder(@NonNull final ViewHolder holder, final int position) {
         final FilterEntry selectedFilterEntry = filterEntries.get(position);
 
+        if (holder.watcher != null) holder.filterText.removeTextChangedListener(holder.watcher);
+        holder.filterTypeSpinner.setOnItemSelectedListener(null);
+        holder.boundEntry = selectedFilterEntry;
         holder.filterText.setText(selectedFilterEntry.filter);
-        holder.filterText.addTextChangedListener(new TextWatcher() {
+        holder.watcher = new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override
             public void onTextChanged(CharSequence s, int start, int before, int count) {
-                selectedFilterEntry.filter = s.toString();
+                if (holder.boundEntry != null) holder.boundEntry.filter = s.toString();
             }
             @Override
             public void afterTextChanged(Editable s) {}
-        });
+        };
+        holder.filterText.addTextChangedListener(holder.watcher);
 
 
 
@@ -67,7 +69,8 @@ public class FilterEntryRecyclerViewAdapter extends RecyclerView.Adapter<FilterE
         holder.filterTypeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int pos, long id) {
-                selectedFilterEntry.filterType = pos;
+                int current = holder.filterTypeSpinner.getSelectedItemPosition();
+                if (holder.boundEntry != null && (current == 0 || current == 1)) holder.boundEntry.filterType = current;
             }
 
             @Override
@@ -76,6 +79,13 @@ public class FilterEntryRecyclerViewAdapter extends RecyclerView.Adapter<FilterE
 
         holder.fileOptions.setOnClickListener(v -> removeItem(selectedFilterEntry));
 
+    }
+
+    @Override public void onViewRecycled(@NonNull ViewHolder holder) {
+        if (holder.watcher != null) holder.filterText.removeTextChangedListener(holder.watcher);
+        holder.filterTypeSpinner.setOnItemSelectedListener(null);
+        holder.boundEntry = null;
+        super.onViewRecycled(holder);
     }
 
     public void removeItem(FilterEntry filterEntry) {
@@ -93,6 +103,8 @@ public class FilterEntryRecyclerViewAdapter extends RecyclerView.Adapter<FilterE
 
     public static class ViewHolder extends RecyclerView.ViewHolder {
 
+        TextWatcher watcher;
+        FilterEntry boundEntry;
         final View view;
         final Spinner filterTypeSpinner;
         final EditText filterText;

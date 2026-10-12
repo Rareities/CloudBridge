@@ -162,4 +162,48 @@ class BisyncStateTest {
         task.bisyncUUID = repaired
         assertEquals(repaired, BisyncPolicy.identityForEdit(task, 6))
     }
+    @Test fun disposablePreviewRetiresOnlyAfterNativeExitAndKeepsBaselines() {
+        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
+        val runId = UUID.randomUUID().toString()
+        val preview = File(root, "previews/$runId").apply { mkdirs() }
+        File(preview, "temporary.lst").writeText("private preview metadata")
+        val baseline = File(root, "baselines/$runId").apply { mkdirs() }
+        File(baseline, "saved.lst").writeText("healthy baseline")
+        assertFalse(BisyncPolicy.retirePreview(root, runId, false))
+        assertTrue(preview.isDirectory)
+        assertFalse(BisyncPolicy.retirePreview(root, "../baselines/$runId", true))
+        assertTrue(BisyncPolicy.retirePreview(root, runId, true))
+        assertFalse(preview.exists())
+        assertEquals("healthy baseline", File(baseline, "saved.lst").readText())
+    }
+
+    @Test fun previewRetirementCannotFollowLinkIntoBaseline() {
+        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
+        val runId = UUID.randomUUID().toString()
+        val baseline = File(root, "baselines/$runId").apply { mkdirs() }
+        File(baseline, "saved.lst").writeText("healthy baseline")
+        val previews = File(root, "previews").apply { mkdirs() }
+        java.nio.file.Files.createSymbolicLink(File(previews, runId).toPath(), baseline.toPath())
+        assertFalse(BisyncPolicy.retirePreview(root, runId, true))
+        assertEquals("healthy baseline", File(baseline, "saved.lst").readText())
+    }
+    @Test fun previewRetirementCannotTraverseNestedLinkIntoBaseline() {
+        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
+        val runId = UUID.randomUUID().toString()
+        val baseline = File(root, "baselines/$runId").apply { mkdirs() }
+        File(baseline, "saved.lst").writeText("healthy baseline")
+        val preview = File(root, "previews/$runId").apply { mkdirs() }
+        java.nio.file.Files.createSymbolicLink(File(preview, "nested").toPath(), baseline.toPath())
+        assertFalse(BisyncPolicy.retirePreview(root, runId, true))
+        assertEquals("healthy baseline", File(baseline, "saved.lst").readText())
+    }
+    @Test fun previewRetirementCannotFollowLinkIntoSiblingPreview() {
+        val root = File(ApplicationProvider.getApplicationContext<Application>().filesDir, UUID.randomUUID().toString())
+        val sibling = File(root, "previews/${UUID.randomUUID()}").apply { mkdirs() }
+        File(sibling, "active.lst").writeText("active preview")
+        val runId = UUID.randomUUID().toString()
+        java.nio.file.Files.createSymbolicLink(File(root, "previews/$runId").toPath(), sibling.toPath())
+        assertFalse(BisyncPolicy.retirePreview(root, runId, true))
+        assertEquals("active preview", File(sibling, "active.lst").readText())
+    }
 }

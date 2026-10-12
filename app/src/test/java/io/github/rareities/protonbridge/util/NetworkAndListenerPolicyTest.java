@@ -2,7 +2,6 @@ package io.github.rareities.protonbridge.util;
 
 import org.junit.Test;
 import java.io.File;
-import java.net.InetAddress;
 import java.net.URI;
 import static org.junit.Assert.*;
 
@@ -13,8 +12,6 @@ public class NetworkAndListenerPolicyTest {
         assertEquals("[::1]", parsed.getHost());
         assertEquals("name@domain:a/b:@ +", parsed.getUserInfo());
         assertFalse(encoded.contains("a/b:@ +"));
-        assertTrue(NetworkValues.dnsEndpoint(InetAddress.getByName("2001:db8::1")).startsWith("["));
-        assertTrue(NetworkValues.dnsEndpoint(InetAddress.getByName("2001:db8::1")).endsWith("]:53"));
     }
     @Test public void lanServingCannotFallBackToPlaintextOrAnonymousAccess() throws Exception {
         assertThrows(IllegalArgumentException.class, () -> ListenerPolicy.validate(1, 8080, true, "u", "p", "", ""));

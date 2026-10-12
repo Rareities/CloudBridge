@@ -3,6 +3,8 @@ package io.github.rareities.protonbridge.util;
 import android.app.Application;
 import androidx.test.core.app.ApplicationProvider;
 import org.junit.Test;
+import org.junit.Before;
+import org.junit.After;
 import org.junit.runner.RunWith;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.annotation.Config;
@@ -17,6 +19,10 @@ import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 28, application = Application.class)
 public class ConfigPasswordStoreTest {
+    private DurableFiles.DirectorySync originalSync;
+    @Before public void configureHostDurability() { originalSync=DurableFiles.directorySync; DurableFiles.directorySync=directory -> {}; }
+    @After public void restoreDurability() { DurableFiles.directorySync=originalSync; }
+
     private File path() throws IOException {
         Application app = ApplicationProvider.getApplicationContext();
         return new File(Files.createTempDirectory(app.getFilesDir().toPath(), "password-test-").toFile(), "wrapped.json");
@@ -81,5 +87,25 @@ public class ConfigPasswordStoreTest {
         original.installRecord(before);
         assertArrayEquals(before, Files.readAllBytes(path.toPath()));
         assertThrows(IOException.class, original::read);
+    }
+    @Test public void failedRecordReadbackCannotReportInstalledPassword() throws Exception {
+        File path = path(); SecretKey key = key();
+        ConfigPasswordStore store = new ConfigPasswordStore(path, (alias, create) -> key);
+        store.save("original-readable-password");
+        byte[] original = Files.readAllBytes(path.toPath());
+        byte[] replacement = store.prepareRecord("replacement-readable-password", false);
+        DurableFiles.directorySync = directory -> Files.write(path.toPath(), original);
+        assertThrows(IOException.class, () -> store.installRecord(replacement));
+        assertArrayEquals(original, Files.readAllBytes(path.toPath()));
+        assertEquals("original-readable-password", store.read());
+    }
+    @Test public void failedConfigReadbackCannotReportEncryptedInstallation() throws Exception {
+        File destination=path(), staged=new File(destination.getParentFile(), "staged.conf");
+        byte[] original="original readable configuration".getBytes(StandardCharsets.UTF_8);
+        Files.write(destination.toPath(),original);
+        Files.write(staged.toPath(),"RCLONE_ENCRYPT_V0:replacement-ciphertext".getBytes(StandardCharsets.UTF_8));
+        DurableFiles.directorySync=directory -> Files.write(destination.toPath(),original);
+        assertThrows(IOException.class, () -> ProtectedRcloneConfig.install(staged,destination));
+        assertArrayEquals(original,Files.readAllBytes(destination.toPath()));
     }
 }

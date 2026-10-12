@@ -1,3 +1,24 @@
+# ProtonBridge 1.1.8-rc.1
+
+Fixed Proton listing/download metadata disagreement that could abort bisync after
+successful copies. Detailed signed metadata is captured before copying; downloads
+stop safely if the snapshot changes. Checksum verification remains enabled.
+
+Fixed saved filters, quoted exclusions, include selection, recycled editor rows
+and filter IDs. The same filters and flags apply during preview, initialisation
+and normal sync. Use .nomedia to exclude markers at every depth.
+
+Reviewed the complete fork, removed unused DNS/API/service code, repaired long
+secret redaction and configuration write verification, and cleaned disposable
+previews safely. Download timestamps are preserved for newer/older conflicts.
+
+Repeat Save and preview, then Review and initialise. Initialisation performs a
+real resync: review the selected winner and files that may be overwritten.
+
+[Full changelog and audit](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.7-rc.1
 
 Fixed the new Proton revision request that could fail preview with HTTP 422 /
