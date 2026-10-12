@@ -912,11 +912,18 @@ public class Rclone {
         RemoteItem endpoint = getRemoteItemFromName(task.getRemoteId());
         if (endpoint == null) throw new IOException("The configured task remote is unavailable; reconnect or edit the task");
         ArrayList<String> args = new ArrayList<>();
+        String conflict = "none";
+        boolean customConflict = false;
+        for (String flag : advanced) if (flag.startsWith("--conflict-resolve=")) {
+            conflict = flag.substring(flag.indexOf('=') + 1);
+            customConflict = true;
+        }
+        boolean compareModtime = "newer".equals(conflict) || "older".equals(conflict);
         Collections.addAll(args, rclone, "--config", rcloneConf,
                 "bisync", task.getLocalPath(),
                 buildRemoteSection(endpoint, task.getRemotePath(), context),
                 "--workdir=" + privateWorkdir.getAbsolutePath(), "--max-delete=" + task.getBisyncMaxDelete(),
-                "--compare=size,checksum", "--checksum", "--require-checksum", "--conflict-resolve=none",
+                "--compare=" + (compareModtime ? "size,modtime,checksum" : "size,checksum"), "--checksum", "--require-checksum",
                 "--conflict-loser=num", "--check-sync=true", "--max-lock=0", "--create-empty-src-dirs",
                 "--transfers=" + getTransfers(task.getTransfers() == null ? null : task.getTransfers().toString()),
                 "--stats=5s", "--stats-log-level=NOTICE", "--use-json-log", "--log-level=INFO",
@@ -932,6 +939,7 @@ public class Rclone {
         for (FilterEntry filter : filters) {
             args.add("--filter=" + (filter.filterType == FilterEntry.FILTER_INCLUDE ? "+ " : "- ") + filter.filter);
         }
+        if (!customConflict) args.add("--conflict-resolve=none");
         args.addAll(advanced);
         // Cobra parses flag names and values before its help path, without opening a remote.
         if (validateOnly) args.add("--help");
@@ -1009,6 +1017,11 @@ public class Rclone {
     /** Flag help is local and tied to the bundled engine. It never authenticates to a remote. */
     public Process bisyncHelp() throws IOException {
         return getRuntimeProcess(new String[]{rclone, "bisync", "--help"}, getRcloneEnv());
+    }
+
+    /** Global/backend flags and explanations from this exact bundled engine. */
+    public Process globalFlagsHelp() throws IOException {
+        return getRuntimeProcess(new String[]{rclone, "help", "flags"}, getRcloneEnv());
     }
 
     private Process syncLocalRemote(RemoteItem remoteItem, String localPath, String remotePath, int syncDirection, boolean useMD5Sum, ArrayList<FilterEntry> filters, boolean deleteExcluded, String transfersOverride) {

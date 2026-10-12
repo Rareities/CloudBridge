@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** A line is one argv token, never a shell command. Values may contain spaces and Unicode. */
+/** One flag per line, normalized into one argv token; never evaluated by a shell. */
 public final class AdvancedOptions {
     private AdvancedOptions() {}
 
@@ -17,14 +17,14 @@ public final class AdvancedOptions {
             "bwlimit", "tpslimit", "tpslimit-burst", "retries", "low-level-retries",
             "timeout", "contimeout", "max-transfer", "max-duration", "min-size",
             "max-size", "filter", "include", "exclude", "suffix", "modify-window",
-            "checkers", "max-connections", "buffer-size"));
+            "checkers", "max-connections", "buffer-size", "conflict-resolve"));
     private static final Set<String> BOOLEAN = new HashSet<>(Arrays.asList("fast-list", "ignore-case", "check-first"));
     private static final Set<String> OWNED = new HashSet<>(Arrays.asList(
             "resync", "resync-mode", "workdir", "config", "force", "max-delete", "max-delete-size",
             "compare", "checksum", "require-checksum", "ignore-checksum", "ignore-listing-checksum",
             "ignore-size", "ignore-errors", "ignore-existing", "size-only", "dry-run", "interactive",
             "delete-excluded", "delete-before", "delete-during", "delete-after", "delete-only",
-            "conflict-resolve", "conflict-loser", "check-sync", "no-slow-hash", "slow-hash-sync-only",
+            "conflict-loser", "check-sync", "no-slow-hash", "slow-hash-sync-only",
             "download-hash", "max-lock", "recover", "remove-empty-dirs", "local-no-check-updated",
             "no-check-certificate", "insecure", "use-json-log", "help", "version", "bind", "addr",
             "backup-dir", "backup-dir1", "backup-dir2", "suffix", "suffix-keep-extension",
@@ -67,21 +67,27 @@ public final class AdvancedOptions {
         for (int i = 0; i < lines.length; i++) {
             String line = lines[i].trim();
             if (line.isEmpty()) continue;
-            int equals = line.indexOf('=');
-            String key = equals < 0 ? line : line.substring(0, equals);
-            if (!NAME.matcher(key).matches()) throw new IllegalArgumentException("Line " + (i + 1) + ": use --flag or --flag=value");
+            int separator = 0;
+            while (separator < line.length() && line.charAt(separator) != '=' &&
+                    line.charAt(separator) != ' ' && line.charAt(separator) != '\t') separator++;
+            String key = line.substring(0, separator);
+            String value = separator == line.length() ? null :
+                    (line.charAt(separator) == '=' ? line.substring(separator + 1) : line.substring(separator).trim());
+            line = key + (value == null ? "" : "=" + value);
+            if (!NAME.matcher(key).matches()) throw new IllegalArgumentException("Line " + (i + 1) + ": use --flag, --flag value or --flag=value");
             for (int c = 0; c < line.length(); c++) {
                 if (Character.isISOControl(line.charAt(c))) throw new IllegalArgumentException("Control character in flag on line " + (i + 1));
             }
             String name = key.substring(2);
             String reason = restriction(name);
             if (reason != null) throw new IllegalArgumentException(reason);
-            String value = equals < 0 ? null : line.substring(equals + 1);
             if (value != null && (Pattern.compile("(?i)[a-z][a-z0-9+.-]*://[^/\\s]+@").matcher(value).find() ||
                     Pattern.compile("(?i)(?:password|access_token|refresh_token|api_key|secret)=").matcher(value).find()))
                 throw new IllegalArgumentException("Credentials belong in the remote editor, not in task option values");
             if (REQUIRES_VALUE.contains(name) && (value == null || value.isEmpty()))
-                throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " requires a value in --flag=value form");
+                throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " requires a value, for example --" + name + " value");
+            if ("conflict-resolve".equals(name) && !Arrays.asList("none", "path1", "path2", "newer", "older", "larger", "smaller").contains(value))
+                throw new IllegalArgumentException("--conflict-resolve must be none, path1, path2, newer, older, larger or smaller");
             if (BOOLEAN.contains(name) && value != null && !"true".equals(value) && !"false".equals(value))
                 throw new IllegalArgumentException("Line " + (i + 1) + ": --" + name + " must be true or false");
             if ("retries".equals(name) || "low-level-retries".equals(name)) {

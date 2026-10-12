@@ -4,6 +4,30 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.1.4-rc.1 — plain flag editor and complete rclone reference
+
+- Replace the optional flag builder, performance presets and command display
+  with a plain multiline flag editor and one searchable rclone reference.
+  Previously saved concrete flags and transfer counts remain intact.
+- Accept `--flag value` as well as `--flag=value` and bare switches, one flag
+  per line. Normalize each into one argv token without shell interpretation;
+  preserve values containing spaces, Unicode and equals signs. Numeric, boolean,
+  duplicate, credential and managed-option checks remain in place.
+- Support `--conflict-resolve newer` and the bundled engine's other resolution
+  modes. Add modtime comparison for newer/older so rclone actually applies the
+  chosen policy, while retaining checksum verification and numbered loser copies.
+  Flag changes remain part of preview approval fingerprints.
+- Load bisync help and all global/backend flag descriptions directly from the
+  bundled engine. Reference loading is local, bounded and cancellable; search
+  retains complete matching entries, including continuation descriptions.
+  The full reference clearly distinguishes engine flags from options managed by
+  app controls or the remote editor.
+
+A real local 20-file bisync fixture confirmed that newer content wins on both
+sides and older content survives in numbered conflict copies, without `--force`
+or relaxing checksum/deletion checks. No live-account/device acceptance test is
+claimed. See [release notes](releases/v1.1.4-rc.1.md).
+
 ## 1.1.3-rc.1 — battery, background lifecycle and privacy
 
 - Let Android manage Wi-Fi power saving instead of forcing high-performance

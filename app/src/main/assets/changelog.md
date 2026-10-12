@@ -1,3 +1,15 @@
+# ProtonBridge 1.1.4-rc.1
+
+Plain rclone flag editor: one --flag value or --flag=value per line. Supports
+--conflict-resolve newer with the required modification-time comparison while
+preserving checksum checks and losing conflict copies. Removed builder, presets
+and command-display buttons. The searchable reference now includes bundled
+bisync, global and backend flags with descriptions.
+
+[Full changelog](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.3-rc.1
 
 Battery and background lifecycle optimizations: Android Wi-Fi power saving,

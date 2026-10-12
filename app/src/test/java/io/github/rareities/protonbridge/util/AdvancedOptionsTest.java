@@ -17,6 +17,14 @@ public class AdvancedOptionsTest {
                 AdvancedOptions.parse("--bwlimit=8M\n--include=folder with spaces/**\n--exclude=\u4f60\u597d=old/**"));
     }
 
+    @Test public void acceptsSpaceSeparatedStringValuesWithoutShellEvaluation() {
+        assertEquals(Arrays.asList("--conflict-resolve=newer", "--bwlimit=8M", "--include=folder with spaces/**", "--exclude=folder=old/**"),
+                AdvancedOptions.parse("--conflict-resolve newer\n--bwlimit 8M\n--include folder with spaces/**\n--exclude folder=old/**"));
+        assertEquals(Arrays.asList("--include=--config=/tmp/not-an-argument"), AdvancedOptions.parse("--include --config=/tmp/not-an-argument"));
+        assertThrows(IllegalArgumentException.class, () -> AdvancedOptions.parse("--config /tmp/other"));
+        assertThrows(IllegalArgumentException.class, () -> AdvancedOptions.parse("--bwlimit 1M\n--bwlimit=2M"));
+    }
+
     @Test public void repeatableFiltersKeepTheirOrder() {
         assertEquals(Arrays.asList("--filter=+ A/**", "--filter=- B/**"), AdvancedOptions.parse("--filter=+ A/**\n--filter=- B/**"));
     }
@@ -31,13 +39,13 @@ public class AdvancedOptionsTest {
     }
 
     @Test public void rejectsPositionalsSubcommandsShortcutsAndDuplicateScalars() {
-        for (String input : Arrays.asList("delete", "remote:path", "-1", "--", "--bwlimit 8M", "--x=a\u0000b", "--bwlimit=1M\n--bwlimit=9M")) {
+        for (String input : Arrays.asList("delete", "remote:path", "-1", "--", "--x=a\u0000b", "--bwlimit=1M\n--bwlimit=9M")) {
             assertThrows(input, IllegalArgumentException.class, () -> AdvancedOptions.parse(input));
         }
     }
 
     @Test public void requiresValuesAndValidatesKnownFlagTypes() {
-        for (String input : Arrays.asList("--bwlimit", "--bwlimit=", "--filter", "--retries=-1",
+        for (String input : Arrays.asList("--bwlimit", "--bwlimit=", "--conflict-resolve", "--conflict-resolve banana", "--filter", "--retries=-1",
                 "--retries=oops", "--tpslimit=-1", "--tpslimit=NaN", "--fast-list=yes",
                 "--no-force=true", "--no-require-checksum=true")) {
             assertThrows(input, IllegalArgumentException.class, () -> AdvancedOptions.parse(input));

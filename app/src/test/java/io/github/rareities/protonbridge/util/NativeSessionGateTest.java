@@ -45,6 +45,8 @@ public class NativeSessionGateTest {
     }
 
     @Test public void metadataDetectionDoesNotTreatAnEndpointAsACommand() {
+        assertTrue(NativeSessionGate.isLocalMetadata(new String[]{"rclone", "help", "flags"}));
+        assertFalse(NativeSessionGate.isLocalMetadata(new String[]{"rclone", "copy", "help", "flags"}));
         assertFalse(NativeSessionGate.isLocalMetadata(new String[]{"rclone", "cat", "version"}));
         assertFalse(NativeSessionGate.isLocalMetadata(new String[]{"rclone", "copy", "a", "listremotes"}));
         assertFalse(NativeSessionGate.isDaemon(new String[]{"rclone", "--rc-addr", "127.0.0.1:5572", "copy", "source", "rcd"}));

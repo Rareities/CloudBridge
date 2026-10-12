@@ -101,7 +101,7 @@ class TaskEditorDeviceIntegrationTest {
     }
 
     private fun showAdvancedIfNeeded(editor: ActivityScenario<TaskActivity>, id: Int) {
-        if (id in setOf(R.id.bisync_command_button, R.id.bisync_preset_button, R.id.bisync_advanced_flags))
+        if (id in setOf(R.id.bisync_help_button, R.id.bisync_advanced_flags))
             editor.onActivity {
                 if (it.findViewById<android.view.View>(R.id.bisync_advanced_panel).visibility != android.view.View.VISIBLE)
                     it.findViewById<Button>(R.id.bisync_advanced_toggle).performClick()
@@ -255,22 +255,12 @@ class TaskEditorDeviceIntegrationTest {
             assertEquals("L", File(right, "left-change.txt").readText())
             assertEquals("R", File(left, "right-change.txt").readText())
 
-            press(screen, R.id.bisync_command_button)
-            onView(withText(containsString("--require-checksum"))).inRoot(isDialog()).check(matches(isDisplayed()))
-            onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
-            press(screen, R.id.bisync_preset_button)
-            onView(withText("Low memory")).inRoot(isDialog()).perform(click())
-            onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
+            showAdvancedIfNeeded(screen, R.id.bisync_advanced_flags)
             screen.onActivity { activity ->
                 val custom = activity.findViewById<EditText>(R.id.bisync_advanced_flags)
-                assertTrue(custom.text.contains("--buffer-size=0M"))
-                assertTrue(custom.text.contains("--max-connections=4"))
+                custom.setText("--conflict-resolve newer\n--bwlimit 8M")
                 assertFalse(activity.findViewById<Button>(R.id.task_run_button).isEnabled)
-                // Return the uncommitted draft to the saved settings before the next case.
                 custom.setText("--bwlimit=8M")
-                val values = activity.resources.getStringArray(R.array.task_transfers_values)
-                val position = values.indexOfFirst { it.toIntOrNull() == (task.transfers ?: -1) }
-                activity.findViewById<Spinner>(R.id.task_transfers_spinner).setSelection(position.coerceAtLeast(0))
             }
 
             // Unsaved destructive options revoke the GUI's run permission immediately.

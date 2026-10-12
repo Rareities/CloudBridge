@@ -155,7 +155,7 @@ class ReleasePackageDeviceTest {
                 .putExtra(TaskActivity.ID_EXTRA, saved.id)).use { editor ->
                 editor.onActivity { activity ->
                     assertEquals(saved.title, activity.findViewById<android.widget.EditText>(R.id.task_title_textfield).text.toString())
-                    assertNotNull(activity.findViewById<android.view.View>(R.id.bisync_command_button))
+                    assertNotNull(activity.findViewById<android.view.View>(R.id.bisync_help_button))
                     assertNotNull(activity.findViewById<android.view.View>(R.id.task_proton_connection_button))
                 }
             }

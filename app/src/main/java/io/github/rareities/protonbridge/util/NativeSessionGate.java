@@ -77,6 +77,7 @@ public final class NativeSessionGate {
         String last = command[n - 1];
         if (last.equals("--help") || last.equals("--version")) return true;
         int verb = verbIndex(command);
+        if (verb == n - 2 && command[verb].equals("help") && last.equals("flags")) return true;
         if (verb == n - 1 && (last.equals("version") || last.equals("listremotes"))) return true;
         return verb == n - 2 && command[verb].equals("config") &&
                 (last.equals("dump") || last.equals("providers"));

@@ -17,14 +17,9 @@
     <string name="bisync_backup_remote">Remote backup folder (optional)</string>
     <string name="bisync_backup_help">Backup folders must be outside the synchronised folders. The remote backup must use the same remote, for example proton:Backups. Local backups contain readable file contents.</string>
     <string name="bisync_flags_label">Advanced rclone options</string>
-    <string name="bisync_flags_help">Optional: type one --flag or --flag=value per line. Leave blank to use the defaults. Spaces in values do not need quotes. Credentials belong in the remote editor. The bundled engine checks option names and values before running.</string>
-    <string name="bisync_flags_hint">--bwlimit=8M</string>
-    <string name="bisync_add_flag">Build a flag (optional)</string>
+    <string name="bisync_flags_help">Optional: type one flag per line: --flag, --flag value or --flag=value. Leave blank to use the defaults. Spaces in values do not need quotes. Credentials belong in the remote editor. The bundled engine checks option names and values before running.</string>
+    <string name="bisync_flags_hint">--conflict-resolve newer\n--bwlimit 8M</string>
     <string name="bisync_engine_help">rclone flag reference</string>
-    <string name="bisync_tuning_title">Choose performance preset (optional)</string>
-    <string name="bisync_tuning_explanation">Copies transfer, checker, buffer, request-rate and bandwidth settings into this task. Filters and safety controls are preserved. These templates are starting points, not measured battery guarantees. Save and preview after changing settings.</string>
-    <string name="bisync_command_title">View rclone command</string>
-    <string name="bisync_command_explanation">Each quoted line is one argument for a normal run. The current private baseline is selected at execution. Initialisation uses a separate approved operation. This view does not start a process; protected options still apply.</string>
     <string name="proton_connection_title">Proton login help</string>
     <string name="proton_connection_explanation">For a Proton Drive remote, edit login details or explicitly reset and verify its cached session. Other tasks for the same declared account remain paused until verification succeeds. This does not initialise or repair a bisync baseline. Resolve human-verification challenges in an official Proton client.</string>
     <string name="proton_one_time_code">One-time 2FA code (optional, not saved)</string>
@@ -41,7 +36,7 @@
     <string name="bisync_preview_help">Start here. Preview saves your task and checks what would change without transferring or deleting files. Wait for it to finish successfully, then review and initialise. Ready tasks preview normal changes without altering their baseline. New or changed tasks preview initialisation and require approval within 30 minutes. A preview may refresh credentials and is not a snapshot of cloud contents.</string>
     <string name="bisync_advanced_show">Advanced settings (optional)</string>
     <string name="bisync_advanced_hide">Hide advanced settings</string>
-    <string name="bisync_advanced_help">Defaults are enough to start. Type custom flags below if needed. The flag builder helps enter a flag; presets change performance settings; command and flag reference are read-only tools.</string>
+    <string name="bisync_advanced_help">Defaults are enough to start. Type custom flags below if needed. The reference lists the bundled engine flags and explains them.</string>
     <string name="proton_login_help_summary">Use only if Proton needs you to sign in again. This does not initialise your sync.</string>
     <string name="bisync_status_initial">Needs initialisation</string>
     <string name="bisync_status_format">State: %1$s\n%2$s</string>
@@ -77,4 +72,7 @@
     <string name="task_unmetered_help">Wait for a network Android marks as unmetered, usually Wi-Fi or Ethernet. Metered Wi-Fi is excluded.</string>
     <string name="bisync_checksum_required">Checksums required for bisync</string>
     <string name="bisync_checksum_help">Compares file size and a common checksum. Missing checksums stop the run rather than silently reducing protection.</string>
+    <string name="bisync_reference_help">Local reference from the bundled rclone engine, with flag descriptions and defaults. It does not run a sync or connect to your account. Search by name or explanation. Some flags are managed by the task controls or belong in the remote editor and cannot be overridden here. For example, --conflict-resolve newer prefers the newer file while preserving the losing version as a numbered conflict copy. Changing flags requires saving and reviewing a fresh preview.</string>
+    <string name="bisync_reference_search">Search flags or explanations</string>
+    <string name="bisync_reference_no_matches">No matching flags</string>
 </resources>

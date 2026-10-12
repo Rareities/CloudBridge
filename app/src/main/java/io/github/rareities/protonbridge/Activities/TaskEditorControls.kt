@@ -9,7 +9,6 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.Button
 import android.widget.EditText
-import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.Switch
@@ -101,10 +100,7 @@ class TaskEditorControls(
         }
         activity.findViewById<Button>(R.id.task_schedule_button).setOnClickListener { schedules() }
         activity.findViewById<Button>(R.id.task_history_button).setOnClickListener { history() }
-        activity.findViewById<Button>(R.id.bisync_add_option).setOnClickListener { addOption() }
         activity.findViewById<Button>(R.id.bisync_help_button).setOnClickListener { help() }
-        activity.findViewById<Button>(R.id.bisync_preset_button).setOnClickListener { tuningPreset() }
-        activity.findViewById<Button>(R.id.bisync_command_button).setOnClickListener { effectiveCommand() }
         activity.findViewById<Button>(R.id.task_proton_connection_button).setOnClickListener { protonConnection() }
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
@@ -397,82 +393,59 @@ class TaskEditorControls(
             .setPositiveButton(android.R.string.ok, null).show()
     }
 
-    private fun addOption() {
-        val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 12, 32, 12) }
-        val name = EditText(activity).apply { hint = "Option name, for example bwlimit"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS }
-        val value = EditText(activity).apply { hint = "Value, for example 8M (blank for a switch)"; inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS }
-        box.addView(name); box.addView(value)
-        val dialog = AlertDialog.Builder(activity).setTitle(R.string.bisync_add_flag).setView(box)
-            .setNegativeButton(android.R.string.cancel, null).setPositiveButton(android.R.string.ok, null).create()
-        dialog.setOnShowListener {
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val token = "--" + name.text.toString().trim().removePrefix("--") +
-                    value.text.toString().takeIf { it.isNotEmpty() }?.let { "=$it" }.orEmpty()
-                val combined = flags.text.toString().trimEnd() + "\n" + token
-                try { AdvancedOptions.parse(combined); flags.setText(combined.trimStart()); dialog.dismiss() }
-                catch (e: IllegalArgumentException) { name.error = e.message }
-            }
-        }
-        dialog.show()
-    }
-
+    private var referenceText: String? = null
     private fun help() {
         activity.lifecycleScope.launch {
             val jobContext = currentCoroutineContext()
-            val output = withContext(Dispatchers.IO) {
-                val text = StringBuilder()
-                try {
-                    val started = System.currentTimeMillis()
-                    val result = ProcessRunner().run(rclone.bisyncHelp(),
-                        { !jobContext.isActive || System.currentTimeMillis() - started > 20000 },
-                        { line -> if (text.length < 160000) text.append(line).append('\n') }, null)
-                    if (result.success()) text.toString() else "Unable to load option help from the bundled engine"
-                } catch (e: Exception) { "Unable to load engine help: ${e.javaClass.simpleName}" }
-            }
-            if (!activity.isFinishing) AlertDialog.Builder(activity).setTitle(R.string.bisync_engine_help)
-                .setView(selectableText(output)).setPositiveButton(android.R.string.ok, null).show()
-        }
-    }
-
-    private fun tuningPreset() {
-        val templates = io.github.rareities.protonbridge.util.BisyncTuning.templates
-        AlertDialog.Builder(activity).setTitle(R.string.bisync_tuning_title)
-            .setItems(templates.map { it.title }.toTypedArray()) { _, position ->
-                val chosen = templates[position]
-                AlertDialog.Builder(activity).setTitle(chosen.title).setMessage(R.string.bisync_tuning_explanation)
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .setPositiveButton(android.R.string.ok) { _, _ ->
-                        try {
-                            val updated = io.github.rareities.protonbridge.util.BisyncTuning.apply(chosen, flags.text.toString())
-                            val values = activity.resources.getStringArray(R.array.task_transfers_values)
-                            val index = values.indexOfFirst { it.toIntOrNull() == chosen.transfers }
-                            require(index >= 0) { "The selected transfer count is unavailable" }
-                            activity.findViewById<Spinner>(R.id.task_transfers_spinner).setSelection(index)
-                            flags.setText(updated)
-                        } catch (invalid: IllegalArgumentException) { error(invalid.message) }
-                    }.show()
-            }.setNegativeButton(android.R.string.cancel, null).show()
-    }
-
-    private fun effectiveCommand() {
-        val task = persist() ?: return
-        activity.lifecycleScope.launch {
-            val description = withContext(Dispatchers.IO) {
+            val output = referenceText ?: withContext(Dispatchers.IO) {
+                val text = StringBuilder(activity.getString(R.string.bisync_reference_help) + "\n\n")
                 runCatching {
-                    val filters = task.filterId?.takeIf { it >= 0 }?.let {
-                        requireNotNull(DatabaseHandler(activity).getFilter(it)).getFilters()
-                    } ?: arrayListOf()
-                    val working = java.io.File(BisyncPolicy.workdir(activity, task), "baselines/<current-baseline>")
-                    val args = rclone.bisyncArguments(task, working, BisyncStateStore.RUN, filters, false)
-                    args.joinToString("\n") { JSONObject.quote(io.github.rareities.protonbridge.util.DiagnosticRedactor.redact(it)) }
-                }
+                    for ((title, start) in listOf(
+                        "Bisync flags" to { rclone.bisyncHelp() },
+                        "Global and backend flags" to { rclone.globalFlagsHelp() }
+                    )) {
+                        text.append(title).append("\n\n")
+                        var overflow = false
+                        val result = ProcessRunner().run(start(), { !jobContext.isActive }, { line ->
+                            if (text.length + line.length > 1_048_576) overflow = true
+                            else text.append(line).append('\n')
+                        }, null, 20_000L)
+                        require(result.success() && !overflow) { "Could not load the complete bundled flag reference" }
+                        text.append("\n")
+                    }
+                    text.toString()
+                }.getOrElse { "Unable to load flag reference: ${it.message ?: it.javaClass.simpleName}" }
             }
             if (!isActive || activity.isFinishing) return@launch
-            description.fold({
-                AlertDialog.Builder(activity).setTitle(R.string.bisync_command_title)
-                    .setView(selectableText(activity.getString(R.string.bisync_command_explanation) + "\n\n" + it))
-                    .setPositiveButton(android.R.string.ok, null).show()
-            }, { error(it.message) })
+            if (output.startsWith(activity.getString(R.string.bisync_reference_help))) referenceText = output
+            val box = android.widget.LinearLayout(activity).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(24, 8, 24, 8)
+            }
+            val search = EditText(activity).apply {
+                setHint(R.string.bisync_reference_search)
+                inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                isSingleLine = true
+            }
+            val body = TextView(activity).apply { text = output; setTextIsSelectable(true); textSize = 13f }
+            box.addView(search)
+            box.addView(ScrollView(activity).apply { addView(body) }, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+            val entries = output.split(Regex("(?m)(?=^\\s*(?:-[^\\s,],\\s+)?--[a-z])"))
+            search.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                override fun afterTextChanged(s: Editable?) {}
+                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                    val query = s.toString().trim()
+                    body.text = if (query.isBlank()) output else entries.filter { it.contains(query, ignoreCase = true) }
+                        .joinToString("\n").ifBlank { activity.getString(R.string.bisync_reference_no_matches) }
+                }
+            })
+            AlertDialog.Builder(activity).setTitle(R.string.bisync_engine_help).setView(box)
+                .setPositiveButton(android.R.string.ok, null).show().also { dialog ->
+                    dialog.window?.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        (activity.resources.displayMetrics.heightPixels * 0.85).toInt())
+                }
         }
     }
 
