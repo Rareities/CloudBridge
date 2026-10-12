@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Reviewed release candidate tag, with a matching section in docs/FORK_CHANGELOG.md'
+        description: 'Reviewed stable or release candidate tag, with a matching section in docs/FORK_CHANGELOG.md'
         required: true
-        default: 'v1.1.9-rc.1'
+        default: 'v1.2.0'
 
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
           python3 -m unittest discover -s scripts/tests
           python3 scripts/validate-release-version.py "$RELEASE_TAG"
           echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
@@ -112,7 +112,7 @@ jobs:
         with:
           name: signed-fork-distribution
           path: distribution
-      - name: Publish a new release candidate with verified assets
+      - name: Publish a verified stable release or release candidate
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -122,7 +122,14 @@ jobs:
           set -euo pipefail
           cd distribution
           sha256sum --check SHA256SUMS.txt
-          jq -n --arg tag "$RELEASE_TAG" --arg sha "$GITHUB_SHA" --rawfile body CHANGELOG.md '{tag_name:$tag,target_commitish:$sha,name:("ProtonBridge "+$tag),body:$body,draft:true,prerelease:true,make_latest:"false"}' > "$RUNNER_TEMP/release.json"
+          if [[ "$RELEASE_TAG" == *-rc.* ]]; then
+            prerelease=true
+            latest=false
+          else
+            prerelease=false
+            latest=true
+          fi
+          jq -n --arg tag "$RELEASE_TAG" --arg sha "$GITHUB_SHA" --argjson prerelease "$prerelease" --rawfile body CHANGELOG.md '{tag_name:$tag,target_commitish:$sha,name:("ProtonBridge "+$tag),body:$body,draft:true,prerelease:$prerelease,make_latest:"false"}' > "$RUNNER_TEMP/release.json"
           release_id="$(gh api --method POST "repos/$GH_REPO/releases" --input "$RUNNER_TEMP/release.json" --jq '.id')"
           gh release upload "$RELEASE_TAG" ./* --repo "$GH_REPO"
-          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false -F prerelease=true -f make_latest=false >/dev/null
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false -F prerelease="$prerelease" -f make_latest="$latest" >/dev/null

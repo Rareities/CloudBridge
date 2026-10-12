@@ -26,7 +26,7 @@ backups of important files.
 The reason I started this was to have a Proton Drive bisync service that could
 automatically sync my folders. That use case guides the project. This is simply
 a personal project; if it benefits someone else, I will be happy. Issues, pull
-requests, comments and concerns are welcome. Published candidates and their
+requests, comments and concerns are welcome. Published releases and their
 validation limits are described in the consolidated changelog.
 
 ProtonBridge is unofficial and is not affiliated with Proton or the upstream app
@@ -51,7 +51,8 @@ and bisync approval. Stop old schedules before enabling equivalent new tasks.
 
 ## Installation
 
-Download a signed APK from [ProtonBridge releases](https://github.com/Rareities/ProtonBridge/releases).
+Download the [stable 1.2.0 release](https://github.com/Rareities/ProtonBridge/releases/tag/v1.2.0),
+or browse all [ProtonBridge releases](https://github.com/Rareities/ProtonBridge/releases).
 Use `protonbridge_v<version>-oss-arm64-v8a-release.apk` for most phones, or
 `protonbridge_v<version>-oss-universal-release.apk` if unsure. ARM32, x86 and
 x86_64 builds are also available. Debug APKs have a separate `.debug` package.

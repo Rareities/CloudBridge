@@ -18,11 +18,11 @@ class ReleaseVersionTest(unittest.TestCase):
         self.changelog.write_text('## 1.1.1-rc.1 — release\n\nNew release.\n\n## 1.1.0-rc.1\n\nOld release.\n')
         self.props(110)
     def tearDown(self): self.temp.cleanup()
-    def props(self, code):
-        (self.root / 'gradle.properties').write_text(f'io.github.rareities.protonbridge.versionCode={code}\nio.github.rareities.protonbridge.versionName=1.1.1-rc.1\n')
-    def validate(self, tags, previous):
+    def props(self, code, version="1.1.1-rc.1"):
+        (self.root / 'gradle.properties').write_text(f'io.github.rareities.protonbridge.versionCode={code}\nio.github.rareities.protonbridge.versionName={version}\n')
+    def validate(self, tags, previous, tag="v1.1.1-rc.1"):
         with patch.object(module.subprocess, 'check_output', return_value='\n'.join(tags)), patch.object(module.subprocess, 'run', return_value=SimpleNamespace(stdout=f'io.github.rareities.protonbridge.versionCode={previous}')):
-            return module.validate('v1.1.1-rc.1', self.root)
+            return module.validate(tag, self.root)
     def test_next_base_exceeds_old_split_apks(self): self.assertEqual(110,self.validate(['v1.1.0-rc.1'],100))
     def test_legacy_cloudbridge_property_history_is_recognized(self):
         with patch.object(module.subprocess, 'check_output', return_value='v1.1.0-rc.1'), patch.object(module.subprocess, 'run', return_value=SimpleNamespace(stdout='de.schuelken.cloudbridge.versionCode=100')):
@@ -51,5 +51,29 @@ class ReleaseVersionTest(unittest.TestCase):
     def test_empty_notes_stop_release(self):
         self.changelog.write_text('## 1.1.1-rc.1\n\n## 1.1.0-rc.1\nOld release.')
         with self.assertRaises(ValueError): self.validate([],100)
+
+    def stable(self):
+        self.props(200, '1.2.0')
+        self.changelog.write_text('## 1.2.0 — stable release\n\nReviewed release.\n')
+
+    def test_stable_release_accepts_next_base(self):
+        self.stable()
+        self.assertEqual(200, self.validate(['v1.1.9-rc.1'], 190, 'v1.2.0'))
+
+    def test_stable_reused_tag_or_code_is_rejected(self):
+        self.stable()
+        for tags, previous in [(['v1.2.0'],190), (['v1.1.9-rc.1'],200)]:
+            with self.subTest(tags=tags), self.assertRaises(ValueError):
+                self.validate(tags,previous,'v1.2.0')
+
+    def test_stable_tag_requires_matching_checked_in_version(self):
+        self.stable()
+        with self.assertRaises(ValueError): self.validate([],190,'v1.2.1')
+
+    def test_unsupported_tag_formats_are_rejected(self):
+        self.stable()
+        for tag in ['1.2.0','v1.2','v1.2.0-beta.1','v1.2.0-rc','v1.2.0-rc.1-extra','v1.2.0+build']:
+            with self.subTest(tag=tag), self.assertRaises(ValueError):
+                self.validate([],190,tag)
 
 if __name__ == '__main__': unittest.main()

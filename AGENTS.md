@@ -83,7 +83,7 @@ Run the checks that match the change. Before any commit or push, required checks
 
 ## CI Workflows
 
-- `fork-release.yml`: Explicit master-only signed release-candidate build and isolated publication.
+- `fork-release.yml`: Explicit master-only signed stable/candidate build and isolated publication.
 - `lint.yml`: Runs unit tests and lint on PRs and master/feature updates.
 - `dependencies.yml`: Resolves and archives runtime dependency provenance with a basic unexpected-tracker check; it is not a comprehensive licence certification.
 - `translations.yml`: Profanity-checks translated `strings.xml` on PRs.

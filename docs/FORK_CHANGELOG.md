@@ -4,7 +4,35 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
-## Unreleased — necessity audit of 1.1.9 and inherited fixes
+## 1.2.0 — audited stable release
+
+- Publish the audited ProtonBridge source as **1.2.0**, a full stable release with
+  the same application ID and signing certificate as the recent prereleases.
+  Base version code is 200; ARM64 is 207. All split/universal codes exceed 1.1.9.
+- Include the necessity-audit change from [`4674c396`](https://github.com/Rareities/ProtonBridge/commit/4674c39621dce5e21e6c71771dc9d582fbc53800):
+  Android foreground-service refusal immediately reports user action, preserves
+  the bisync baseline and suppresses failure follow-ups. Remove automatic retries
+  of that permission/setup rejection. Ordinary network/charging/contention waits
+  remain; no permissions, battery exemptions or platform bypasses are added.
+- Retain the verified checksum snapshot, filter/editor, privacy, configuration-write,
+  restore, timestamp and preview-cleanup fixes described in 1.1.8. Keep rclone pinned
+  to `f1d1627e2e91867b5fed5eb6bb4d4e8d094924c8` and the same baseline fingerprint policy.
+  A healthy 1.1.8/1.1.9 baseline remains valid; upgrading from 1.1.7 or changing
+  filters/settings may require a new preview and reviewed initialisation.
+- Extend signed publication to accept stable `vX.Y.Z` tags as well as `-rc.N` tags.
+  Stable releases are published without the prerelease marker and become GitHub's
+  latest release. Preserve immutable tags, exact version/notes matching,
+  monotonically increasing ABI codes, draft asset staging, signing checks and
+  checksum/source provenance. Earlier candidates stay immutable.
+- Validation before the release commit: independent review; **205 Android tests
+  with no failures or skips**; **14 release-script tests**; lint; debug APK build
+  and native engine provenance verification. The signed workflow repeats checks
+  and verifies the distribution before publication.
+- The stable channel is a publishing designation. The recorded fixture, host and
+  build verification does not establish every live account/device scenario.
+  Android permissions and background limits still require appropriate user setup.
+
+### Necessity audit included in 1.2.0
 
 Reviewed every functional change in 1.1.9 and 1.1.8 against its source, regression
 coverage and the earlier complete fork/companion audit. Coverage includes the
@@ -45,9 +73,8 @@ or skips**, lint, debug APK build/engine verification and release-script tests a
 passed. The engine source/pin did not change, so its already-passing backend,
 bisync, companion, race and vet checks did not need repeating.
 
-This is a source audit update, not a replacement of the immutable published
-1.1.9 APK/tag. Historical release entries below describe what those releases
-actually shipped. The latest source/operating guidance reflects the removal.
+This audit is included in 1.2.0. The published 1.1.9 APK/tag remains immutable;
+historical release entries below describe what those releases actually shipped.
 
 ## 1.1.9-rc.1 — handle Android background-start restrictions safely
 

@@ -27,8 +27,8 @@ def release_notes(tag, root):
 
 
 def validate(tag, root):
-    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+", tag):
-        raise ValueError("Use a release candidate tag")
+    if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?", tag):
+        raise ValueError("Use vX.Y.Z or vX.Y.Z-rc.N")
     props = properties((root / "gradle.properties").read_text())
     code = int(props["io.github.rareities.protonbridge.versionCode"])
     if code <= 0 or code % 10 or code + 9 > 2100000000:

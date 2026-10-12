@@ -1,4 +1,7 @@
-# Unreleased — necessity audit
+# ProtonBridge 1.2.0
+
+Full stable release of the audited ProtonBridge source, with the existing
+package and signing certificate.
 
 Removed automatic retries after Android refuses a foreground-service start.
 The task now immediately asks for user action, preserves the baseline and avoids
