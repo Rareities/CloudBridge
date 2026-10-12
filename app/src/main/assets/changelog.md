@@ -1,3 +1,17 @@
+# ProtonBridge 1.1.7-rc.1
+
+Fixed the new Proton revision request that could fail preview with HTTP 422 /
+Code 2501. Legacy listings use fresh revision history and authenticated metadata,
+including empty files. Stale listing hints or warm caches cannot select an older
+checksum; downloads stop if the verified revision changes before opening.
+
+Repeat Save and preview, then review and initialise if recovery is required.
+Initialisation is a real resync: check the preview and selected winner first.
+
+[Full changelog](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.6-rc.1
 
 Fixed legacy Proton listings using an older link checksum than the downloaded

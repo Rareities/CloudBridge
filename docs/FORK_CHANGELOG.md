@@ -4,6 +4,32 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.1.7-rc.1 — fix Proton preview revision lookup
+
+- Pin the rclone engine to [`b8c5405e`](https://github.com/Rareities/rclone/commit/b8c5405e236da9f2b3a549ea199adabd0ab5ff0d).
+  Fix the new preview request introduced in 1.1.6 that could return Proton HTTP
+  422 / Code 2501 before any transfer. Resolve legacy file metadata through the
+  existing revision-history route without requesting a block range or block URLs.
+- Refresh the unique active revision for every legacy listing, even when the
+  folder listing advertises a stale revision ID or authenticated metadata is
+  already cached. Only reuse signed metadata under the freshly selected revision
+  identity; verify signatures against current keys. Never use an old Link.XAttr
+  checksum or conceal an actual history/permission error with cached data.
+- Retain the verified revision identity in listed file objects. Downloads check
+  that identity against fresh history and stop if it changed, before fetching
+  content. Preserve exact detailed-response identity checks, unknown metadata
+  semantics, bounded request concurrency and signed-metadata cache limits.
+- Regression coverage includes the reported rejected request, empty files,
+  revision A changing to B with a stale hint and warm cache, history errors,
+  invalid signed attributes and snapshot changes before download. Host engine/
+  backend/bisync regressions use disposable fixtures and race checks. Android
+  artifacts are built and verified separately; live-account acceptance still
+  depends on retrying the installed update.
+- After updating, repeat **Save and preview**, then review and initialise the
+  failed task if recovery is required. Initialisation performs a real resync and
+  can copy/overwrite files according to the selected winner; check the preview.
+  No checksum bypass, automatic resync or exclusion of `.nomedia` is introduced.
+
 ## 1.1.6-rc.1 — authoritative Proton revision checksums and recovery reports
 
 - Pin the rclone engine to [`8627faf6`](https://github.com/Rareities/rclone/commit/8627faf6c0d8725f4ea8203de325939a874ea841).
