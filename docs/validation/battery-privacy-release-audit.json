@@ -1,0 +1,121 @@
+{
+  "release": "v1.1.3-rc.1",
+  "repository": "Rareities/ProtonBridge",
+  "applicationSource": "96d0f0d2f6208da08251b3832d89f844b3040d8a",
+  "engineSource": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+  "verifiedAt": "2026-10-12T02:34:32.849277+00:00",
+  "applicationId": "io.github.rareities.protonbridge",
+  "baseVersionCode": 130,
+  "arm64VersionCode": 137,
+  "verification": {
+    "localTests": 181,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "releaseVersionTests": 7,
+    "lint": "passed with existing baseline",
+    "instrumentationCompilation": "passed",
+    "independentCodeReview": "passed; cancellation/ownership follow-ups resolved",
+    "signedBuildRun": "https://github.com/Rareities/ProtonBridge/actions/runs/38195302526",
+    "signedBuildConclusion": "success",
+    "masterLintRun": 38195282801,
+    "masterDependencyAuditRun": 38195282806,
+    "assetDigests": "All ten checksum ledger entries match GitHub API asset digests; downloaded ledger, metadata and ARM64 also match API digests.",
+    "downloadedArm64": "Independently verified non-debug package/label/version, apksigner certificate, native pin/hash/version branding.",
+    "sameCertificateAsPreviousRelease": true,
+    "allFiveApks": [
+      {
+        "file": "protonbridge_v1.1.3-rc.1-oss-arm64-v8a-release.apk",
+        "bytes": 33482119,
+        "sha256": "527f45891d23e5bcd7d4d9d9087ea4550eadf1aaf184f0231892b67453194f8a",
+        "abis": [
+          "arm64-v8a"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.3-rc.1-oss-armeabi-v7a-release.apk",
+        "bytes": 34878870,
+        "sha256": "9f46bf851973b0f81f9eaf5264e7743114cd5c79a83d1849da92bc5ad257e694",
+        "abis": [
+          "armeabi-v7a"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.3-rc.1-oss-universal-release.apk",
+        "bytes": 139405647,
+        "sha256": "8f25abb9ed376fe05005ba3d332f3d98589f5d3bcce1d6b6d046732e65935339",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "x86",
+          "x86_64"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.3-rc.1-oss-x86_64-release.apk",
+        "bytes": 43153240,
+        "sha256": "83ddf52560f68c73803a3c1f4189a756c786ab3f1be3c7bfde6a679f9fc63a83",
+        "abis": [
+          "x86_64"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.3-rc.1-oss-x86-release.apk",
+        "bytes": 44504945,
+        "sha256": "07276add4c75d4b7dbb983562042641430334856778edcb2af1537d1f0869758",
+        "abis": [
+          "x86"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      }
+    ]
+  },
+  "optimizationScope": [
+    "Android-managed Wi-Fi power saving; framework-owned worker CPU locks; active RC service CPU locks retained",
+    "Blocking process exit with bounded cancellation/deadline coordinator; quieter progress and RC polling",
+    "Optional battery exemption and deferrable new idle defaults; saved choices preserved",
+    "Bounded/cancellable health probes and config reads; no raw account/backend logging or arbitrary reconnect alarms",
+    "Owned thumbnail pipe draining and cancellation; hardened local Markdown and executor lifecycle",
+    "Battery-not-low auxiliary update checks and confirmed foreground startup before file operations"
+  ],
+  "safety": "Same reviewed engine pin, approval and baseline recovery; actual-exit admission and checksum/cryptographic checks retained.",
+  "limits": [
+    "No physical-device battery or live-account measurement; no percentage saving claimed.",
+    "Previously granted Android battery exemption and saved allow-while-idle settings are preserved; user can choose Optimized and disable idle wakeups.",
+    "Opted-in health probes may take their stop grace beyond the two-minute budget; native leases stay held until actual exit."
+  ]
+}

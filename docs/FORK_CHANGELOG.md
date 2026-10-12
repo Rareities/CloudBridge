@@ -40,6 +40,16 @@ recovery policy are unchanged. Battery savings have not been measured on a phone
 See [audit and measurement guidance](BATTERY_AND_PRIVACY.md) and
 [release notes](releases/v1.1.3-rc.1.md).
 
+Implemented in [`96d0f0d2`](https://github.com/Rareities/ProtonBridge/commit/96d0f0d2f6208da08251b3832d89f844b3040d8a).
+[Signed candidate v1.1.3-rc.1](https://github.com/Rareities/ProtonBridge/releases/tag/v1.1.3-rc.1)
+passed the signed CI pipeline and all five APK checks. Local validation passed
+181 app tests without failures/skips, seven version checks, lint, APK assembly
+and instrumentation compilation. Public checksums and the downloaded ARM64
+identity/signature/native payload were independently verified. The
+[verification record](validation/battery-privacy-release-audit.json) includes
+source/run IDs, all APK digests and measurement limits.
+
+
 ## 1.1.2-rc.1 — ProtonBridge identity and listing performance
 
 Pin the reviewed [rclone performance fix](https://github.com/Rareities/rclone/commit/de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e)
