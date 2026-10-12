@@ -166,7 +166,7 @@ class OnboardingActivity : AppIntro2(), SlideLeaveInterface, SlideSwitchCallback
             addSlide(
                 IdentifiableAppIntroFragment.createInstance(
                     title = getString(R.string.intro_battery_optimizations_title),
-                    description = getString(R.string.intro_battery_optimizations_description),
+                    description = getString(R.string.battery_optimizations_optional_description),
                     imageDrawable = R.drawable.undraw_electricity,
                     backgroundColorRes = color,
                     id = SLIDE_ID_BATTERY_OPTIMIZATION,
@@ -214,12 +214,11 @@ class OnboardingActivity : AppIntro2(), SlideLeaveInterface, SlideSwitchCallback
     }
 
     private var mAlarmsRequested = false
-    private var mOptimizationRequested = false
     private var mNotificationsRequested = false
 
     override fun allowSlideLeave(id: String): Boolean {
         return when(id) {
-            SLIDE_ID_BATTERY_OPTIMIZATION -> mOptimizationRequested
+            SLIDE_ID_BATTERY_OPTIMIZATION -> true // Battery exemption is optional.
             SLIDE_ID_ALARMS -> mAlarmsRequested
             SLIDE_ID_NOTIFICATIONS -> mNotificationsRequested
             SLIDE_ID_STORAGE -> mPermissions.grantedStorage()
@@ -233,7 +232,6 @@ class OnboardingActivity : AppIntro2(), SlideLeaveInterface, SlideSwitchCallback
             SLIDE_ID_STORAGE -> mPermissions.requestStorage(this)
             SLIDE_ID_BATTERY_OPTIMIZATION -> {
                 mPermissions.requestBatteryOptimizationException()
-                mOptimizationRequested = true
             }
             SLIDE_ID_ALARMS -> {
                 mPermissions.requestAlarms()

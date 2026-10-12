@@ -4,6 +4,42 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.1.3-rc.1 — battery, background lifecycle and privacy
+
+- Let Android manage Wi-Fi power saving instead of forcing high-performance
+  Wi-Fi for every transfer. Use WorkManager's foreground CPU ownership for
+  scheduled and file transfers; retain operation-scoped CPU ownership for RC
+  document streams/jobs outside WorkManager.
+- Block on native process exit, with a one-second coordinator for cancellation
+  and deadlines, instead of inspecting exit ten times a second. Preserve
+  graceful/forced cancellation and actual-exit admission/lease protection.
+- Generate native transfer stats every five seconds, throttle progress
+  notifications to five seconds, heartbeat to fifteen seconds, and poll active
+  RC jobs every three seconds. Final outcomes still publish without a throttle;
+  idle RC polling continues to block and unused daemons retain their idle stop.
+- Make the battery-optimization exemption optional during onboarding and
+  permission checks. New idle-trigger defaults allow Android to defer wakeups;
+  existing saved choices remain unchanged. Optional update checks now require
+  battery not low, including already-scheduled periodic work.
+- Bound/drain local configuration dumps and optional session probes. Skip
+  probes during active native work, budget two minutes plus termination grace,
+  cap each probe at thirty seconds, avoid extra list-remotes calls, propagate
+  coroutine cancellation and notify only with positive authentication evidence.
+  Stop writing raw account names/backend diagnostics into system logs.
+- Always drain and own thumbnail-server pipes, cancel listeners on service
+  stop, and remove private thumbnail endpoint logging.
+- Keep Markdown rendering local: block JavaScript, network subresources,
+  file/content access and custom-scheme navigation. Explicit HTTP(S) links open
+  externally. Destroy its executor/WebView with the host activities and ignore
+  late callbacks.
+- Confirm foreground promotion before a file-transfer process starts and make
+  its cancellation action available in the first notification.
+
+The engine pin, checksum/cryptographic verification, bisync approval and baseline
+recovery policy are unchanged. Battery savings have not been measured on a phone.
+See [audit and measurement guidance](BATTERY_AND_PRIVACY.md) and
+[release notes](releases/v1.1.3-rc.1.md).
+
 ## 1.1.2-rc.1 — ProtonBridge identity and listing performance
 
 Pin the reviewed [rclone performance fix](https://github.com/Rareities/rclone/commit/de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e)

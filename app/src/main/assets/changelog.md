@@ -1,3 +1,15 @@
+# ProtonBridge 1.1.3-rc.1
+
+Battery and background lifecycle optimizations: Android Wi-Fi power saving,
+less progress/polling work, optional battery exemption, deferrable new schedules,
+and bounded/cancellable optional health checks. Private diagnostic logging and
+Markdown content are hardened; thumbnail listeners drain and stop reliably.
+Existing schedule choices and bisync safety checks remain intact.
+
+[Full fork changelog](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.2-rc.1
 
 - New ProtonBridge name, icon and separate package identity.

@@ -28,7 +28,6 @@ import io.github.rareities.protonbridge.util.DiagnosticRedactor
 import java.util.concurrent.atomic.AtomicBoolean
 import io.github.rareities.protonbridge.util.FLog
 import io.github.rareities.protonbridge.util.SyncLog
-import io.github.rareities.protonbridge.util.TransferLocks
 import io.github.rareities.protonbridge.util.WifiConnectivitiyUtil
 import io.github.rareities.protonbridge.extensions.tag
 import io.github.rareities.protonbridge.notifications.implementations.DownloadWorkerNotification
@@ -145,19 +144,20 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
             // is still null earlier. Promoting here keeps short-lived jobs (deletes!) in the
             // foreground instead of losing their slot to the background job time limit.
             mTitle = mNotificationManager?.initialTitle ?: ""
-            updateForegroundNotification(mNotificationManager?.updateNotification(
-                mTitle,
-                mTitle,
-                ArrayList(),
-                0,
-                ongoingNotificationID
-            ))
-
             mNotificationManager?.setCancelId(id)
+            val initialNotification = requireNotNull(mNotificationManager?.updateNotification(
+                mTitle, mTitle, ArrayList(), 0, ongoingNotificationID
+            )) { "Cannot create the transfer notification" }
+            val initialForeground = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+                ForegroundInfo(ongoingNotificationID, initialNotification, FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            else ForegroundInfo(ongoingNotificationID, initialNotification)
+            // Confirm framework CPU/service ownership before launching native work.
+            setForegroundAsync(initialForeground).get(30, java.util.concurrent.TimeUnit.SECONDS)
+            if (isStopped) { failureReason = FAILURE_REASON.CANCELLED; return false }
             if(preconditionsMet()) {
                 // do not instantiate rclone when you dont want it to run.
                 // It will immediately run!
-                val transferLocks = TransferLocks.acquire(mContext, "ephemeral")
+                // Foreground WorkManager owns CPU availability for this transfer.
                 try {
                     when(type){
                     Type.DOWNLOAD -> {
@@ -240,7 +240,6 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 }
                 handleSync(mTitle)
                 } finally {
-                    transferLocks?.release()
                     sCleanupFiles.forEach { it.delete() }
                 }
             } else {
@@ -302,7 +301,7 @@ class EphemeralWorker (private var mContext: Context, workerParams: WorkerParame
                 if (logline.optString("level") == "error" && sIsLoggingEnabled) log2File?.log(line)
                 statusObject.parseLoglineToStatusObject(logline)
                 val now = android.os.SystemClock.elapsedRealtime()
-                if (statusObject.notificationContent.isNotEmpty() && now - lastNotifyMs >= 500L) {
+                if (statusObject.notificationContent.isNotEmpty() && now - lastNotifyMs >= 5_000L) {
                     lastNotifyMs = now
                     updateForegroundNotification(mNotificationManager?.updateNotification(title,
                         statusObject.notificationContent, statusObject.notificationBigText,

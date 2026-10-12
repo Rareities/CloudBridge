@@ -58,8 +58,8 @@ public class RcdService extends Service implements RcloneRcd.JobsUpdateHandler {
     private boolean shutdown;
     private final Object onlineLock = new Object();
     private long initNanosTimestamp = 0;
-    // Held only while VCP/rcd jobs are actively running, so the device does not enter Doze
-    // and stall transfers with the screen off.
+    // CPU ownership only while VCP/RC jobs or streams are active.
+    // This does not override Android Doze or Wi-Fi power saving.
     private TransferLocks activeTransferLocks;
     private final Handler idleHandler = new Handler(Looper.getMainLooper());
     private final Runnable idleAction = this::shutdownIfPossible;

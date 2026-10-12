@@ -58,10 +58,7 @@ class PermissionFragment : Fragment() {
             binding.cardBatteryOptimizations.visibility = View.GONE
         }
 
-        if(mPermissionManager.grantedStorage() &&
-            mPermissionManager.grantedNotifications() &&
-            mPermissionManager.grantedBatteryOptimizationExemption() &&
-            mPermissionManager.grantedStorage()) {
+        if(mPermissionManager.hasAllPermissions()) {
             (requireActivity() as MainActivity).startRemotesFragment()
         }
     }

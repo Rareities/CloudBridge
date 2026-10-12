@@ -3,9 +3,7 @@ package io.github.rareities.protonbridge.Services;
 import android.app.IntentService;
 import android.content.Intent;
 import androidx.annotation.Nullable;
-import androidx.preference.PreferenceManager;
 import io.github.rareities.protonbridge.Items.RemoteItem;
-import io.github.rareities.protonbridge.R;
 import io.github.rareities.protonbridge.Rclone;
 import io.github.rareities.protonbridge.util.FLog;
 
@@ -17,7 +15,9 @@ public class ThumbnailsLoadingService extends IntentService {
     public static final String SERVER_PORT = "io.github.rareities.protonbridge.ThumbnailsLoadingService.PORT";
 
     private Rclone rclone;
-    private Process process;
+    private volatile Process process;
+    private volatile io.github.rareities.protonbridge.util.NativePipeTransfer transfer;
+    private volatile boolean stopping;
 
     public ThumbnailsLoadingService() {
         super("io.github.rareities.protonbridge.ThumbnailLoadingService");
@@ -45,31 +45,29 @@ public class ThumbnailsLoadingService extends IntentService {
         }
         String hiddenPath = "/" + hiddenPathExtra + '/' + remote.getName();
         int serverPort = intent.getIntExtra(SERVER_PORT, 29179);
-        FLog.d(TAG, "onHandleIntent: hiddenPath=%s", hiddenPath);
+        if (stopping) return; // Never log the private thumbnail endpoint.
         process = rclone.serve(Rclone.SERVE_PROTOCOL_HTTP, serverPort, false, null, null, remote, "", hiddenPath);
         if (process != null) {
+            // Always drain both pipes, even when file logging is disabled.
+            io.github.rareities.protonbridge.util.NativePipeTransfer owned =
+                    new io.github.rareities.protonbridge.util.NativePipeTransfer(process, true);
+            transfer = owned;
+            if (stopping) owned.cancel();
             try {
-                if(PreferenceManager.getDefaultSharedPreferences(this).
-                        getBoolean(getString(R.string.pref_key_logs), false)) {
-                    new Thread() {
-                        @Override
-                        public void run() {
-                            rclone.logErrorOutput(process);
-                        }
-                    }.start();
-                }
-                process.waitFor();
-            } catch (InterruptedException e) {
-                FLog.e(TAG, "onHandleIntent: error waiting for process", e);
-            }
+                owned.output().close();
+                owned.awaitSuccessfulExit();
+            } catch (java.io.IOException failure) {
+                FLog.w(TAG, "Thumbnail listener stopped");
+            } finally { owned.cancel(); }
         }
     }
 
     @Override
     public void onDestroy() {
+        stopping = true;
+        io.github.rareities.protonbridge.util.NativePipeTransfer owned = transfer;
+        if (owned != null) owned.cancel();
+        // A child created concurrently observes stopping before its wait begins.
         super.onDestroy();
-        if (process != null) {
-            process.destroy();
-        }
     }
 }

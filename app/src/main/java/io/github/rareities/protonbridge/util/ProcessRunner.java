@@ -5,6 +5,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /** Owns both pipes and the process exit result. Log messages never determine success. */
 public final class ProcessRunner {
@@ -55,11 +58,26 @@ public final class ProcessRunner {
         Thread out = drain(child.getInputStream(), stdout, streamFailure, "rclone-stdout");
         Thread err = drain(child.getErrorStream(), stderr, streamFailure, "rclone-stderr");
         try { child.getOutputStream().close(); } catch (IOException ignored) { }
+        // Block on OS exit instead of waking ten times per second to inspect it.
+        // The coordinator still wakes for cancellation, deadlines and UI heartbeat.
+        AtomicReference<Integer> exitResult = new AtomicReference<>();
+        CountDownLatch exited = new CountDownLatch(1);
+        Thread watcher = new Thread(() -> {
+            boolean interrupted = false;
+            for (;;) {
+                try { exitResult.set(child.waitFor()); break; }
+                catch (InterruptedException ignored) { interrupted = true; }
+            }
+            exited.countDown();
+            if (interrupted) Thread.currentThread().interrupt();
+        }, "rclone-process-exit");
+        watcher.setDaemon(true);
+        watcher.start();
         Integer exit = null;
         boolean forced = false;
         boolean interrupted = false;
         long cancelStarted = 0L;
-        while (exit == null) {
+        while ((exit = exitResult.get()) == null) {
             if (timeoutMillis > 0 && (System.nanoTime() - started) / 1_000_000L >= timeoutMillis) timedOut = true;
             if (timedOut || stop.stopped() || cancel.get() || Thread.currentThread().isInterrupted()) {
                 if (Thread.interrupted()) interrupted = true;
@@ -74,11 +92,13 @@ public final class ProcessRunner {
                 }
                 if (elapsed >= 15_000L) break;
             }
-            try { exit = child.exitValue(); }
-            catch (IllegalThreadStateException running) {
-                try { Thread.sleep(100L); }
-                catch (InterruptedException e) { interrupted = true; requestStop(); }
+            long waitMillis = 1000L;
+            if (timeoutMillis > 0 && !timedOut) {
+                long remaining = timeoutMillis - (System.nanoTime() - started) / 1_000_000L;
+                waitMillis = Math.min(waitMillis, Math.max(1L, remaining));
             }
+            try { exited.await(waitMillis, TimeUnit.MILLISECONDS); }
+            catch (InterruptedException e) { interrupted = true; requestStop(); }
         }
         if (exit != null) {
             try { out.join(5000L); err.join(5000L); }

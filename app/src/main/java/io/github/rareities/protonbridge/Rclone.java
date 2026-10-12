@@ -862,7 +862,7 @@ public class Rclone {
         String dstSection = buildRemoteSection(remoteItem2, remotePath2, context);
         String op = (syncDirection == SyncDirectionObject.SYNC_REMOTE_TO_REMOTE) ? "sync" : "copy";
 
-        ArrayList<String> defaultParameter = new ArrayList<>(Arrays.asList("--transfers", getTransfers(transfersOverride), "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log"));
+        ArrayList<String> defaultParameter = new ArrayList<>(Arrays.asList("--transfers", getTransfers(transfersOverride), "--stats=5s", "--stats-log-level", "NOTICE", "--use-json-log"));
         if (useMD5Sum) {
             defaultParameter.add("--checksum");
         }
@@ -919,7 +919,7 @@ public class Rclone {
                 "--compare=size,checksum", "--checksum", "--require-checksum", "--conflict-resolve=none",
                 "--conflict-loser=num", "--check-sync=true", "--max-lock=0", "--create-empty-src-dirs",
                 "--transfers=" + getTransfers(task.getTransfers() == null ? null : task.getTransfers().toString()),
-                "--stats=1s", "--stats-log-level=NOTICE", "--use-json-log", "--log-level=INFO",
+                "--stats=5s", "--stats-log-level=NOTICE", "--use-json-log", "--log-level=INFO",
                 "--protondrive-original-file-size=true", "--protondrive-replace-existing-draft=false",
                 "--protondrive-enable-caching=false");
         if (!operation.equals("run") && !operation.equals("preview-existing")) {
@@ -1015,7 +1015,7 @@ public class Rclone {
         String[] command;
         String remoteSection = buildRemoteSection(remoteItem, remotePath, context);
 
-        ArrayList<String> defaultParameter = new ArrayList<>(Arrays.asList("--transfers", getTransfers(transfersOverride), "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log"));
+        ArrayList<String> defaultParameter = new ArrayList<>(Arrays.asList("--transfers", getTransfers(transfersOverride), "--stats=5s", "--stats-log-level", "NOTICE", "--use-json-log"));
         ArrayList<String> directionParameter = new ArrayList<>();
 
         if(useMD5Sum){
@@ -1078,7 +1078,7 @@ public class Rclone {
 
         localFilePath = encodePath(localFilePath);
 
-        command = createCommandWithOptions("copy", remoteFilePath, localFilePath, "--transfers", getTransfers(), "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log");
+        command = createCommandWithOptions("copy", remoteFilePath, localFilePath, "--transfers", getTransfers(), "--stats=5s", "--stats-log-level", "NOTICE", "--use-json-log");
 
         String[] env = getRcloneEnv();
         try {
@@ -1110,7 +1110,7 @@ public class Rclone {
             path = (uploadPath.compareTo("//" + remoteName) == 0) ? remoteName + ":" + localRemotePath : remoteName + ":" + localRemotePath + uploadPath;
         }
 
-        command = createCommandWithOptions("copy", uploadFile, path, "--transfers", getTransfers(), "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log");
+        command = createCommandWithOptions("copy", uploadFile, path, "--transfers", getTransfers(), "--stats=5s", "--stats-log-level", "NOTICE", "--use-json-log");
 
         String[] env = getRcloneEnv();
         try {
@@ -1154,7 +1154,7 @@ public class Rclone {
         String[] command = createCommandWithOptions("delete", root,
                 "--files-from", filesFrom.getAbsolutePath(),
                 "--transfers", getTransfers(),
-                "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log",
+                "--stats=5s", "--stats-log-level", "NOTICE", "--use-json-log",
                 "--contimeout", "30s", "--timeout", "2m");
 
         String[] env = getRcloneEnv();
@@ -1169,7 +1169,7 @@ public class Rclone {
     /** Recursively deletes a single directory on the remote. */
     public Process purgeItem(RemoteItem remote, String path) {
         String[] command = createCommandWithOptions("purge", buildFullRemotePath(remote, path),
-                "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log",
+                "--stats=5s", "--stats-log-level", "NOTICE", "--use-json-log",
                 "--contimeout", "30s", "--timeout", "2m");
 
         String[] env = getRcloneEnv();
@@ -1184,7 +1184,7 @@ public class Rclone {
     /** Deletes a single plain file on the remote (fallback for names unusable in --files-from). */
     public Process deleteItems(RemoteItem remote, String path) {
         String[] command = createCommandWithOptions("deletefile", buildFullRemotePath(remote, path),
-                "--stats=1s", "--stats-log-level", "NOTICE", "--use-json-log",
+                "--stats=5s", "--stats-log-level", "NOTICE", "--use-json-log",
                 "--contimeout", "30s", "--timeout", "2m");
 
         String[] env = getRcloneEnv();
@@ -1534,54 +1534,52 @@ public class Rclone {
     }
 
     public String configDump() {
-        String[] command = createCommand("config", "dump");
+        return configDump(() -> false);
+    }
+
+    /** Local credential reads are bounded and drain both pipes; output is never logged. */
+    public String configDump(io.github.rareities.protonbridge.util.ProcessRunner.StopCheck stop) {
         StringBuilder output = new StringBuilder();
-        Process process;
-
+        java.util.concurrent.atomic.AtomicBoolean oversized = new java.util.concurrent.atomic.AtomicBoolean();
         try {
-            process = getRuntimeProcess(command);
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
-            }
-
-            process.waitFor();
-            if (process.exitValue() != 0) {
-                FLog.e(TAG, "configDump: rclone error, exit(%d)", process.exitValue());
-                logErrorOutput(process);
-                return null;
-            }
-
-            return output.toString();
-        } catch (IOException | InterruptedException e) {
-            FLog.e(TAG, "configDump: unexpected error", e);
+            io.github.rareities.protonbridge.util.ProcessRunner.Outcome result =
+                    new io.github.rareities.protonbridge.util.ProcessRunner().run(
+                            getRuntimeProcess(createCommand("config", "dump")), stop, line -> {
+                                if (line.equals("[oversized diagnostic omitted]") || output.length() + line.length() > 4 * 1024 * 1024)
+                                    oversized.set(true);
+                                if (!oversized.get()) output.append(line).append('\n');
+                            }, null, 30_000L);
+            return result.success() && !oversized.get() ? output.toString() : null;
+        } catch (IOException failure) {
+            FLog.w(TAG, "Configuration could not be read");
             return null;
         }
     }
 
     public DirectoryProbeResult listDirectories(String remoteName, int maxDepth) {
-        String[] command = createCommand("lsd", "--max-depth", String.valueOf(maxDepth), remoteName + ":");
-        Process process;
+        return listDirectories(remoteName, maxDepth, () -> false);
+    }
 
+    /** Optional health checks must not keep a radio/process alive indefinitely. */
+    public DirectoryProbeResult listDirectories(String remoteName, int maxDepth,
+                                                io.github.rareities.protonbridge.util.ProcessRunner.StopCheck stop) {
+        String[] command = createCommand("lsd", "--max-depth", String.valueOf(maxDepth),
+                "--retries=1", "--low-level-retries=1", "--contimeout=10s", "--timeout=20s", remoteName + ":");
+        StringBuilder errors = new StringBuilder();
         try {
-            process = getRuntimeProcess(command);
-
-            // Capture stderr so callers can classify the error type
-            StringBuilder stderrBuilder = new StringBuilder();
-            try (BufferedReader errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-                String line;
-                while ((line = errReader.readLine()) != null) {
-                    stderrBuilder.append(line).append("\n");
-                }
-            }
-
-            process.waitFor();
-            return new DirectoryProbeResult(process.exitValue(), stderrBuilder.toString());
-        } catch (IOException | InterruptedException e) {
-            FLog.e(TAG, "listDirectories: error for remote " + remoteName, e);
-            return new DirectoryProbeResult(-1, e.getMessage() != null ? e.getMessage() : "process error");
+            io.github.rareities.protonbridge.util.ProcessRunner.Outcome outcome =
+                    new io.github.rareities.protonbridge.util.ProcessRunner().run(getRuntimeProcess(command), stop,
+                            null, line -> {
+                                errors.append(io.github.rareities.protonbridge.util.DiagnosticRedactor.redact(line)).append('\n');
+                                if (errors.length() > 8192) errors.delete(0, errors.length() - 8192);
+                            }, 30_000L);
+            if (outcome.timedOut) return new DirectoryProbeResult(-1, "Health probe timed out");
+            if (outcome.cancelled || !outcome.exited || outcome.streamFailure)
+                return new DirectoryProbeResult(-1, "Health probe was interrupted or incomplete");
+            return new DirectoryProbeResult(outcome.exitCode == null ? -1 : outcome.exitCode, errors.toString());
+        } catch (IOException e) {
+            FLog.w(TAG, "Health probe could not start");
+            return new DirectoryProbeResult(-1, "Health probe could not start");
         }
     }
 
@@ -1608,6 +1606,16 @@ public class Rclone {
 
         public boolean isSuccess() {
             return exitCode == 0;
+        }
+
+        /** Quota, permissions, integrity and local contention are not expired sessions. */
+        public boolean isAuthenticationError() {
+            if (exitCode <= 0 || isNetworkError()) return false;
+            return java.util.regex.Pattern.compile(
+                    "(?i)invalid_grant|invalid credentials|authentication failed|" +
+                    "(?:http|status|response|error|code)[^\\r\\n]{0,20}\\b401\\b|" +
+                    "(?:token|session) (?:has )?expired|invalid refresh token")
+                    .matcher(stderr).find();
         }
 
         /**

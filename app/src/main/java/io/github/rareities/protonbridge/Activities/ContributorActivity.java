@@ -36,6 +36,13 @@ public class ContributorActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onDestroy() {
+        MarkdownView view = findViewById(R.id.markdownView);
+        if (view != null) view.destroy();
+        super.onDestroy();
+    }
+
+    @Override
     public boolean onSupportNavigateUp() {
         onBackPressed();
         return true;

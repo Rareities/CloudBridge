@@ -6,7 +6,7 @@ on:
       release_tag:
         description: 'Reviewed release candidate tag, with a matching docs/releases changelog'
         required: true
-        default: 'v1.1.2-rc.1'
+        default: 'v1.1.3-rc.1'
 
 permissions:
   contents: read

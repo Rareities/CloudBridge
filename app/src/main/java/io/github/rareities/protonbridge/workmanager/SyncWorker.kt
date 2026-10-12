@@ -30,7 +30,6 @@ import io.github.rareities.protonbridge.util.ProcessRunner
 import io.github.rareities.protonbridge.util.RunHistory
 import io.github.rareities.protonbridge.util.ScheduleCalculator
 import io.github.rareities.protonbridge.util.SyncLog
-import io.github.rareities.protonbridge.util.TransferLocks
 import io.github.rareities.protonbridge.util.WifiConnectivitiyUtil
 import io.github.rareities.protonbridge.proton.ProtonAccountPolicy
 import io.github.rareities.protonbridge.proton.ProtonAccountState
@@ -108,7 +107,6 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
         val admission = try { BisyncPolicy.Admission.acquire(mContext) } catch (_: Exception) { null }
         if (admission == null) return if (runAttemptCount < 8) retryWaiting(task, operation, "Waiting for another transfer to finish")
             else failBeforeStart(task, operation, "Another transfer remained active. This task did not start.")
-        var transferLocks: TransferLocks? = null
         try {
             if (!inputData.keyValueMap.containsKey(TASK_EPHEMERAL)) {
                 allowFollowup = false
@@ -137,7 +135,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             }
             if (isStopped) throw InterruptedException("Task was cancelled")
             publishPhase("Checking task and remote settings")
-            transferLocks = TransferLocks.acquire(mContext, "task")
+            // Foreground WorkManager owns the CPU wake lock for this worker.
             val filters = task.filterId?.takeIf { it >= 0 }?.let { filterId ->
                 requireNotNull(mDatabase.getFilter(filterId)) { "The selected filter no longer exists" }.getFilters()
             } ?: arrayListOf()
@@ -159,7 +157,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
         } finally {
             cancelled = cancelled || isStopped
             if (cancelled) currentRunner.requestStop()
-            try { transferLocks?.release() } finally { admission.closeAfterExit(currentProcess) }
+            admission.closeAfterExit(currentProcess)
             try { deliverResult(task, operation) } catch (e: Exception) {
                 FLog.e(TAG, "Could not deliver task result: ${e.javaClass.simpleName}")
             }
@@ -198,7 +196,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
 
     private fun heartbeat() {
         val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastHeartbeat < 5_000L) return
+        if (now - lastHeartbeat < 15_000L) return
         lastHeartbeat = now
         val quietSeconds = (now - lastEngineOutput).coerceAtLeast(0) / 1000
         val message = "$phase · ${(System.currentTimeMillis() - startedAt).coerceAtLeast(0) / 1000}s elapsed" +
@@ -351,7 +349,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
                     try {
                         statusObject.parseLoglineToStatusObject(json)
                         val now = android.os.SystemClock.elapsedRealtime()
-                        if (now - lastNotify >= 750L && statusObject.notificationContent.isNotEmpty()) {
+                        if (now - lastNotify >= 5_000L && statusObject.notificationContent.isNotEmpty()) {
                             lastNotify = now
                             updateForegroundNotification(mNotificationManager.updateSyncNotification(
                                 mTitle, statusObject.notificationContent, statusObject.notificationBigText,

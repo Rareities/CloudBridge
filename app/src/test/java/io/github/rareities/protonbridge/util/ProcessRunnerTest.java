@@ -47,6 +47,14 @@ public class ProcessRunnerTest {
         assertTrue(result.success());
         assertFalse(result.timedOut);
     }
+    @Test(timeout=10000) public void quietTransferDoesNotPollTenTimesPerSecond() throws Exception {
+        AtomicInteger checks = new AtomicInteger();
+        ProcessRunner.Outcome result = new ProcessRunner().run(child("quiet"), () -> {
+            checks.incrementAndGet(); return false;
+        }, null, null);
+        assertTrue(result.success());
+        assertTrue("Coordinator woke too often during a quiet transfer: " + checks.get(), checks.get() <= 6);
+    }
     @Test public void missingProcessIsNeverSuccess() {
         assertFalse(new ProcessRunner().run(null, () -> false, null, null).success());
     }
@@ -60,6 +68,7 @@ public class ProcessRunnerTest {
                 case "fail": System.exit(7); break;
                 case "warning": System.err.println("warning: advisory only"); break;
                 case "sleep": Thread.sleep(120000L); break;
+                case "quiet": Thread.sleep(2200L); break;
                 default: throw new IllegalArgumentException("Unknown fixture");
             }
         }

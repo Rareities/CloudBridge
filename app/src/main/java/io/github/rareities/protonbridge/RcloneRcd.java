@@ -266,7 +266,7 @@ public class RcloneRcd {
             throw new RuntimeException(e);
         }
         // PendingRcloneJobs blocks thread until first job arrives
-        jobsUpdateFuture = jobMonitorService.scheduleWithFixedDelay(new PendingRcloneJobs(), 0, 1, TimeUnit.SECONDS);
+        jobsUpdateFuture = jobMonitorService.scheduleWithFixedDelay(new PendingRcloneJobs(), 0, 3, TimeUnit.SECONDS);
     }
 
     public String[] getEnv() {

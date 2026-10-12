@@ -23,14 +23,14 @@ class UpdateManager(private var mContext: Context) {
 
     private fun getConstrains(): Constraints {
         val constraints = Constraints.Builder()
-            .setRequiresBatteryNotLow(false)
+            .setRequiresBatteryNotLow(true)
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
         return constraints
     }
 
     private fun work(request: PeriodicWorkRequest) {
-        WorkManager.getInstance(mContext).enqueueUniquePeriodicWork(TAG_REPEATING, ExistingPeriodicWorkPolicy.KEEP, request)
+        WorkManager.getInstance(mContext).enqueueUniquePeriodicWork(TAG_REPEATING, ExistingPeriodicWorkPolicy.UPDATE, request)
     }
 
     fun cancelAll() {
