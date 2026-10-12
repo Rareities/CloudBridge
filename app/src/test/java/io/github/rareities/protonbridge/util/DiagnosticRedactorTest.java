@@ -18,4 +18,8 @@ public class DiagnosticRedactorTest {
     @Test public void ordinaryFailureTextIsPreserved() {
         assertEquals("rclone exited with status 7", DiagnosticRedactor.redact("rclone exited with status 7"));
     }
+    @Test public void terminalDecorationsCannotBreakSecretRedaction() {
+        assertEquals("Checksum not equal: .nomedia password=[redacted]",
+                DiagnosticRedactor.redact("\u001b[35mChecksum not equal: .nomedia\u001b[0m password=\u001b[31mCANARY\u001b[0m"));
+    }
 }

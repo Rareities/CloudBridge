@@ -4,6 +4,32 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.1.6-rc.1 — consistent Proton revision checksums and readable recovery reports
+
+- Pin the rclone engine to [`3eed9a27`](https://github.com/Rareities/rclone/commit/3eed9a27eaeafafc4974d4480c84d0af0a580482).
+  Proton listings prefer explicitly supplied active-revision attributes; older
+  link attributes are used only when the revision has none. Invalid preferred
+  metadata never silently falls back to an older checksum.
+- Verify downloaded revision attributes using that revision's signer. Reject
+  a changed advertised active revision, a mismatched revision response or a
+  missing active revision identity before consuming download content.
+- Remove terminal colour escape codes before redacting/displaying diagnostics.
+  Checksum-listing aborts retain failure status and now explain verification
+  uncertainty, closing apps editing the folder, comparing the two copies and
+  repeating preview/review/initialisation. No automatic force, resync, exclusion
+  or checksum bypass is added.
+- Signed-metadata regressions reproduce the listing/download inconsistency and
+  authenticate the preferred metadata with separate keys. Tests cover corrupt
+  preferred attributes and changed/mismatched/missing revision IDs. Local SHA1
+  fixtures initialise differing 29-byte `.nomedia` files successfully.
+
+The reported Anki failure occurred during initialisation. Its exact cloud
+response is unavailable, so this is a confirmed backend consistency fix rather
+than proof that every marker mismatch has this cause. Files changing during sync
+can still correctly stop reconciliation. No full listing-to-download snapshot
+binding, live-account/device acceptance or silent repair is claimed. Engine
+changes require fresh preview and explicit approval for existing bisync tasks.
+
 ## 1.1.5-rc.1 — consistent branding and consolidated documentation
 
 - Update the README to describe ProtonBridge throughout, with current download

@@ -367,7 +367,7 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             !outcome.exited -> "The process did not confirm exit; another transfer remains blocked until it stops."
             outcome.streamFailure -> "Could not completely read the process output. Review the task before retrying."
             outcome.exitCode == null -> "The rclone process could not be started."
-            outcome.exitCode != 0 -> "rclone exited with status ${outcome.exitCode}.\n${diagnosticText().takeLast(1400)}"
+            outcome.exitCode != 0 -> io.github.rareities.protonbridge.util.BisyncFailureReport.exited(outcome.exitCode, diagnosticText())
             else -> "Completed successfully"
         }
         val account = accountIdentity

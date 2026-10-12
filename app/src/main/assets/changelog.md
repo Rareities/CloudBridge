@@ -1,3 +1,14 @@
+# ProtonBridge 1.1.6-rc.1
+
+Fixed inconsistent Proton active-revision checksum/signature metadata handling.
+Changed or invalid revision identities stop safely before download. Checksum
+failures now include recovery guidance, and terminal colour codes are removed.
+Preview and review existing bisync tasks again after this engine update.
+
+[Full changelog](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.5-rc.1
 
 Updated ProtonBridge README, website/privacy and contributor documentation.
