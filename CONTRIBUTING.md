@@ -12,7 +12,7 @@ We welcome any contribution to ProtonBridge, and there are multiple ways to cont
 ## Reporting a bug
 No one likes it if something goes wrong. However, before submitting a bug report, please make sure to check the following links:
 
-- [ProtonBridge documentation](https://thies2005.github.io/ProtonBridge/)
+- [ProtonBridge documentation](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
 - [search existing issues](https://github.com/Rareities/ProtonBridge/issues?q=is%3Aissue)
 - [rclone documentation](https://rclone.org/)
 - [rclone forum](https://forum.rclone.org/)
@@ -55,8 +55,8 @@ When filing a new bug report, answer all the questions in the template. This inc
 ## Developing
 You should first make sure you have:
 
-- Go 1.25+ installed and in your PATH
-- Java installed and in your PATH
+- Go 1.27.2 installed and in your PATH
+- JDK 17 installed and in your PATH
 - Android SDK command-line tools installed OR the NDK version specified in `gradle.properties`
   installed
 

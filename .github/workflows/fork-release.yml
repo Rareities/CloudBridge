@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Reviewed release candidate tag, with a matching docs/releases changelog'
+        description: 'Reviewed release candidate tag, with a matching section in docs/FORK_CHANGELOG.md'
         required: true
-        default: 'v1.1.4-rc.1'
+        default: 'v1.1.5-rc.1'
 
 permissions:
   contents: read
@@ -92,7 +92,8 @@ jobs:
           Copy-Item app/build/outputs/apk/oss/release/*.apk distribution/
           Copy-Item app/build/generated/rcloneAssets/* distribution/
           Copy-Item app/build/reports/verified-apks.json distribution/
-          Copy-Item "docs/releases/$env:RELEASE_TAG.md" distribution/CHANGELOG.md
+          python3 scripts/validate-release-version.py --notes $env:RELEASE_TAG | Set-Content -Encoding utf8NoBOM distribution/CHANGELOG.md
+          if ($LASTEXITCODE -ne 0) { throw "Release changelog extraction failed" }
           [pscustomobject]@{appCommit=$env:GITHUB_SHA;tag=$env:RELEASE_TAG;certificateSha256=$env:CERTIFICATE} | ConvertTo-Json | Set-Content distribution/release-provenance.json
           Get-ChildItem distribution -File | Sort-Object Name | ForEach-Object { "$( (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() )  $($_.Name)" } | Set-Content distribution/SHA256SUMS.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

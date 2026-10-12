@@ -1,8 +1,21 @@
-# Full fork changelog and commit history
+# ProtonBridge — changes, usage and project notes
 
 This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
+
+## 1.1.5-rc.1 — consistent branding and consolidated documentation
+
+- Update the README to describe ProtonBridge throughout, with current download
+  names, package/activity identity, build toolchain, bisync controls and attribution.
+- Update repository documentation pages, privacy text, contributor instructions
+  and issue-template links to this fork. Remove upstream download/store claims.
+- Consolidate the added guides, audit/roadmap files and release notes into this
+  document. Historical details remain available through immutable Git history.
+- Signed releases now extract their notes from the matching version section here;
+  missing, empty or duplicate sections stop release validation.
+- Retain the existing app identity, signing certificate, engine pin and runtime
+  behaviour. This update contains documentation and release tooling changes.
 
 ## 1.1.4-rc.1 — plain flag editor and complete rclone reference
 
@@ -26,7 +39,7 @@ Integration merges are included without counting their features twice.
 A real local 20-file bisync fixture confirmed that newer content wins on both
 sides and older content survives in numbered conflict copies, without `--force`
 or relaxing checksum/deletion checks. No live-account/device acceptance test is
-claimed. See [release notes](releases/v1.1.4-rc.1.md).
+claimed. See [release notes](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.4-rc.1.md).
 
 Committed at [`ed232938`](https://github.com/Rareities/ProtonBridge/commit/ed232938441169c37bee15a4a292d81bd95d663a)
 and published as [signed v1.1.4-rc.1](https://github.com/Rareities/ProtonBridge/releases/tag/v1.1.4-rc.1).
@@ -70,8 +83,8 @@ includes the real conflict fixture, source/run IDs and all APK digests.
 
 The engine pin, checksum/cryptographic verification, bisync approval and baseline
 recovery policy are unchanged. Battery savings have not been measured on a phone.
-See [audit and measurement guidance](BATTERY_AND_PRIVACY.md) and
-[release notes](releases/v1.1.3-rc.1.md).
+See [audit and measurement guidance](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/BATTERY_AND_PRIVACY.md) and
+[release notes](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.3-rc.1.md).
 
 Implemented in [`96d0f0d2`](https://github.com/Rareities/ProtonBridge/commit/96d0f0d2f6208da08251b3832d89f844b3040d8a).
 [Signed candidate v1.1.3-rc.1](https://github.com/Rareities/ProtonBridge/releases/tag/v1.1.3-rc.1)
@@ -122,7 +135,7 @@ engine/app checks and verified all five APKs. Public asset digests match the
 checksum ledger; the downloaded ARM64 APK independently passed package/label,
 version, signature, certificate and embedded engine hash/pin/branding checks.
 
-See [release notes](releases/v1.1.2-rc.1.md) for scope and validation limits and
+See [release notes](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.2-rc.1.md) for scope and validation limits and
 [the verification record](validation/protonbridge-release-audit.json) for run IDs
 and APK digests.
 
@@ -132,15 +145,15 @@ and APK digests.
 ### Signed promotion and repository cleanup
 
 The reviewed application source is merged into `master` at
-[`fe23bd52`](https://github.com/Rareities/CloudBridge/commit/fe23bd52d90e46ca63384db4b174bc50b4a3cc05).
-[`461d911d`](https://github.com/Rareities/CloudBridge/commit/461d911d)
+[`fe23bd52`](https://github.com/Rareities/ProtonBridge/commit/fe23bd52d90e46ca63384db4b174bc50b4a3cc05).
+[`461d911d`](https://github.com/Rareities/ProtonBridge/commit/461d911d)
 removes temporary debug publishing and the test-branch signing exception;
 debug APK builds are now manual-only. No additional app source blocker was
 found during the aggregate follow-up review. The pinned engine is unchanged;
 rclone's documentation follow-up is merged at
 [`63bf067c`](https://github.com/Rareities/rclone/commit/63bf067cab7ceeddd330aaff45b0f8ffa9e51855).
 
-The [signed prerelease](https://github.com/Rareities/CloudBridge/releases/tag/v1.1.1-rc.1)
+The [signed prerelease](https://github.com/Rareities/ProtonBridge/releases/tag/v1.1.1-rc.1)
 contains five APKs with the previous release's package and certificate.
 176 host tests, lint, dependency checks, native regression checks and signed
 APK verification passed. The downloaded ARM64 APK was independently checked
@@ -180,7 +193,7 @@ these managed-app fixes.
 
 Validation results and remaining device/live-account limits are recorded in
 this changelog and the signed release
-[notes](releases/v1.1.1-rc.1.md).
+[notes](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.1-rc.1.md).
 
 ### Simpler bisync editor follow-up
 
@@ -233,25 +246,25 @@ Independent source review passed. Device execution remains unrun.
 
 ### Follow-up commits
 
-- [d4521de6c1](https://github.com/Rareities/CloudBridge/commit/d4521de6c15a86ee85e8f485299ee0ac239fda9c) —
+- [d4521de6c1](https://github.com/Rareities/ProtonBridge/commit/d4521de6c15a86ee85e8f485299ee0ac239fda9c) —
   opt-in, independently reviewed debug-test prerelease publication from the
   isolated test branch, with fail-fast uploads and no release signing secrets.
-- [eb41c11444](https://github.com/Rareities/CloudBridge/commit/eb41c11444ff4b8e2359b94d96ed307ea8bb428e) —
+- [eb41c11444](https://github.com/Rareities/ProtonBridge/commit/eb41c11444ff4b8e2359b94d96ed307ea8bb428e) —
   exact test-branch admission in the signed-release workflow and updated notes.
   The existing environment deployment allowlist remains a required external gate.
 
-- [f59a257740](https://github.com/Rareities/CloudBridge/commit/f59a2577405c16a4ce3ac93cb1ebdf47a0fcb5f9) —
+- [f59a257740](https://github.com/Rareities/ProtonBridge/commit/f59a2577405c16a4ce3ac93cb1ebdf47a0fcb5f9) —
   simpler bisync editor, actionable running/queued feedback, persisted waiting
   reasons, foreground/local-check deadlines and validated regression coverage.
-- [dbbe9ee32f](https://github.com/Rareities/CloudBridge/commit/dbbe9ee32f912f7c3060ce617d792b3bf84ca4dc) —
+- [dbbe9ee32f](https://github.com/Rareities/ProtonBridge/commit/dbbe9ee32f912f7c3060ce617d792b3bf84ca4dc) —
   first-run UUID fix documentation and validation.
-- [cbcda693b2](https://github.com/Rareities/CloudBridge/commit/cbcda693b2c924ebc0939fb0099ad02c47d2a28f) —
+- [cbcda693b2](https://github.com/Rareities/ProtonBridge/commit/cbcda693b2c924ebc0939fb0099ad02c47d2a28f) —
   personal-fork README introduction and full commit-linked changelog.
 
-- [e8f2a5ad5a](https://github.com/Rareities/CloudBridge/commit/e8f2a5ad5aae553eca7a5fd5d014d413120d9316) —
+- [e8f2a5ad5a](https://github.com/Rareities/ProtonBridge/commit/e8f2a5ad5aae553eca7a5fd5d014d413120d9316) —
   first-run initialization guidance and safe task/baseline UUID validation.
 
-- [f5b8f5fc3e](https://github.com/Rareities/CloudBridge/commit/f5b8f5fc3e282116ad1ecfd7eabc1e6c6ce247db) —
+- [f5b8f5fc3e](https://github.com/Rareities/ProtonBridge/commit/f5b8f5fc3e282116ad1ecfd7eabc1e6c6ce247db) —
   configuration/account approval, process admission, durable restore, resolved
   defaults, versioning, regression tests and validation evidence.
 - [852525046b](https://github.com/Rareities/rclone/commit/852525046bf0856349eee51b814d11057f2effb5) —
@@ -403,7 +416,7 @@ Dedicated fork signing certificate SHA-256:
 
 `c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd`
 
-Release ID: `de.schuelken.cloudbridge`. Debug ID:
+Historical 1.1.0 release ID: `de.schuelken.cloudbridge`. Historical debug ID:
 `de.schuelken.cloudbridge.debug`. Android will not update an application signed
 by somebody else's certificate with this fork key. Export and verify a backup
 before any deliberate replacement; do not uninstall merely to bypass signing
@@ -417,7 +430,7 @@ explicit, verified release workflow.
 
 ## Acceptance and remaining gates
 
-See `docs/RELEASE_PLAN_COVERAGE.md`, `docs/INTEGRATION_ACCEPTANCE.md` and the
+See [docs/RELEASE_PLAN_COVERAGE.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/RELEASE_PLAN_COVERAGE.md), [docs/INTEGRATION_ACCEPTANCE.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/INTEGRATION_ACCEPTANCE.md) and the
 release workflow evidence. Verification covers native and GUI bisync, all
 ordinary task modes, WorkManager charging/cancellation, RC/provider ownership,
 force-stop/reopen, encrypted rollback, hostile archives and secret canaries.
@@ -489,7 +502,7 @@ Built with **Go 1.27.2 or newer**, including its October 2026 security fixes.
 Windows amd64, Linux amd64/arm64 and macOS amd64/arm64 archives include licence,
 changelog, exact source SHA, module/toolchain metadata and binary hashes.
 `SHA256SUMS.txt` covers published assets. Android executables are built separately
-by CloudBridge with NDK 29, bionic system DNS, PIE and 16 KiB load alignment.
+by ProtonBridge with NDK 29, bionic system DNS, PIE and 16 KiB load alignment.
 
 The release workflow runs backend/config/march/bisync regressions, race/static
 checks, negative crypto and fake-server tests, and disposable CLI acceptance.
@@ -503,7 +516,7 @@ publication runs separately and does not execute candidate code with write acces
 **External gates:** live disposable-Proton official-client round trips, actual
 long-lived refresh/revocation and account/crypto-migration matrices. No personal
 credentials were used. Photos, Shared With Me, instant events and universal
-service compatibility are not claimed. Pair this with a CloudBridge build whose
+service compatibility are not claimed. Pair this with a ProtonBridge build whose
 provenance pins this release's exact engine source.
 
 ## Exhaustive fork commit ledger
@@ -514,13 +527,13 @@ Authors below are git metadata. Merge rows represent integration, not an extra i
 
 | Commit | Author | Change |
 |---|---|---|
-| [fdf65556f5](https://github.com/Rareities/CloudBridge/commit/fdf65556f596da8798cb1566a3a2e8398b552600) | ChatGPT | feat: add guarded Proton bisync workflows and task scheduling |
-| [e24703f3e0](https://github.com/Rareities/CloudBridge/commit/e24703f3e04e4d07dec861d6c9e6111fe1b7c313) | ChatGPT | ci: install supported Android SDK packages |
-| [39251088ce](https://github.com/Rareities/CloudBridge/commit/39251088ce172cee10c9b83a3c25fcd2e66545c3) | ChatGPT | fix: validate native bisync lifecycle and complete task workflows |
-| [ab161aa76c](https://github.com/Rareities/CloudBridge/commit/ab161aa76cca548dcda728324d899b389f3ba4e1) | ChatGPT | fix: harden privacy boundaries and ship a signed bisync release candidate |
-| [a50c7a0784](https://github.com/Rareities/CloudBridge/commit/a50c7a078448d2edfdd80989e46a8c847c7f0327) | ChatGPT | test: validate signed release without test-only shrunk helper calls |
-| [e18a057f1c](https://github.com/Rareities/CloudBridge/commit/e18a057f1c925510af6dd08d90f697a5ed9307b0) | ChatGPT | fix: complete remote setup lifecycle and preserve queued task actions |
-| [a6589372cb](https://github.com/Rareities/CloudBridge/commit/a6589372cbf86e0b72fb374b500ff81ac87cc7a6) | Rareities | Merge verified Proton bisync, privacy and signed release candidate |
+| [fdf65556f5](https://github.com/Rareities/ProtonBridge/commit/fdf65556f596da8798cb1566a3a2e8398b552600) | ChatGPT | feat: add guarded Proton bisync workflows and task scheduling |
+| [e24703f3e0](https://github.com/Rareities/ProtonBridge/commit/e24703f3e04e4d07dec861d6c9e6111fe1b7c313) | ChatGPT | ci: install supported Android SDK packages |
+| [39251088ce](https://github.com/Rareities/ProtonBridge/commit/39251088ce172cee10c9b83a3c25fcd2e66545c3) | ChatGPT | fix: validate native bisync lifecycle and complete task workflows |
+| [ab161aa76c](https://github.com/Rareities/ProtonBridge/commit/ab161aa76cca548dcda728324d899b389f3ba4e1) | ChatGPT | fix: harden privacy boundaries and ship a signed bisync release candidate |
+| [a50c7a0784](https://github.com/Rareities/ProtonBridge/commit/a50c7a078448d2edfdd80989e46a8c847c7f0327) | ChatGPT | test: validate signed release without test-only shrunk helper calls |
+| [e18a057f1c](https://github.com/Rareities/ProtonBridge/commit/e18a057f1c925510af6dd08d90f697a5ed9307b0) | ChatGPT | fix: complete remote setup lifecycle and preserve queued task actions |
+| [a6589372cb](https://github.com/Rareities/ProtonBridge/commit/a6589372cbf86e0b72fb374b500ff81ac87cc7a6) | Rareities | Merge verified Proton bisync, privacy and signed release candidate |
 
 ### rclone
 
@@ -544,3 +557,104 @@ Authors below are git metadata. Merge rows represent integration, not an extra i
 | [76f218c559](https://github.com/Rareities/rclone/commit/76f218c559a5be7c423eba7a381e71df260c7b89) | ChatGPT | Merge reviewed official rclone master release tooling |
 | [6a9f0fc48c](https://github.com/Rareities/rclone/commit/6a9f0fc48ca23660022fe24615bf5e988710d418) | ChatGPT | build: check known vulnerabilities and preserve executable archive modes |
 | [47048daf3c](https://github.com/Rareities/rclone/commit/47048daf3c80e1de633ec9a1f09981f4c30f9a30) | Rareities | Merge reviewed Proton bisync and verified fork release |
+
+
+## Current usage and operating limits
+
+### Bisync and flags
+
+Use **Save and preview → Review and initialise → Run** with independent backups.
+The preview is advisory, not a frozen cloud snapshot. Review initial winning side,
+ordered endpoints, filters, optional backups and the deletion percentage (default
+10 percent). Backup folders must be outside synced roots. Approval expires after
+30 minutes and is bound to settings, configuration identity and the engine pin.
+Missing/interrupted state requires explicit recovery; there is no automatic force
+or resync repair.
+
+Managed bisync requires size and common checksums. Missing metadata or damaged
+baseline rows stop reconciliation. Conflicts default to preserving both contents;
+`--conflict-resolve newer` or `older` additionally compares modification times,
+which must be meaningful for your files. Numbered losing copies are retained.
+
+The editor accepts one `--flag`, `--flag value` or `--flag=value` per line. Spaces,
+Unicode and equals signs in values are preserved without shell interpretation.
+Repeatable filters are allowed, duplicate scalar flags are rejected. Task-owned
+state, endpoints, credentials, listeners, executable hooks and safety controls
+cannot be overridden. The searchable reference contains the bundled bisync,
+global and backend flag descriptions. It is local help, not a cloud connection.
+The Proton connection control checks the configured connection; it does not
+initialise a bisync baseline.
+
+### Scheduling and battery
+
+Schedules support network, charging, battery-not-low and quiet-hour constraints.
+Intervals have a 15-minute minimum; missed runs coalesce. Android Doze, quotas,
+force-stop and permissions may delay starts. Manual runs are explicit requests.
+Existing idle-wakeup preferences are preserved. For lower idle drain disable
+General settings → Allow tasks to run when the device is idle, and use Android's
+Optimized battery setting if deferred starts are acceptable. The app cannot
+revoke a previously granted battery exemption itself.
+
+Android manages Wi-Fi power saving; WorkManager owns worker CPU locks. Active
+RC streams retain operation-scoped CPU protection. Stats/notifications update
+every five seconds, heartbeat every fifteen, active RC polling every three.
+Optional update checks require battery not low; optional connection probes are
+bounded and cancellable. Encryption/scans/transfers still consume power. No
+physical-device battery saving percentage or live-account acceptance is claimed.
+
+### Credentials, backups and privacy
+
+The live rclone configuration uses native rclone encryption in private storage.
+Its random password is wrapped using Android Keystore AES-GCM. Background access
+is unattended; there is no mandatory biometric prompt per sync. Active native
+children receive the password in their environment, not command arguments.
+A compromised running app, rooted device or broken OS can defeat these boundaries.
+
+Configuration migration/import/restore uses staged validation and rollback
+journals. Protected backup exports contain secrets and need careful handling;
+keep their passphrase safe. Android automatic backup is disabled. Exported task
+requests require a valid shortcut capability or confirmation. RC/WebDAV services
+are local and authenticated. Logs and preview reports can contain filenames:
+redact them before sharing. Markdown rendering blocks scripts and subresources;
+explicit web links open externally. Provider and optional GitHub requests expose
+ordinary network metadata to those services; there is no app analytics or ad SDK.
+
+### Build and release
+
+Use the exact Go/NDK versions in `gradle.properties`, JDK 17 and Android SDK 36.
+The native `librclone.so` is a PIE executable launched as a child process, not a
+JNI shared library. Builds use CGO/bionic DNS and 16 KiB ELF load alignment.
+On Windows use the Gradle wrapper and Android NDK, not a desktop MinGW compiler.
+
+Debug builds append `.debug`. Release signing uses configured keystore/CI secrets;
+never commit signing material. Version names and base codes are checked in
+`gradle.properties`; base codes end in zero and exceed every prior split APK.
+The explicit master-only `fork-release.yml` workflow validates this version's
+section, runs tests/lint, signs five APKs and verifies package/certificate/native
+provenance before publication. It does not publish to Google Play.
+
+### Evidence and archived detail
+
+Current validation records are kept as machine-readable JSON under `validation/`.
+Host fixtures and compilation do not prove live Proton/Android acceptance or
+physical-device energy improvements. Commit-linked change history above records
+actual work; older plans are historical proposals rather than proof of completion.
+The following superseded files are consolidated here and retained in Git history:
+
+- [AUDIT_AND_REMEDIATION_PLAN.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/AUDIT_AND_REMEDIATION_PLAN.md)
+- [BUILD_GUIDE.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/BUILD_GUIDE.md)
+- [WINDOWS_BUILD_GUIDE.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/WINDOWS_BUILD_GUIDE.md)
+- [docs/ADR-001-credential-storage-at-rest.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/ADR-001-credential-storage-at-rest.md)
+- [docs/ADR-002-native-rclone-config.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/ADR-002-native-rclone-config.md)
+- [docs/BATTERY_AND_PRIVACY.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/BATTERY_AND_PRIVACY.md)
+- [docs/BISYNC_GUIDE.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/BISYNC_GUIDE.md)
+- [docs/BISYNC_VALIDATION.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/BISYNC_VALIDATION.md)
+- [docs/INTEGRATION_ACCEPTANCE.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/INTEGRATION_ACCEPTANCE.md)
+- [docs/INTEGRATION_RESULTS.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/INTEGRATION_RESULTS.md)
+- [docs/RELEASE_PLAN_COVERAGE.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/RELEASE_PLAN_COVERAGE.md)
+- [docs/releases/v1.1.0-rc.1-validation.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.0-rc.1-validation.md)
+- [docs/releases/v1.1.0-rc.1.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.0-rc.1.md)
+- [docs/releases/v1.1.1-rc.1.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.1-rc.1.md)
+- [docs/releases/v1.1.2-rc.1.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.2-rc.1.md)
+- [docs/releases/v1.1.3-rc.1.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.3-rc.1.md)
+- [docs/releases/v1.1.4-rc.1.md](https://github.com/Rareities/ProtonBridge/blob/c0113618d1c3d5cc7b0e054ecf323bc7cc58011d/docs/releases/v1.1.4-rc.1.md)

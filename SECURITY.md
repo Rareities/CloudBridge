@@ -1,6 +1,6 @@
 # Security Policy
 
-Please contact us directly about security issues: [136268370+thies2005@users.noreply.github.com](mailto:136268370+thies2005@users.noreply.github.com). Please give appropriate time to respond.
+Report vulnerabilities through [ProtonBridge private vulnerability reporting](https://github.com/Rareities/ProtonBridge/security/advisories/new) if GitHub enables it. Otherwise open a minimal issue asking for a private contact route, without credentials, exploit details or private file contents. Upstream maintainers are not responsible for this fork. Please allow time to respond.
 
 This is a community project without 24/7 operations or formal security review. While we try to make the app as secure as possible, we cannot offer any guarantees. Do not rely on the encryption for your safety.
 
@@ -19,6 +19,6 @@ The app relies on the platform for protecting its private directories and execut
 
 ## Current state of security
 _While we do not consider those things security vulnerabilities, they are on our "security" todo list for new/improved protections._
-- The rclone configuration file is stored without additional encryption in app-private storage ([issue](https://github.com/x0b/rcx/issues/12)).
+- The live rclone configuration is natively encrypted in app-private storage; its password is wrapped using Android Keystore. Unattended background transfers require runtime access. A compromised app process or device can defeat this protection. Protect exported backups and their passphrases. See the [consolidated security notes](docs/FORK_CHANGELOG.md#credentials-backups-and-privacy).
 - Some operations may use your flash storage as temporary storage location, if they are too large for app-internal storage. Depending on your Android version, those files may temporarily be available to other apps that you have granted external storage or storage manager permissions.
-- The upcoming SAF provider offers other apps direct access to your files. It is vital you do not install apps you do not trust 100%, since they may be able to impersonate apps you have previously granted file access to.
+- The SAF provider offers other apps direct access to your files. It is vital you do not install apps you do not trust 100%, since they may be able to impersonate apps you have previously granted file access to.

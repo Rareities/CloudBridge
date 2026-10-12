@@ -9,7 +9,7 @@ assignees: ''
 
 <!---
 If you just have a question around ProtonBridge-usage, you might find something in the documentation:
-https://thies2005.github.io/ProtonBridge/
+https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md
 
 If you have a question regarding rclone functionality (e.g. config files), the forum is a good place to ask:
 https://forum.rclone.org/

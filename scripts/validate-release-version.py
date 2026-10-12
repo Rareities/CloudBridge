@@ -11,6 +11,21 @@ def properties(text):
                 if "=" in line and not line.lstrip().startswith("#"))
 
 
+def release_notes(tag, root):
+    """Extract one version section from the single project changelog."""
+    text = (root / "docs/FORK_CHANGELOG.md").read_text()
+    heading = re.compile(r"^## " + re.escape(tag.removeprefix("v")) + r"(?: — [^\n]+)?$", re.MULTILINE)
+    matches = list(heading.finditer(text))
+    if len(matches) != 1:
+        raise ValueError("Release changelog must contain exactly one matching version section")
+    start = matches[0].start()
+    end = re.search(r"^## ", text[matches[0].end():], re.MULTILINE)
+    section = text[start:matches[0].end() + end.start() if end else len(text)].strip()
+    if not section.split("\n", 1)[-1].strip() or "\n" not in section:
+        raise ValueError("Release changelog section is empty")
+    return section + "\n"
+
+
 def validate(tag, root):
     if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+", tag):
         raise ValueError("Use a release candidate tag")
@@ -20,8 +35,7 @@ def validate(tag, root):
         raise ValueError("Base versionCode must be positive, end in 0 and leave ABI room")
     if tag != "v" + props["io.github.rareities.protonbridge.versionName"]:
         raise ValueError("Tag must match the checked-in versionName")
-    if not (root / "docs/releases" / (tag + ".md")).is_file():
-        raise ValueError("Release changelog is missing")
+    release_notes(tag, root)
     tags = subprocess.check_output(["git", "tag", "--list"], cwd=root, text=True).splitlines()
     if tag in tags:
         raise ValueError("Published tags are immutable; choose a new version")
@@ -47,6 +61,10 @@ def validate(tag, root):
 
 if __name__ == "__main__":
     try:
-        print("Verified release base versionCode:", validate(sys.argv[1], pathlib.Path(__file__).resolve().parents[1]))
-    except (ValueError, KeyError, subprocess.CalledProcessError) as error:
+        root = pathlib.Path(__file__).resolve().parents[1]
+        if sys.argv[1] == "--notes":
+            print(release_notes(sys.argv[2], root), end="")
+        else:
+            print("Verified release base versionCode:", validate(sys.argv[1], root))
+    except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         sys.exit(str(error))

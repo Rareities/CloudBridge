@@ -1,3 +1,13 @@
+# ProtonBridge 1.1.5-rc.1
+
+Updated ProtonBridge README, website/privacy and contributor documentation.
+Consolidated project guides and release notes into the full changelog.
+App behaviour and the reviewed engine pin remain unchanged.
+
+[Full changelog](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.4-rc.1
 
 Plain rclone flag editor: one --flag value or --flag=value per line. Supports

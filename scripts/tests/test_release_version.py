@@ -13,8 +13,9 @@ class ReleaseVersionTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.temp.name)
-        (self.root / 'docs/releases').mkdir(parents=True)
-        (self.root / 'docs/releases/v1.1.1-rc.1.md').write_text('new release')
+        (self.root / 'docs').mkdir(parents=True)
+        self.changelog = self.root / 'docs/FORK_CHANGELOG.md'
+        self.changelog.write_text('## 1.1.1-rc.1 — release\n\nNew release.\n\n## 1.1.0-rc.1\n\nOld release.\n')
         self.props(110)
     def tearDown(self): self.temp.cleanup()
     def props(self, code):
@@ -38,5 +39,17 @@ class ReleaseVersionTest(unittest.TestCase):
         with self.assertRaises(ValueError): self.validate(['v1.1.0-rc.1'],100)
     def test_tag_must_match_checked_in_version(self):
         with self.assertRaises(ValueError): module.validate('v1.1.2-rc.1',self.root)
+
+    def test_notes_exclude_other_versions(self):
+        self.assertEqual('## 1.1.1-rc.1 — release\n\nNew release.\n', module.release_notes('v1.1.1-rc.1', self.root))
+
+    def test_missing_or_duplicate_notes_stop_release(self):
+        for text in ['## 1.1.0-rc.1\nOld release.', '## 1.1.1-rc.1\nA\n## 1.1.1-rc.1 — duplicate\nB']:
+            self.changelog.write_text(text)
+            with self.assertRaises(ValueError): self.validate([],100)
+
+    def test_empty_notes_stop_release(self):
+        self.changelog.write_text('## 1.1.1-rc.1\n\n## 1.1.0-rc.1\nOld release.')
+        with self.assertRaises(ValueError): self.validate([],100)
 
 if __name__ == '__main__': unittest.main()
