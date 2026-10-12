@@ -109,7 +109,6 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
         val admission = try { BisyncPolicy.Admission.acquire(mContext) } catch (_: Exception) { null }
         if (admission == null) return if (runAttemptCount < 8) retryWaiting(task, operation, "Waiting for another transfer to finish")
             else failBeforeStart(task, operation, "Another transfer remained active. This task did not start.")
-        var foregroundDeferred = false
         try {
             if (!inputData.keyValueMap.containsKey(TASK_EPHEMERAL)) {
                 allowFollowup = false
@@ -160,23 +159,19 @@ class SyncWorker(private val mContext: Context, params: WorkerParameters) : Work
             completed = false
             if (!foregroundEstablished && ForegroundStartPolicy.isDenied(e)) {
                 allowFollowup = false
-                foregroundDeferred = automatic && runAttemptCount < ForegroundStartPolicy.MAX_RETRIES && !isStopped
-                needsUserAction = !foregroundDeferred
-                detail = if (foregroundDeferred) ForegroundStartPolicy.WAITING else ForegroundStartPolicy.ACTION_REQUIRED
+                needsUserAction = true
+                detail = ForegroundStartPolicy.ACTION_REQUIRED
             } else detail = DiagnosticRedactor.redact(e.message ?: e.javaClass.simpleName)
         } finally {
             cancelled = cancelled || isStopped
             if (cancelled) currentRunner.requestStop()
             admission.closeAfterExit(currentProcess)
-            try {
-                if (foregroundDeferred && !cancelled) retryWaiting(task, operation, detail)
-                else deliverResult(task, operation)
-            } catch (e: Exception) {
+            try { deliverResult(task, operation) } catch (e: Exception) {
                 FLog.e(TAG, "Could not deliver task result: ${e.javaClass.simpleName}")
             }
             mNotificationManager.cancelSyncNotification(ongoingNotificationID)
         }
-        return if (foregroundDeferred && !cancelled) Result.retry() else if (completed && !cancelled) Result.success() else
+        return if (completed && !cancelled) Result.success() else
             Result.failure(Data.Builder().putString("error", detail.take(1800)).build())
     }
 

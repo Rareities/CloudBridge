@@ -1,3 +1,17 @@
+# Unreleased — necessity audit
+
+Removed automatic retries after Android refuses a foreground-service start.
+The task now immediately asks for user action, preserves the baseline and avoids
+failure follow-ups. Permission/setup restrictions require a user decision.
+
+Retained the verified checksum, filter/editor, privacy, configuration-write and
+timestamp fixes. Existing approval/recovery guards and native glob semantics are
+unchanged. Published 1.1.9 assets remain immutable.
+
+[Audit decisions](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.9-rc.1
 
 Scheduled foreground-service startup restrictions now defer with limited retries

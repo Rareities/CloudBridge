@@ -4,6 +4,51 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## Unreleased — necessity audit of 1.1.9 and inherited fixes
+
+Reviewed every functional change in 1.1.9 and 1.1.8 against its source, regression
+coverage and the earlier complete fork/companion audit. Coverage includes the
+32 application fork commits through `8a052dab` and 26 engine fork commits through
+`f1d1627e`, plus the companions compared with their exact imported versions. Independent Android and
+engine reviews checked the stricter requirement: correct demonstrated defects,
+report setup errors clearly and do not add workarounds for platform permissions.
+
+**Removed:** automatic retries after Android rejects foreground-service startup.
+The reported scheduled-start rejection does not establish a transient condition;
+backoff cannot grant permission or change battery settings. Repeated attempts add
+wakeups without a demonstrated benefit. The audited source immediately reports
+**needs user action**, starts no native transfer, preserves the saved baseline and
+suppresses failure follow-ups. Manual retries remain the user's choice.
+
+| Change reviewed | Decision and evidence |
+|---|---|
+| Android rejection classification | Keep exact exception/cause classification and actionable status. An OS/setup refusal is not an rclone transfer failure. SDK 33 worker tests preserve ready-state bytes and reject unrelated permission errors separately. |
+| Baseline readiness diagnostics | Keep clearer reasons; the approval guards are unchanged. Changed filters/flags/configuration/engine, missing initialisation or an interrupted run legitimately require review. No forced recovery or approval bypass. |
+| Proton checksum snapshot consistency | Keep. Signed HTTP fixtures and actual bisync reproduce a hash captured before copying and changed on download open. Resolve consistent authenticated metadata before capture and reject changed snapshots. The user's live checksum cause is still unproven; a successful exclusion is not proof of that cause. |
+| Filter/editor changes | Keep reproduced recycled-row, saved-rule parsing, dropdown-identity and draft-loss repairs, plus shared tested argument composition. Flags were already appended during all three bisync stages in 1.1.7; no imaginary blanket missing-flags defect required a special initialisation workaround. |
+| Include selection and deletion review | Keep restrictive GUI include semantics and explicit review for older include/delete-excluded tasks. The migration prevents silently widening destination deletion. Expert filter order and literal pattern whitespace remain available. |
+| `.nomedia` handling | Keep documented native semantics only: `/.nomedia` is root-only, `**/.nomedia` is nested-only, `.nomedia` matches at every depth. No automatic exclusion, deletion, marker rewriting or checksum bypass. |
+| Secret redaction | Keep. Old long/unterminated JSON fixtures expose truncation leakage or Java regex stack overflow; repaired redaction tests pass. |
+| Configuration/password writes and restore | Keep readback/durability verification and recovery admission. Failure-injection tests show suppressed failed writes and uncertain marker retirement. The app stops/reports uncertainty rather than concealing storage failures. |
+| Newer/older conflict timestamps | Keep the scoped local override: downloads must preserve source times for the existing chronological conflict mode to compare them meaningfully. Other operations retain their policy. |
+| Disposable preview cleanup | Keep bounded cleanup only after confirmed native exit. Tests preserve baselines/live previews and reject traversal/symlink escapes. |
+| Removed DNS/API/service/duplicate scheduling code | Keep those removals: unused paths had no caller/operational role; Android's system DNS and the actual WorkManager scheduling path remain. |
+| Other previously audited fork changes | Keep evidence-backed authentication, listing, integrity, process ownership, scheduling constraints, privacy and signed-build provenance protections. Rechecks found no additional justified rollback candidate. |
+
+Existing waits for a missing network, charging, quiet hours or another live native
+operation remain: those are observable conditions that can change. They are
+separate from retrying a rejected Android service permission. No exemption,
+expedited-job conversion, exact-alarm permission or setup-dependent bypass is added.
+
+Validation after removal: independent review, **205 Android tests with no failures
+or skips**, lint, debug APK build/engine verification and release-script tests all
+passed. The engine source/pin did not change, so its already-passing backend,
+bisync, companion, race and vet checks did not need repeating.
+
+This is a source audit update, not a replacement of the immutable published
+1.1.9 APK/tag. Historical release entries below describe what those releases
+actually shipped. The latest source/operating guidance reflects the removal.
+
 ## 1.1.9-rc.1 — handle Android background-start restrictions safely
 
 - Handle Android `ForegroundServiceStartNotAllowedException` distinctly from
@@ -830,8 +875,8 @@ Optimized battery setting if deferred starts are acceptable. The app cannot
 revoke a previously granted battery exemption itself.
 
 If Android rejects a scheduled foreground-service start, no transfer has begun
-and that attempt does not alter the bisync baseline. The app retries a limited
-number of times, then requests user action. Open ProtonBridge to retry, or review
+and that attempt does not alter the bisync baseline. The audited source reports user action immediately without automatically retrying
+that permission rejection. Open ProtonBridge to retry, or review
 Android App info → Battery/background settings for unattended sync. An
 unrestricted setting may increase battery use; the app does not change it for you.
 This startup restriction is separate from the requirement to review changed flags

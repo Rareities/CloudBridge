@@ -70,28 +70,26 @@ class ForegroundStartOutcomeTest {
         return Triple(task,worker,root to original)
     }
 
-    @Test fun scheduledRestrictionWaitsWithoutFailingOrChangingBaseline() {
+    @Test fun scheduledRestrictionNeedsActionWithoutRetryingOrChangingBaseline() {
         val (task,worker,saved)=rejected(0,true)
         val result=worker.doWork()
         assertEquals(1,promotions)
-        assertTrue(result is ListenableWorker.Result.Retry)
+        assertTrue(result is ListenableWorker.Result.Failure)
         val history=RunHistory.read(context,task)
         assertEquals(1,history.length())
-        assertEquals("WAITING",history.getJSONObject(0).getString("status"))
-        assertTrue(history.getJSONObject(0).isNull("finished"))
+        assertEquals("NEEDS_USER_ACTION",history.getJSONObject(0).getString("status"))
+        assertFalse(history.getJSONObject(0).isNull("finished"))
         assertEquals(saved.second,File(saved.first,"protonbridge.json").readText())
     }
 
-    @Test fun exhaustedAndManualRestrictionsRequireUserActionWithoutResync() {
-        for(automatic in listOf(true,false)) {
-            val (task,worker,saved)=rejected(3,automatic)
-            assertTrue(worker.doWork() is ListenableWorker.Result.Failure)
-            val record=RunHistory.read(context,task).getJSONObject(0)
-            assertEquals("NEEDS_USER_ACTION",record.getString("status"))
-            assertTrue(promotions > 0)
-            assertTrue(record.getString("message").contains("background"))
-            assertEquals(saved.second,File(saved.first,"protonbridge.json").readText())
-        }
+    @Test fun manualRestrictionRequiresUserActionWithoutResync() {
+        val (task,worker,saved)=rejected(0,false)
+        assertTrue(worker.doWork() is ListenableWorker.Result.Failure)
+        val record=RunHistory.read(context,task).getJSONObject(0)
+        assertEquals("NEEDS_USER_ACTION",record.getString("status"))
+        assertEquals(1,promotions)
+        assertTrue(record.getString("message").contains("background"))
+        assertEquals(saved.second,File(saved.first,"protonbridge.json").readText())
     }
 
     @Test fun unrelatedForegroundErrorsDoNotBecomeBackgroundRetries() {
