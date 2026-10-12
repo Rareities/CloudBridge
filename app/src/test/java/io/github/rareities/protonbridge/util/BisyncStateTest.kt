@@ -206,4 +206,21 @@ class BisyncStateTest {
         assertFalse(BisyncPolicy.retirePreview(root, runId, true))
         assertEquals("active preview", File(sibling, "active.lst").readText())
     }
+
+    @Test fun readinessMessagesDistinguishChangedSettingsFromRecovery() {
+        val baseline=UUID.randomUUID().toString()
+        val healthy=org.json.JSONObject().put("status",BisyncStateStore.READY)
+            .put("fingerprint","old").put("baselineId",baseline)
+        val changed=assertThrows(IllegalArgumentException::class.java) { BisyncStateStore.baselineForRun(healthy,"new") }
+        assertTrue(changed.message!!.contains("filters"))
+        assertFalse(changed.message!!.contains("previous bisync did not complete"))
+        healthy.put("fingerprint","new")
+        assertEquals(baseline,BisyncStateStore.baselineForRun(healthy,"new"))
+        healthy.put("status",BisyncStateStore.NEEDS_RECOVERY)
+        val interrupted=assertThrows(IllegalArgumentException::class.java) { BisyncStateStore.baselineForRun(healthy,"new") }
+        assertTrue(interrupted.message!!.contains("previous bisync did not complete"))
+        healthy.put("status",BisyncStateStore.READY).put("baselineId","invalid")
+        val invalid=assertThrows(IllegalArgumentException::class.java) { BisyncStateStore.baselineForRun(healthy,"new") }
+        assertTrue(invalid.message!!.contains("baseline identity"))
+    }
 }

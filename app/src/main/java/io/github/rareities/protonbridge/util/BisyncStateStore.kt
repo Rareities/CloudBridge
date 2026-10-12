@@ -25,7 +25,16 @@ class BisyncStateStore(private val directory: File) {
         /** Validate readiness before resolving any baseline directory, including a first Run. */
         @JvmStatic fun baselineForRun(state: JSONObject, fingerprint: String): String {
             require(isReady(state, fingerprint)) {
-                "Bisync needs initialisation or recovery, or its settings have changed. Open the task, run Preview, review the result and select Initialise before Run."
+                val reason = when (state.optString("status")) {
+                    READY -> if (state.optString("fingerprint") != fingerprint)
+                        "The task settings, filters, configuration or bundled engine have changed since initialisation."
+                    else "The saved bisync baseline identity is missing or invalid. Review recovery."
+                    NEEDS_RECOVERY, "RUNNING", "INITIALISING" -> "The previous bisync did not complete or its saved state is invalid. Review recovery."
+                    PREVIEW_READY -> "Preview completed, but reviewed initialisation has not completed."
+                    "PREVIEWING" -> "The previous preview did not complete. Repeat Preview."
+                    else -> "Bisync has not completed initialisation."
+                }
+                "$reason Run Preview, review the result and select Initialise before Run."
             }
             return state.getString("baselineId")
         }

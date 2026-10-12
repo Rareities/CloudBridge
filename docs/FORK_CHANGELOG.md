@@ -4,6 +4,43 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
+## 1.1.9-rc.1 — handle Android background-start restrictions safely
+
+- Handle Android `ForegroundServiceStartNotAllowedException` distinctly from
+  transfer errors. Scheduled tasks defer with bounded WorkManager backoff instead
+  of immediately recording a failed transfer. Waiting does not send failure
+  notifications or queue failure follow-ups, and the temporary notification and
+  transfer admission are released. Cancellation still takes priority.
+- After the retry budget is exhausted, or if a manual start is denied, report
+  **needs user action** with Android battery/background-settings guidance. The
+  rejection occurs before native work and before any bisync state transition;
+  the existing baseline remains unchanged. This error does not itself require
+  resync. Other permission errors and timeouts remain separate failures.
+- Distinguish missing initialisation, pending preview approval, changed task/filter/
+  configuration/engine fingerprints, interrupted runs and invalid saved baseline
+  identities in readiness diagnostics. Keep all existing approval/recovery guards.
+  Changing filters on 1.1.7 can invalidate approval independently of a scheduled
+  foreground-service rejection.
+- Retain the reviewed 1.1.8 fixes. A working marker exclusion does not repair the
+  demonstrated listing/download checksum inconsistency, recycled filter-editor
+  callbacks, long-secret redaction or configuration-write defects. No engine or
+  fingerprint-policy change is introduced by this release, so a healthy 1.1.8
+  baseline does not need reinitialisation merely because the app version changed.
+- Regression tests inject the real Android exception through a worker foreground
+  updater on API 33 and check retry history, terminal user-action reporting and
+  byte-for-byte preservation of ready state. A negative permission-error fixture
+  checks that unrelated errors are not retried as start restrictions. Readiness
+  tests retain the same baseline guards and verify distinct diagnostics.
+- Validation passed before committing: independent review, **205 Android host/unit
+  tests with no failures or skips**, lint, debug APKs and engine provenance. The
+  signed workflow repeats host checks and verifies package,
+  version codes, certificate, architectures and distribution checksums.
+- **Platform limit:** retries cannot force Android to permit a scheduled foreground
+  service. For long unattended transfers, review ProtonBridge's App info → Battery/
+  background settings, or open the app and run the task. Allowing unrestricted
+  background operation can use more battery. No automatic battery exemption,
+  exact-alarm permission, expedited-job conversion or checksum bypass is added.
+
 ## 1.1.8-rc.1 — consistent Proton checksums, working filters and fork cleanup
 
 ### Proton revision consistency
@@ -722,6 +759,7 @@ Authors below are git metadata. Merge rows represent integration, not an extra i
 | [76b711c035](https://github.com/Rareities/ProtonBridge/commit/76b711c035944afa7b8677172d907ed545df2270) | Mahant | fix: pin consistent Proton revision metadata and explain checksum failures |
 | [5047b4c387](https://github.com/Rareities/ProtonBridge/commit/5047b4c387f1dd185bb2790f58e97c052493bcce) | Mahant | fix: pin verified legacy Proton revision metadata resolution |
 | [691ebb7b1c](https://github.com/Rareities/ProtonBridge/commit/691ebb7b1c8bb9fec2ccb32d481042eff6cc9ba5) | Mahant | fix: update Proton revision lookup for preview and downloads |
+| [42b292ae4f](https://github.com/Rareities/ProtonBridge/commit/42b292ae4ff520ae6838e684457a9f72beba42d9) | Mahant | fix: stabilize Proton bisync metadata and apply filters consistently |
 
 ### rclone
 
@@ -790,6 +828,14 @@ Existing idle-wakeup preferences are preserved. For lower idle drain disable
 General settings → Allow tasks to run when the device is idle, and use Android's
 Optimized battery setting if deferred starts are acceptable. The app cannot
 revoke a previously granted battery exemption itself.
+
+If Android rejects a scheduled foreground-service start, no transfer has begun
+and that attempt does not alter the bisync baseline. The app retries a limited
+number of times, then requests user action. Open ProtonBridge to retry, or review
+Android App info → Battery/background settings for unattended sync. An
+unrestricted setting may increase battery use; the app does not change it for you.
+This startup restriction is separate from the requirement to review changed flags
+or recover a genuinely interrupted bisync.
 
 Android manages Wi-Fi power saving; WorkManager owns worker CPU locks. Active
 RC streams retain operation-scoped CPU protection. Stats/notifications update

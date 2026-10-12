@@ -1,3 +1,18 @@
+# ProtonBridge 1.1.9-rc.1
+
+Scheduled foreground-service startup restrictions now defer with limited retries
+and clear Android battery/background guidance. A blocked start preserves the
+existing bisync baseline and does not trigger failure follow-ups or require resync.
+Android may still require you to permit background operation in App info.
+
+Readiness messages now distinguish changed settings from incomplete initialisation,
+interrupted runs and invalid saved baseline identities. The engine and baseline
+policy are unchanged from 1.1.8; its verified fixes are retained.
+
+[Full changelog](https://github.com/Rareities/ProtonBridge/blob/master/docs/FORK_CHANGELOG.md)
+
+---
+
 # ProtonBridge 1.1.8-rc.1
 
 Fixed Proton listing/download metadata disagreement that could abort bisync after
