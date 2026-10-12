@@ -1,6 +1,8 @@
 # ProtonBridge 1.1.6-rc.1
 
-Fixed inconsistent Proton active-revision checksum/signature metadata handling.
+Fixed legacy Proton listings using an older link checksum than the downloaded
+revision. Identified, authenticated revision metadata is fetched and reused with
+bounded memory and request concurrency; fresh directory listings are preserved.
 Changed or invalid revision identities stop safely before download. Checksum
 failures now include recovery guidance, and terminal colour codes are removed.
 Preview and review existing bisync tasks again after this engine update.

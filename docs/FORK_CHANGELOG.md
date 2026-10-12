@@ -4,31 +4,43 @@ This records the Rareities changes on top of the direct upstream repositories.
 Commit authors are git metadata, not a claim about who directed each line.
 Integration merges are included without counting their features twice.
 
-## 1.1.6-rc.1 — consistent Proton revision checksums and readable recovery reports
+## 1.1.6-rc.1 — authoritative Proton revision checksums and recovery reports
 
-- Pin the rclone engine to [`3eed9a27`](https://github.com/Rareities/rclone/commit/3eed9a27eaeafafc4974d4480c84d0af0a580482).
-  Proton listings prefer explicitly supplied active-revision attributes; older
-  link attributes are used only when the revision has none. Invalid preferred
-  metadata never silently falls back to an older checksum.
-- Verify downloaded revision attributes using that revision's signer. Reject
-  a changed advertised active revision, a mismatched revision response or a
-  missing active revision identity before consuming download content.
+- Pin the rclone engine to [`8627faf6`](https://github.com/Rareities/rclone/commit/8627faf6c0d8725f4ea8203de325939a874ea841).
+  Legacy Proton listings omit active-revision attributes and may expose an older
+  checksum in Link.XAttr. Resolve the listed revision's own authenticated metadata
+  rather than comparing that older checksum against downloaded content. Explicit
+  revision attributes, when present, remain authoritative and must verify.
+- Fetch only a minimal revision metadata page with block URLs disabled. Coalesce
+  duplicate requests, limit concurrent metadata fetches to four, and reuse signed
+  metadata by share/link/revision identity within an 8 MiB payload budget and
+  2048-entry cap. No names, directory inventory or active IDs are reused: each
+  listing is fresh, and metadata cache hits reverify against current keys.
+  Downloads and successful signed commits seed reuse for post-transfer listings.
+- Use the fetched revision's signer; reject changed advertised revision IDs,
+  mismatched responses and missing/ambiguous active identity. Invalid preferred
+  metadata never falls back to older link attributes or a valid cache entry.
 - Remove terminal colour escape codes before redacting/displaying diagnostics.
-  Checksum-listing aborts retain failure status and now explain verification
-  uncertainty, closing apps editing the folder, comparing the two copies and
-  repeating preview/review/initialisation. No automatic force, resync, exclusion
-  or checksum bypass is added.
-- Signed-metadata regressions reproduce the listing/download inconsistency and
-  authenticate the preferred metadata with separate keys. Tests cover corrupt
-  preferred attributes and changed/mismatched/missing revision IDs. Local SHA1
-  fixtures initialise differing 29-byte `.nomedia` files successfully.
+  Checksum-listing aborts retain failure status and explain verification uncertainty,
+  comparing the two copies and repeating preview/review/initialisation. No automatic
+  force, resync, exclusion or checksum bypass is added.
+- Signed legacy-API fixtures reproduce the reported pair of differing checksums
+  and cover listing → download metadata → relisting → changed revision → upload
+  commit → relisting. Tests cover current-key revalidation, corrupt preferred
+  attributes, identity failures, cache bounds, cancellation and concurrent reads.
+  Backend/bisync, companion auth/crypto/block, race and static checks passed before
+  pushing the completed engine fix. Local SHA1 fixtures initialise differing
+  29-byte `.nomedia` files successfully without mutating files during preview.
 
-The reported Anki failure occurred during initialisation. Its exact cloud
-response is unavailable, so this is a confirmed backend consistency fix rather
-than proof that every marker mismatch has this cause. Files changing during sync
-can still correctly stop reconciliation. No full listing-to-download snapshot
-binding, live-account/device acceptance or silent repair is claimed. Engine
-changes require fresh preview and explicit approval for existing bisync tasks.
+The first release build was cancelled after a repeated Anki failure exposed
+the legacy wire-shape gap. This candidate contains the
+completed fix. The actual account response/device is unavailable, so signed
+protocol regression coverage does not constitute live-account acceptance. Files
+changing during sync can still correctly stop reconciliation; keep Anki closed
+when synchronising its database. No full listing-to-download snapshot binding or
+silent repair is claimed. Engine changes require fresh preview and explicit approval.
+
+Protocol reference: [Proton SDK legacy revision endpoint and metadata schema](https://github.com/ProtonDriveApps/sdk/blob/8ffae007b0fbb8bcef53514719d6f093bb32dcf9/client/js/src/internal/apiService/driveTypes.ts#L9410).
 
 ## 1.1.5-rc.1 — consistent branding and consolidated documentation
 
