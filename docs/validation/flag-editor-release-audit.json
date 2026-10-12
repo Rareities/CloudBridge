@@ -1,0 +1,129 @@
+{
+  "release": "v1.1.4-rc.1",
+  "applicationSource": "ed232938441169c37bee15a4a292d81bd95d663a",
+  "engineSource": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+  "verifiedAt": "2026-10-12T03:07:47.032888+00:00",
+  "applicationId": "io.github.rareities.protonbridge",
+  "baseVersionCode": 140,
+  "arm64VersionCode": 147,
+  "verification": {
+    "localTests": 180,
+    "failures": 0,
+    "errors": 0,
+    "skips": 0,
+    "releaseVersionTests": 7,
+    "lint": "passed with existing baseline",
+    "instrumentationCompilation": "passed",
+    "independentReview": "passed",
+    "signedBuildRun": "https://github.com/Rareities/ProtonBridge/actions/runs/38197418601",
+    "signedBuildConclusion": "success",
+    "masterLintRun": 38197403475,
+    "masterDependencyAuditRun": 38197403459,
+    "publicAssetDigests": "All ten checksum entries match API digests; downloaded ledger, metadata and ARM64 also match API digests.",
+    "publicArm64": "Non-debug package/name/version, expected certificate, native source/hash/branding verified independently.",
+    "allFiveApks": [
+      {
+        "file": "protonbridge_v1.1.4-rc.1-oss-arm64-v8a-release.apk",
+        "bytes": 33477468,
+        "sha256": "c8173dfcf3268cff656b10b0448c86bf417c9c5268aeb46157431e51bb292605",
+        "abis": [
+          "arm64-v8a"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.4-rc.1-oss-armeabi-v7a-release.apk",
+        "bytes": 34874189,
+        "sha256": "b386ab157d320b0dd5ef8fffadcd2abcbaf137075b7daa5dae2fc1c9180b13ac",
+        "abis": [
+          "armeabi-v7a"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.4-rc.1-oss-universal-release.apk",
+        "bytes": 139400985,
+        "sha256": "338647d9eb563ef49eabd24e6032093a505511d619d98488bfb2b9184ef111a2",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a",
+          "x86",
+          "x86_64"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.4-rc.1-oss-x86_64-release.apk",
+        "bytes": 43148578,
+        "sha256": "fe798afe2220252c7979d1bca67a5546cb6c67286dc5cebe57f97325c0d6d588",
+        "abis": [
+          "x86_64"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      },
+      {
+        "file": "protonbridge_v1.1.4-rc.1-oss-x86-release.apk",
+        "bytes": 44500281,
+        "sha256": "691e3e83f99f454552a5b67e600bdf637670ba843fad01c739b4071c267f6593",
+        "abis": [
+          "x86"
+        ],
+        "engineCommit": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+        "signingCertificateSha256": "c1b947a38264f1d65f7986c0b65f649ce882fc5232094726777067050dac9bcd",
+        "signatureVerified": true,
+        "engineHashesVerified": true,
+        "elfArchitecturesVerified": true,
+        "androidPieVerified": true,
+        "elfLoadAlignment16KiBVerified": true
+      }
+    ]
+  },
+  "nativeConflictFixture": {
+    "engine": "de1b01ca4ca02488ef2942ea6f2f00c0a35dc08e",
+    "mode": "newer",
+    "compare": "size,modtime,checksum",
+    "files": 20,
+    "force": false,
+    "result": "newer content on both sides, older content preserved",
+    "loserCopies": 2
+  },
+  "flagSystem": {
+    "syntax": "One --flag, --flag value or --flag=value per line; normalized single argv tokens, no shell",
+    "removedControls": [
+      "flag builder",
+      "performance presets",
+      "command display"
+    ],
+    "reference": "Bundled bisync help plus complete global/backend flag descriptions, locally loaded and searchable",
+    "approval": "Canonical flags participate in fingerprint; policy changes require fresh preview/approval",
+    "conflictSafety": "Newer/older add modtime; mandatory checksum and numbered losing copies retained"
+  },
+  "limits": [
+    "Local native fixture uses local files; no live-account or physical-device acceptance test was executed.",
+    "Listed engine flags can still be managed/restricted by app safety or credential controls."
+  ]
+}

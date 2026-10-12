@@ -28,6 +28,15 @@ sides and older content survives in numbered conflict copies, without `--force`
 or relaxing checksum/deletion checks. No live-account/device acceptance test is
 claimed. See [release notes](releases/v1.1.4-rc.1.md).
 
+Committed at [`ed232938`](https://github.com/Rareities/ProtonBridge/commit/ed232938441169c37bee15a4a292d81bd95d663a)
+and published as [signed v1.1.4-rc.1](https://github.com/Rareities/ProtonBridge/releases/tag/v1.1.4-rc.1).
+All 180 current app tests, seven version checks, lint, APK assembly and
+instrumentation compilation passed. Signed CI verified all five APKs; public
+asset digests and the downloaded ARM64 signature/identity/native payload passed
+independent checks. [Verification record](validation/flag-editor-release-audit.json)
+includes the real conflict fixture, source/run IDs and all APK digests.
+
+
 ## 1.1.3-rc.1 — battery, background lifecycle and privacy
 
 - Let Android manage Wi-Fi power saving instead of forcing high-performance
